@@ -71,7 +71,7 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 - CLI: `taxonymous redact <file> --profile vault/profile.json`
 - **Accept:** for every text-PDF fixture (all forms, not just a subset), all seeded identifiers are gone from the output text layer; all seeded dollar amounts are still present and unchanged; `pdfinfo`/PyMuPDF shows no metadata, annotations or form fields.
 
-### M2 — Verification gate
+### M2 — Verification gate ✅ (2026-10-16)
 - Text re-extract + OCR pass + metadata checks; machine-readable report per file
 - **Accept:** a deliberately broken redactor (e.g. one that only draws boxes) is caught on 100% of fixtures. A test also confirms that a value hidden under a drawn rectangle is detected.
 
@@ -97,7 +97,7 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 
 ## Known limitations after M1
 
-- Images inside text PDFs (embedded scans, logos with text) are not OCR'd yet; that comes in M3.
+- Images inside text PDFs (embedded scans, logos with text) are not *redacted* yet; that comes in M3. Since M2, OCR verification catches them and holds the file back.
 - Third-party names are caught only next to labels (form boxes, table headers). Names in prose need NER (M4).
 - The public vs. private organization split is a keyword heuristic (`bank`, `securities`, `charitable`… versus `LLC`, `LP`, `family trust`). The review UI (M6) is the backstop.
 - Your first and last names are matched on their own anywhere in the text, so a first name that is also a common word (e.g. "Grant") will be over-redacted.

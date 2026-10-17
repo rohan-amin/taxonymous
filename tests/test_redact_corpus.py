@@ -3,27 +3,10 @@
 import re
 
 import pymupdf
-import pytest
-
-from taxonymous.detect import ProfileMatcher
-from taxonymous.profile import Profile
-from taxonymous.redact import redact_pdf
-from taxonymous.vault import Vault
 
 
 def norm(s: str) -> str:
     return re.sub(r"[\s\-]", "", s).lower()
-
-
-@pytest.fixture(scope="session")
-def redacted(corpus, tmp_path_factory):
-    src, manifest, profile = corpus
-    out = tmp_path_factory.mktemp("redacted")
-    matcher = ProfileMatcher(Profile.from_dict(profile))
-    vault = Vault(out / "vault" / "placeholders.json")
-    docs = [d for d in manifest["documents"] if d["kind"] == "text"]
-    results = {d["file"]: (d, redact_pdf(src / d["file"], out, matcher, vault)) for d in docs}
-    return results, vault
 
 
 def test_no_identifier_survives(redacted):

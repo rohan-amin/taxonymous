@@ -37,8 +37,12 @@ DATE_RE = re.compile(
     r"\b(?:\d{1,2}[/-]\d{1,2}[/-](?:\d{4}|\d{2})|\d{4}-\d{2}-\d{2}|"
     r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})\b", IC)
 TIN_VALUE_RE = re.compile(r"(?<![\w*•])(?:[\dXx*•]{3}[- ]?[\dXx*•]{2}[- ]?\d{4}|\d{2}-?\d{7})(?!\d)")
-ID_VALUE_RE = re.compile(r"(?<![\w*•#-])(?=[A-Za-z0-9*•#-]*\d[A-Za-z0-9*•#-]*\d[A-Za-z0-9*•#-]*\d"
-                         r"[A-Za-z0-9*•#-]*\d)[A-Za-z0-9*•#-]{4,}(?![\w-])")
+# an account/ID value has at least 5 digits, so form numbers ("1099-R", "5498") and years don't qualify
+ID_VALUE_RE = re.compile(r"(?<![\w*•#-])(?=(?:[A-Za-z*•#-]*\d){5})[A-Za-z0-9*•#-]{5,}(?![\w-])")
+# words printed on forms; a "name" made only of these is a caption, not a person
+FORM_WORDS = {"state", "city", "town", "country", "zip", "code", "postal", "province", "total", "amount",
+              "date", "yes", "no", "see", "instructions", "part", "line", "box", "form", "page", "schedule",
+              "copy", "void", "corrected", "other", "and", "or", "of", "the", "number", "local", "federal"}
 STREET_SUFFIX = (r"st|street|ave|avenue|ln|lane|ct|court|rd|road|way|blvd|boulevard|dr|drive|pl|place|"
                  r"ter|terrace|cir|circle|pkwy|parkway|hwy|highway|trl|trail|sq|square|loop|row")
 STREET_RE = re.compile(
@@ -189,17 +193,23 @@ PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
+def pattern_hits(text: str):
+    """Yield (match, kind) for every identifier-shaped string in text."""
+    for rx, kind in PATTERNS:
+        for m in rx.finditer(text):
+            value = m.group()
+            if kind == "CARD" and not (13 <= len(digits(value)) <= 19 and luhn(digits(value))):
+                continue
+            if "\n" in value:
+                continue
+            yield m, kind
+
+
 def find_patterns(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
     out = []
-    for rx, kind in PATTERNS:
-        for m in rx.finditer(pt.text):
-            text = m.group()
-            if kind == "CARD" and not (13 <= len(digits(text)) <= 19 and luhn(digits(text))):
-                continue
-            if "\n" in text:
-                continue
-            k, key = pm.canonical(kind, text)
-            out.append(Finding(pt.number, m.start(), m.end(), k, key, "pattern", text))
+    for m, kind in pattern_hits(pt.text):
+        k, key = pm.canonical(kind, m.group())
+        out.append(Finding(pt.number, m.start(), m.end(), k, key, "pattern", m.group()))
     return out
 
 
@@ -247,6 +257,8 @@ def _value_in(text: str, vtype: str) -> tuple[int, int] | None:
             return None
         if s[0].isdigit() and not (STREET_RE.search(s) or CITY_LINE_RE.search(s)):
             return None  # a box caption like "15 State", not a name or address
+        if set(re.findall(r"[a-z]+", s.lower())) <= FORM_WORDS:
+            return None
         start = text.index(s)
         return start, start + len(s)
     return (m.start(), m.end()) if m else None

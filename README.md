@@ -2,7 +2,7 @@
 
 Scrub personal identifiers from tax documents **on your own machine**, so you can share them with an AI assistant (e.g. Claude) for review without exposing who you are.
 
-> **Status:** early development. Text-layer PDFs can be redacted (M1); the mandatory verification gate (M2) and scan/photo support (M3) are not built yet, so **do not rely on it for real documents**. See [`docs/PLAN.md`](docs/PLAN.md).
+> **Status:** early development. Text-layer PDFs are redacted (M1) and every output is verified, including by OCR, before release (M2). Scans and photos (M3) are not supported yet, and nothing has been tested on real documents, so **do not rely on it yet**. See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## What it will do
 
@@ -12,6 +12,16 @@ Scrub personal identifiers from tax documents **on your own machine**, so you ca
 - Replace them with consistent placeholders (`<SSN_A>`, `<ACCT_1>`) and keep the mapping in a local `vault/` that is never uploaded.
 - **Verify every output** by re-extracting the text and OCR-ing the result. A file only reaches `ready-to-upload/` if nothing leaks.
 - Make no network calls. Everything runs locally.
+
+## Usage (preview)
+
+```sh
+uv run taxonymous init --workspace ~/Dropbox/Taxes/taxonymous   # creates inbox/ work/ ready-to-upload/ vault/
+# put your identifiers in vault/profile.json (format: src/taxonymous/profile.py), PDFs in inbox/
+uv run taxonymous run --workspace ~/Dropbox/Taxes/taxonymous
+```
+
+Only files that pass verification are copied to `ready-to-upload/`. Failures stay in `work/` with a `*.report.json` that names the kind of leak and the page, never the value.
 
 ## Development
 

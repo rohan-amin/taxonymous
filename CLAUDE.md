@@ -21,7 +21,7 @@ Open-source tool that scrubs sensitive information from tax documents (1099s, W-
 
 - `uv run pytest` / `uv run ruff check .`
 - `uv run python -m tools.fixtures.generate` builds the fake corpus into `tests/fixtures/generated/` (gitignored); `manifest.json` there is the ground truth (`redact` / `keep` per document).
-- `uv run taxonymous redact FILE... --profile P.json --out DIR --vault DIR` (text PDFs only so far).
+- `uv run taxonymous init|run --workspace DIR` (inbox → work → verify → ready-to-upload); `redact` and `verify` for single files. Text PDFs only so far.
 - Pre-commit PII guard: `git config core.hooksPath .githooks` (runs `tools/check_pii.py`).
 
 ## Rules
@@ -31,4 +31,4 @@ Open-source tool that scrubs sensitive information from tax documents (1099s, W-
 
 ## Open questions
 
-- None blocking. M0 and M1 done 2026-10-16; next is M2 (verification gate).
+- None blocking. M0–M2 done 2026-10-16; next is M3 (scans and photos).
