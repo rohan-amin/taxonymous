@@ -52,6 +52,24 @@ def test_masked_last_four_maps_to_profile_identity():
     assert [f.key for f in fs] == ["ssn:0", "acct:0"]
 
 
+@pytest.mark.parametrize("line", ["SSN 4323", "SSN: ending in 4323", "TIN (last 4 digits): 4323",
+                                  "XXX-XX-4323"])
+def test_last_four_after_ssn_label_is_the_profile_ssn(line):
+    """Masked or bare, the last four after an SSN label is redacted as the taxpayer's SSN."""
+    [f] = findings(line)
+    assert (f.kind, f.key, f.text[-4:]) == ("SSN", "ssn:0", "4323")
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("SSN: ending in 9999", ("TIN", "9999")),  # not ours: still redacted, not called a card
+    ("Payer's TIN 1099-INT", None),  # a form number, not a last four
+    ("SSN 2026.00", None),
+])
+def test_last_four_after_label_edge_cases(line, expected):
+    fs = findings(line)
+    assert [(f.kind, f.text) for f in fs] == ([expected] if expected else [])
+
+
 @pytest.mark.parametrize("line, expected", [
     (f"Employee SSN {SSN} on file", SSN),
     (f"Payer EIN {EIN}", EIN),

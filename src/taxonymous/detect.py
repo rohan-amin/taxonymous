@@ -37,6 +37,9 @@ DATE_RE = re.compile(
     r"\b(?:\d{1,2}[/-]\d{1,2}[/-](?:\d{4}|\d{2})|\d{4}-\d{2}-\d{2}|"
     r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})\b", IC)
 TIN_VALUE_RE = re.compile(r"(?<![\w*•])(?:[\dXx*•]{3}[- ]?[\dXx*•]{2}[- ]?\d{4}|\d{2}-?\d{7})(?!\d)")
+# just the last four, printed right after the label: "SSN 5455", "SSN: ending in 5455"
+LAST4_VALUE_RE = re.compile(r"^(?:\(?(?:ending in|last (?:4|four)(?: digits)?)\)?[\s:]*)?"
+                            r"(\d{4})(?![\w.,/-])", IC)
 # an account/ID value has at least 5 digits, so form numbers ("1099-R", "5498") and years don't qualify
 ID_VALUE_RE = re.compile(r"(?<![\w*•#-])(?=(?:[A-Za-z*•#-]*\d){5})[A-Za-z0-9*•#-]{5,}(?![\w-])")
 # words printed on forms; a "name" made only of these is a caption, not a person
@@ -106,6 +109,9 @@ def date_patterns(value: str) -> list[str]:
 
 # ---------------------------------------------------------------- profile
 
+IDENTIFIER_KINDS = ("SSN", "EIN", "TIN", "ACCT", "CARD", "ROUTING", "ID", "PHONE")
+
+
 class ProfileMatcher:
     def __init__(self, profile: Profile):
         self.rules: list[tuple[re.Pattern, str, str]] = []
@@ -165,12 +171,13 @@ class ProfileMatcher:
         ds = digits(text)
         if ds in self.by_digits:
             return self.by_digits[ds]
-        if re.search(r"[*Xx•#]", text) and len(ds) == 4 and ds in self.by_last4:
+        bare = re.fullmatch(r"\d{4}", text.strip()) and kind in IDENTIFIER_KINDS
+        if len(ds) == 4 and ds in self.by_last4 and (re.search(r"[*Xx•#]", text) or bare):
             return self.by_last4[ds]
         name = " ".join(text.lower().split())
         if name in self.by_name:
             return self.by_name[name]
-        norm = ds if kind in ("SSN", "EIN", "TIN", "ACCT", "CARD", "ROUTING", "ID", "PHONE") else name
+        norm = ds if kind in IDENTIFIER_KINDS else name
         if re.search(r"[*Xx•#]", text):
             norm = "masked:" + norm
         return kind, f"{kind.lower()}:{norm}"
@@ -249,10 +256,13 @@ def _is_label_line(text: str) -> bool:
     return any(rx.search(_plain(text)) for rx, _, _ in LABELS)
 
 
-def _value_in(text: str, vtype: str) -> tuple[int, int] | None:
-    """Character range of a plausible value of this type inside text, or None."""
+def _value_in(text: str, vtype: str, inline: bool = False) -> tuple[int, int] | None:
+    """Character range of a plausible value of this type inside text, or None.
+    `inline` is text right after the label on the same line, where a bare last four counts."""
     if vtype == "tin":
         m = TIN_VALUE_RE.search(text)
+        if not m and inline and (last4 := LAST4_VALUE_RE.match(text)):
+            return last4.span(1)
     elif vtype == "date":
         m = DATE_RE.search(text)
     elif vtype == "card":
@@ -341,8 +351,8 @@ def find_labels(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
             sep = re.match(r"[\s:#.]*", rest)
             body = rest[sep.end():]
             if body.strip() and (vtype != "name" or ":" in sep.group()):
-                hit = _value_in(body, vtype)
-                if hit and not body[: hit[0]].strip():
+                hit = _value_in(body, vtype, inline=True)
+                if hit and (not body[: hit[0]].strip() or (vtype == "tin" and LAST4_VALUE_RE.match(body))):
                     offset = line.start + m.end() + sep.end()
                     emit(offset + hit[0], offset + hit[1], kind)
                     continue
