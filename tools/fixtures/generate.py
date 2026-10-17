@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import degrade, fake, irs, synthetic
+from . import degrade, fake, heldout, irs, synthetic
 
 DEFAULT_OUT = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "generated"
 
@@ -21,6 +21,7 @@ def generate(out_dir: Path, seed: int = 7, brokerage_pages: int = 30) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     hh = fake.household(seed)
     records = irs.build_all(out_dir, hh, seed) + synthetic.build_all(out_dir, hh, seed, brokerage_pages)
+    records += heldout.build_all(out_dir, hh, seed)
     by_file = {r.file: r for r in records}
     records += [
         degrade.scan(by_file["w2.pdf"], out_dir, out_dir, "w2_scan", [1], seed),
@@ -29,6 +30,7 @@ def generate(out_dir: Path, seed: int = 7, brokerage_pages: int = 30) -> dict:
         degrade.scan(by_file["1099_r.pdf"], out_dir, out_dir, "1099_r_scan", [0], seed),
         degrade.scan(by_file["ira_statement.pdf"], out_dir, out_dir, "ira_statement_scan", [0], seed),
         degrade.scan(by_file["brokerage_consolidated.pdf"], out_dir, out_dir, "brokerage_scan", [0, 1], seed),
+        degrade.scan(by_file["k1_statement.pdf"], out_dir, out_dir, "k1_statement_scan", [0, 1], seed),
         degrade.photo(by_file["receipt.pdf"], out_dir, out_dir, "receipt_photo", seed),
         degrade.photo(by_file["daf_acknowledgment.pdf"], out_dir, out_dir, "daf_photo", seed),
         degrade.scanner_ocr(by_file["1099_div.pdf"], out_dir, out_dir, "1099_div_scanner_ocr", seed),

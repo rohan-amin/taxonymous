@@ -5,9 +5,11 @@ Checks, all fail-closed:
   text       the PDF text layer and the .txt contain no known value (anything redacted
              from this document, any profile value in any format) and no identifier-shaped
              pattern; placeholders are ignored
-  ocr        the same, on Tesseract OCR of every rendered page (both OCR passes), so text
-             that was only covered (not removed) or that lives in image pixels is still
-             caught; matching tolerates the digits and letters OCR confuses
+  ocr        the same, on Tesseract OCR of every rendered page, so text that was only
+             covered (not removed) or that lives in image pixels is still caught; matching
+             tolerates the digits and letters OCR confuses. Sparse pages (forms, receipts,
+             anything with an image) get both OCR passes; dense text pages (statements,
+             letters) get the layout pass, which is what reads dense text best
 
 Issues never contain real values: only the kind of value, the check, and the page.
 """
@@ -29,6 +31,7 @@ CONFUSABLE = {"0": "0Oo", "1": "1Il|i", "2": "2Z", "5": "5S", "6": "6b", "8": "8
 # letters OCR swaps for each other in words ("Iyer" read as "lyer")
 LETTER_FOLD = str.maketrans({"l": "i", "1": "i", "|": "i", "!": "i", "0": "o", "5": "s", "8": "b"})
 OCR_DPI = 200
+DENSE_CHARS = 1500  # a page with more text than this and no images is read with one OCR pass
 
 
 @dataclass
@@ -122,6 +125,12 @@ def _structure(doc: pymupdf.Document) -> list[Issue]:
     return issues
 
 
+def _passes(page: pymupdf.Page) -> tuple[str, ...]:
+    if not page.get_images() and len(page.get_text()) > DENSE_CHARS:
+        return ocr_mod.PASSES[:1]
+    return ocr_mod.PASSES
+
+
 def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | None = None,
            ocr: bool = True) -> Report:
     report = Report(pdf=str(pdf), ocr=ocr)
@@ -137,11 +146,13 @@ def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | N
             report.issues += [Issue("txt", k) for k in scanner.scan(Path(txt).read_text(), fuzzy=True)]
         if ocr:
             ocr_mod.require()
-            images = [p.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY).tobytes("png") for p in doc]
-            texts = iter(ocr_mod.run_all([(png, psm) for png in images for psm in ocr_mod.PASSES]))
-            for n in range(1, len(images) + 1):
+            passes = [_passes(p) for p in doc]
+            jobs = [(p.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY).tobytes("png"), psm)
+                    for p, psms in zip(doc, passes, strict=True) for psm in psms]
+            texts = iter(ocr_mod.run_all(jobs))
+            for n, psms in enumerate(passes, 1):
                 found = set()
-                for _ in ocr_mod.PASSES:
+                for _ in psms:
                     found.update(scanner.scan(next(texts), fuzzy=True))
                 report.issues += [Issue("ocr", k, n) for k in sorted(found)]
     except Exception as e:  # anything unexpected is a failure, never a pass

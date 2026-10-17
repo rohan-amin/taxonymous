@@ -15,3 +15,4 @@
 | f1041sk1.pdf | https://www.irs.gov/pub/irs-pdf/f1041sk1.pdf | `66e7c4c2a6d11bd9…` |
 | f1040sh.pdf | https://www.irs.gov/pub/irs-pdf/f1040sh.pdf | `5c94c7673d6693ad…` |
 | f5498.pdf | https://www.irs.gov/pub/irs-pdf/f5498.pdf | `630f4d4691c3954d…` |
+| f1098.pdf | https://www.irs.gov/pub/irs-pdf/f1098.pdf | `304da9c0f67a46ff…` |

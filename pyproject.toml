@@ -10,9 +10,11 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "en-core-web-trf",
     "pillow>=13.0.0",
     "pillow-heif>=1.8.1",
     "pymupdf>=1.28.2",
+    "spacy>=3.8.16",
 ]
 
 [project.scripts]
@@ -31,7 +33,12 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-filterwarnings = ["ignore:builtin type .* has no __module__ attribute:DeprecationWarning"]
+addopts = "-m 'not slow'"
+markers = ["slow: long-running acceptance tests (run with: uv run pytest -m slow)"]
+filterwarnings = [
+    "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
+    "ignore:`torch.jit.script` is deprecated:FutureWarning",
+]
 
 [tool.ruff]
 line-length = 110
@@ -39,3 +46,6 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.uv.sources]
+en-core-web-trf = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.8.0/en_core_web_trf-3.8.0-py3-none-any.whl" }

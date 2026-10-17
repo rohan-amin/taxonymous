@@ -88,9 +88,21 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
   - Verification OCRs with both modes and tolerates OCR letter confusions in names (`Iyer`/`lyer`).
   - A file that can't be processed (password-protected, corrupt) is held back with an error report; the rest of the run continues.
 
-### M4 — Long and free-form documents
+### M4 — Long and free-form documents ✅ (2026-10-17)
 - Repetition detector, page streaming for big files, name detection in prose (profile plus a local NER model such as spaCy, so it catches names that aren't in the profile, like third parties)
 - **Accept:** a 150-page fixture finishes in < 60 s on an M-series Mac and passes verification; transaction-row count and totals match the original. Third-party names and SSNs not in the profile are caught. Includes a **held-out test:** a document type the detectors were never tuned on (e.g. a 1098 or a pay stub) must also pass, which shows the engine generalizes.
+- **Result:**
+  - 150-page brokerage statement: redact + verify in 47 s on an M4 Pro (14 cores); all 9,536 transaction rows and the proceeds total match. `uv run pytest -m slow` runs it.
+  - Seeds 7, 99, 2024, 31337: 24 text documents and 11 scans/photos each, 0 leaks, all pass verification. Scan amount retention 98.7% (1,179/1,195) across the four seeds.
+  - New fixtures: a K-1's prose statement (outsiders' names, an outsider's SSN in a sentence, an account number labelled on page 1 and bare on page 2, a private partnership's name as a heading), and its scan.
+  - **Held-out:** Form 1098 passed on its first run and has not been tuned on. Three other types failed their first run, each exposing a generic gap that was then fixed: the pay stub (a value to the right of its label in a separate text object), a property tax bill (unlabelled parcel and tax account numbers), and a childcare provider's statement ("Provider: <name>" and the provider's surname in the business name). Those three are regular fixtures now; `tools/fixtures/heldout.py` explains the rule.
+- How it works:
+  - Names in prose: spaCy's transformer model `en_core_web_trf`, run locally on prose only (sentences, greetings, sign-offs). The smaller `sm`/`md`/`lg` models missed uncommon surnames. In forms and tables the model tags captions and security names as people, so those stay with the label detector. The model also finds private organizations in prose (a legal suffix like LLC/LP, and not a bank/broker/charity).
+  - Repetition: everything any detector finds on any page (or any OCR read) is searched for on every other page. A full name passes its parts on, so "Oyelaran" alone gets the same placeholder as "Margarethe Oyelaran" (for names from a label, only when the model agrees the string is a person).
+  - New generic rules: a value to the right of its label on the same row; a bare number of 7+ digits is an ID unless it is an amount, a date or a form's OMB number; a person's role followed by a colon ("Provider:", "Executor:") labels a name; a line that is only a private organization's legal name (not a table cell) is redacted.
+  - Scans are read 8 pages at a time; page images are dropped once read and rendered again when the page is rebuilt.
+  - Verification gives dense text pages (no images, > 1,500 characters) one OCR pass instead of two; that halves its time on long statements.
+  - Cost: the model is 436 MB and pulls in PyTorch (the venv is ~1.2 GB). Loading it takes ~6 s and peaks at 2.7 GB of memory, 0.9 GB resident after. It loads only when a document has prose.
 
 ### M5 — Local API
 - FastAPI bound to `127.0.0.1` only: upload, run, status, fetch original/redacted page images, add/remove a redaction, re-verify, export
@@ -104,16 +116,19 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 - Fuzz the redactor with odd PDFs (rotated pages, Type3 fonts, text drawn as vector paths, incremental updates, encrypted PDFs)
 - Native wrapper spike (pywebview vs Tauri)
 
-## Known limitations after M3
+## Known limitations after M4
 
 - Scanned pages are output as images, so they are bigger than the original and have no text layer except placeholders; the `.txt` carries the (redacted) OCR text instead.
 - OCR word boxes are sometimes taller than the text. The padded black box can then clip the top of the line below (seen once in 40 degraded fixtures).
 - A value OCR can't read at all can't be detected. The verifier OCRs the output the same way, so it can't see it either. Low-quality scans should be reviewed by eye (the review UI is M6).
 - Rotated pages (`/Rotate`), and pictures layered on top of other pictures in a text PDF, are untested (M7).
-- Third-party names are caught only next to labels (form boxes, table headers). Names in prose need NER (M4).
+- A third party's name that is neither next to a label nor in prose (a name alone in a table cell, a heading that isn't a legal entity name) is not caught unless it also appears somewhere that is.
+- The name model can still miss a name; a surname alone is caught reliably only when the full name also appears in the document.
+- A bare 7+ digit number on a scan is treated as an ID, so an amount OCR misread without its decimal point (`15,158.60` read as `1515880`) is redacted. A few amounts per 300 on degraded scans.
+- The 150-page timing is on a 14-core M4 Pro; verification is CPU-bound, so a Mac with fewer cores will be slower.
 - The public vs. private organization split is a keyword heuristic (`bank`, `securities`, `charitable`… versus `LLC`, `LP`, `family trust`). The review UI (M6) is the backstop.
 - Your first and last names are matched on their own anywhere in the text, so a first name that is also a common word (e.g. "Grant") will be over-redacted.
-- The label detector was developed against the corpus layouts. Other seeds with the same layouts pass. Whether it generalizes to unseen layouts is what M4's held-out test is for.
+- The label detector was developed against the corpus layouts. Of four held-out types, one passed untouched and three needed generic fixes; expect real documents to find more gaps, which is what review (M6) is for.
 
 ## Resolved (2026-10-16)
 

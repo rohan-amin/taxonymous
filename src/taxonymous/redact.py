@@ -3,7 +3,8 @@
 Text pages (a text layer):
 1. Flatten form fields and annotations so their values become page text
    (and get scanned like everything else).
-2. Detect identifiers on every page.
+2. Detect identifiers on every page, then look for everything found anywhere
+   in the document on every other page too.
 3. Apply true redactions: the covered text, image pixels and drawings are
    removed from the file, and a placeholder like <SSN_A> is written in.
    Images on the page (an embedded scan, a signature) are OCR'd and the
@@ -12,14 +13,14 @@ Text pages (a text layer):
 Image pages (a scan, a scan with only an invisible OCR layer, or a photo):
    The page is rendered, straightened and OCR'd, the identifiers are burned
    into the pixels, and the page is replaced by that one image, so nothing
-   that was hidden under or behind it survives.
+   that was hidden under or behind it survives. Pages are read a few at a
+   time and their images let go, so a long scan never sits in memory whole.
 
 Then for every file: scrub metadata, XMP, attachments, JavaScript, links,
 hidden text, and write the placeholder text.
 """
 
 import io
-import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,7 +29,7 @@ import pymupdf
 from PIL import Image, ImageDraw, ImageOps
 
 from . import ocr
-from .detect import Finding, ProfileMatcher, detect, is_amount
+from .detect import Finding, ProfileMatcher, detect, merge, relink, repeat_values, repeated
 from .pagetext import PageText, extract
 from .vault import Vault
 
@@ -36,6 +37,7 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif", ".
 SUFFIXES = IMAGE_SUFFIXES | {".pdf"}
 PHOTO_TEXT_HEIGHT = 6.5  # points: OCR word boxes in a photo are scaled so text is about this tall
 JPEG_QUALITY = 80
+OCR_BATCH = 8  # scanned pages rendered and read at a time
 
 
 @dataclass
@@ -53,10 +55,12 @@ class Result:
 
 @dataclass
 class _Ocr:
-    """One page read by OCR: the image, points per pixel, and a PageText per read."""
+    """One page read by OCR: the image (dropped once read, for a PDF page), points per
+    pixel, and a PageText per read."""
     number: int
-    img: Image.Image
+    img: Image.Image | None
     scale: float
+    dpi: float = 0
     reads: list[tuple[PageText, list[ocr.Word]]] = field(default_factory=list)
     found: list[tuple[PageText, Finding]] = field(default_factory=list)
 
@@ -105,11 +109,26 @@ def _dpi(page: pymupdf.Page) -> float:
     return ocr.RENDER_DPI
 
 
+def _image(page: pymupdf.Page, dpi: float) -> Image.Image:
+    pix = page.get_pixmap(dpi=round(dpi), colorspace=pymupdf.csRGB, alpha=False)
+    return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+
+
 def _render(page: pymupdf.Page) -> _Ocr:
     dpi = _dpi(page)
-    pix = page.get_pixmap(dpi=round(dpi), colorspace=pymupdf.csRGB, alpha=False)
-    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-    return _Ocr(page.number, img, page.rect.width / pix.width)
+    img = _image(page, dpi)
+    return _Ocr(page.number, img, page.rect.width / img.width, dpi)
+
+
+def _read_pages(doc: pymupdf.Document, numbers: list[int], matcher: ProfileMatcher) -> list[_Ocr]:
+    out = []
+    for i in range(0, len(numbers), OCR_BATCH):
+        batch = [_render(doc[n]) for n in numbers[i:i + OCR_BATCH]]
+        _read_all(batch, matcher)
+        for p in batch:
+            p.img = None  # rendered again if the page is rebuilt
+        out += batch
+    return out
 
 
 def _read_all(pages: list[_Ocr], matcher: ProfileMatcher) -> None:
@@ -123,24 +142,13 @@ def _read_all(pages: list[_Ocr], matcher: ProfileMatcher) -> None:
             p.scale = PHOTO_TEXT_HEIGHT / h if h else 72 / 200
         p.reads = [(ocr.page_text(w, p.number, p.scale, m), w) for w, m in reads]
         p.found = [(pt, f) for pt, _ in p.reads for f in detect(pt, matcher)]
-    _propagate(pages)
 
 
-def _propagate(pages: list[_Ocr]) -> None:
-    """A value one read redacts is redacted wherever any read sees it. Reads disagree
-    (a label is recognised in one and not another), and what goes out must not contain
-    a value that was treated as an identifier somewhere else in the document."""
-    values = {f.text: f for p in pages for _, f in p.found
-              if len(f.text.strip()) >= 4 and not is_amount(f.text)}
-    for p in pages:
-        for pt, _ in p.reads:
-            taken = [(f.start, f.end) for t, f in p.found if t is pt]
-            for text, f in values.items():
-                for m in re.finditer(r"(?<!\w)" + re.escape(text) + r"(?!\w)", pt.text):
-                    if not any(m.start() < e and s < m.end() for s, e in taken):
-                        copy = Finding(pt.number, m.start(), m.end(), f.kind, f.key, f.source, text)
-                        p.found.append((pt, copy))
-                        taken.append((m.start(), m.end()))
+def _repeat_ocr(p: _Ocr, values: dict[str, Finding]) -> None:
+    """OCR reads disagree (a label is recognised in one and not another), so a value
+    any read or page redacts is redacted wherever any read sees it."""
+    for pt, _ in p.reads:
+        p.found += [(pt, f) for f in repeated(pt, [f for t, f in p.found if t is pt], values)]
 
 
 def _whole_words(pt: PageText, f: Finding) -> tuple[int, int]:
@@ -198,7 +206,7 @@ def _substituted(pt: PageText, regions: list[tuple[pymupdf.Rect, str, Finding]])
 
 def _rebuild(doc: pymupdf.Document, p: _Ocr, regions, at: int | None) -> str:
     """Replace page `at` (or append) with the burned image; return its placeholder text."""
-    img = p.img.copy()
+    img = p.img.copy() if p.img is not None else _image(doc[at], p.dpi)
     draw = ImageDraw.Draw(img)
     labels: list[tuple[pymupdf.Rect, str]] = []
     for r, ph, _ in regions:
@@ -240,6 +248,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault)
         doc = pymupdf.open()
         photo = _Ocr(0, load_image(src), 0.0)
         _read_all([photo], matcher)
+        _repeat_ocr(photo, repeat_values([f for _, f in photo.found]))
         texts[0] = _rebuild(doc, photo, _ocr_regions(photo, vault, result), None)
         result.image_pages.append(1)
     else:
@@ -247,20 +256,35 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault)
         if doc.needs_pass:
             raise ValueError(f"{src.name} is password-protected; remove the password first")
         doc.bake(annots=True, widgets=True)
-        scans, mixed = [], []
+        # pass 1: find everything, on every page
+        text_pages: dict[int, tuple[PageText, list[Finding]]] = {}
+        scan_numbers, mixed_numbers = [], []
         for page in doc:
             if not _visible_text(page):
-                scans.append(_render(page))
-            elif _image_rects(page):
-                mixed.append(_render(page))
-        _read_all(scans + mixed, matcher)
-        mixed_by_page = {p.number: p for p in mixed}
-
-        for page in doc:
-            if page.number in {p.number for p in scans}:
+                scan_numbers.append(page.number)
                 continue
-            _redact_text_page(page, matcher, vault, result, mixed_by_page.get(page.number))
+            pt = extract(page)
+            text_pages[page.number] = (pt, detect(pt, matcher))
+            if _image_rects(page):
+                mixed_numbers.append(page.number)
+        read = _read_pages(doc, scan_numbers + mixed_numbers, matcher)
+        scans, mixed = read[:len(scan_numbers)], {p.number: p for p in read[len(scan_numbers):]}
+        everything = [f for _, fs in text_pages.values() for f in fs] + [f for p in read for _, f in p.found]
+        values = repeat_values(everything)
+        relink(everything, values)
+
+        # pass 2: add what the rest of the document found, and redact
+        for page in doc:
+            if page.number not in text_pages:
+                continue
+            pt, found = text_pages.pop(page.number)
+            found = merge(found + repeated(pt, found, values), pt)
+            ocr_page = mixed.get(page.number)
+            if ocr_page is not None:
+                _repeat_ocr(ocr_page, values)
+            _redact_text_page(page, pt, found, vault, result, ocr_page)
         for p in scans:
+            _repeat_ocr(p, values)
             texts[p.number] = _rebuild(doc, p, _ocr_regions(p, vault, result), p.number)
             result.image_pages.append(p.number + 1)
 
@@ -284,11 +308,10 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault)
     return result
 
 
-def _redact_text_page(page: pymupdf.Page, matcher: ProfileMatcher, vault: Vault, result: Result,
-                      images: _Ocr | None) -> None:
-    pt = extract(page)
+def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], vault: Vault,
+                      result: Result, images: _Ocr | None) -> None:
     labels: list[tuple[pymupdf.Rect, str]] = []
-    for f in detect(pt, matcher):
+    for f in found:
         ph = vault.placeholder(f.kind, f.key, f.text)
         result.findings.append(f)
         result.placeholders[ph] = f.kind

@@ -86,7 +86,7 @@ def test_patterns_catch_identifiers_not_in_profile(line, expected):
 def test_luhn_rejects_random_long_numbers():
     assert luhn("4111111111111111")
     assert not luhn("4111111111111112")
-    assert texts("Ref 4111111111111112") == []
+    assert [f.kind for f in findings("Ref 4111111111111112")] == ["ID"]  # a long number, not a card
 
 
 @pytest.mark.parametrize("lines, expected", [

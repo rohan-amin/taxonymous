@@ -1,10 +1,16 @@
 """Find identifiers on a page. Document-agnostic: the same detectors run on
 every page of every document.
 
-Three detectors, highest priority first:
+Four detectors, highest priority first:
   profile  - the user's own known values, matched with formatting tolerance
   pattern  - shapes that are identifiers wherever they appear (SSN, EIN, email, ...)
   label    - text next to a PII label ("Account number", "RECIPIENT'S name", ...)
+  ner      - people (and private organizations) named in prose, by a local
+             language model (names.py)
+
+Then, across the whole document, anything one detector found is found again
+wherever else it appears ("repeat"): a name in a letter's heading and the same
+name in a footnote on page 30.
 
 Pattern and label findings never cover a dollar amount.
 """
@@ -12,11 +18,14 @@ Pattern and label findings never cover a dollar amount.
 import re
 from dataclasses import dataclass
 
+from . import names
 from .pagetext import Line, PageText
 from .profile import Profile
 
 IC = re.IGNORECASE
-PRIORITY = {"profile": 3, "pattern": 2, "label": 1}
+PRIORITY = {"profile": 4, "pattern": 3, "label": 2, "ner": 1, "repeat": 0}
+RIGHT_GAP = 200  # points: how far right of a label its value may sit on the same row
+REPEAT_MIN = 4  # shorter values are not searched for elsewhere in the document
 
 
 @dataclass
@@ -26,7 +35,7 @@ class Finding:
     end: int
     kind: str  # placeholder prefix: SSN EIN TIN ACCT CARD ROUTING ID NAME ORG ADDR PHONE EMAIL DOB
     key: str  # identity used to give the same value the same placeholder
-    source: str  # profile | pattern | label
+    source: str  # profile | pattern | label | ner | repeat
     text: str = ""
 
 
@@ -71,6 +80,11 @@ def digits(s: str) -> str:
 
 def is_amount(s: str) -> bool:
     return bool(AMOUNT_RE.match(s.strip()))
+
+
+# a private organization's name standing alone: "Larkspur Ridge Partners LP" heading a statement
+LEGAL_NAME_RE = re.compile(r"(?:[A-Z][\w&.,'-]*\s+|&\s+){1,6}(?:LLC|L\.L\.C\.|LP|L\.P\.|LLP|PLLC|"
+                           r"Inc\.?|Ltd\.?|Corp\.?|Partners|Associates|Holdings)")
 
 
 def is_public_org(s: str) -> bool:
@@ -204,6 +218,13 @@ PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
+# a bare number this long is an ID (parcel, tax account, member number) unless it is an
+# amount (decimals or thousands commas), a date, or a form's printed OMB control number
+LONG_NUMBER_RE = re.compile(r"(?<![\w.,/$-])\d[\d-]{5,}\d(?![\w.,/%-]|\.\d)")
+LONG_NUMBER_DIGITS = 7
+OMB_RE = re.compile(r"\bOMB\s*No\W{0,3}$", IC)  # tolerant: OCR reads "OMB No." as "OMBNo," too
+
+
 def pattern_hits(text: str):
     """Yield (match, kind) for every identifier-shaped string in text."""
     for rx, kind in PATTERNS:
@@ -221,6 +242,11 @@ def find_patterns(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
     for m, kind in pattern_hits(pt.text):
         k, key = pm.canonical(kind, m.group())
         out.append(Finding(pt.number, m.start(), m.end(), k, key, "pattern", m.group()))
+    # not in PATTERNS: verification would flag every OCR misread of an amount that lost its point
+    for m in LONG_NUMBER_RE.finditer(pt.text):
+        if len(digits(m.group())) >= LONG_NUMBER_DIGITS and not OMB_RE.search(pt.text[:m.start()][-12:]):
+            out.append(Finding(pt.number, m.start(), m.end(), *pm.canonical("ID", m.group()), "pattern",
+                               m.group()))
     return out
 
 
@@ -233,13 +259,19 @@ LABELS: list[tuple[re.Pattern, str, str]] = [
                 r"member (?:#|no\b\.?|number|id)|policy (?:number|no\b\.?)|loan (?:number|no\b\.?)|"
                 r"customer (?:number|id)|participant id", IC), "id", "ACCT"),
     (re.compile(r"state (?:id|identification)\b(?: (?:number|no\b\.?))?|payer's state no\b\.?|"
-                r"control (?:number|no\b\.?)", IC), "id", "ID"),
+                r"control (?:number|no\b\.?)|"
+                r"\b(?:employee|client|patient|student|badge|personnel|staff) (?:id\b|number|no\b\.?|#)",
+                IC), "id", "ID"),
     (re.compile(r"social security number|\bssn\b|\bi?tin\b|identification number|identifying number|"
                 r"\bein\b|taxpayer id", IC), "tin", "TIN"),
     (re.compile(r"date of birth|\bdob\b|birth ?date", IC), "date", "DOB"),
     (re.compile(r"\b(?:visa|mastercard|amex|american express|discover)\b|card (?:number|no\b\.?|#)|"
                 r"\bending in\b", IC), "card", "CARD"),
-    (re.compile(r"\bname\b|\baddress\b|^\s*recipient\s*$|account holder|^\s*beneficiar(?:y|ies)\s*$", IC),
+    (re.compile(r"\bname\b|\baddress\b|^\s*recipient\s*$|account holder|^\s*beneficiar(?:y|ies)\s*$|"
+                # a person's role, then a colon: "Provider: Cyrus Pemberton", "Prepared for: ..."
+                r"\b(?:provider|payee|patient|student|child(?:ren)?|dependents?|parents?|owners?|taxpayers?|"
+                r"spouse|guardian|executor|executrix|administrator|trustee|preparer|prepared (?:for|by)|"
+                r"attention|client|insured|borrowers?|co-borrower|signer|contact)(?=\s*:)", IC),
      "name", "NAME"),
 ]
 CARD_TOKEN_RE = re.compile(r"[\d*•#]")
@@ -328,6 +360,22 @@ def _single_value_below(pt: PageText, label: Line, vtype: str) -> tuple[int, int
     return None
 
 
+def _value_right(pt: PageText, label: Line, vtype: str) -> tuple[int, int] | None:
+    """A value in its own text object to the right of the label, on the same row
+    ("Employee ID:" ... "489135"): the nearest text on the row."""
+    r = label.rect
+    row = [ln for ln in pt.lines if ln is not label and r.x1 - 2 <= ln.rect.x0 < r.x1 + RIGHT_GAP
+           and min(ln.rect.y1, r.y1) - max(ln.rect.y0, r.y0) > 0.5 * min(r.height, ln.rect.height)]
+    if not row:
+        return None
+    ln = min(row, key=lambda ln: ln.rect.x0)
+    text = pt.text[ln.start:ln.end]
+    hit = _value_in(text, vtype, inline=True)
+    if hit and not text[: hit[0]].strip() and not _is_label_line(text):
+        return ln.start + hit[0], ln.start + hit[1]
+    return None
+
+
 def find_labels(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
     out: list[Finding] = []
 
@@ -355,6 +403,11 @@ def find_labels(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
                 if hit and (not body[: hit[0]].strip() or (vtype == "tin" and LAST4_VALUE_RE.match(body))):
                     offset = line.start + m.end() + sep.end()
                     emit(offset + hit[0], offset + hit[1], kind)
+                    continue
+            if not body.strip() and vtype in ("id", "tin", "card", "date"):
+                hit = _value_right(pt, line, vtype)
+                if hit:
+                    emit(*hit, kind)
                     continue
             # value in the box below the label
             if vtype in ("id", "tin", "card"):
@@ -388,6 +441,103 @@ def find_labels(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
     return out
 
 
+# ---------------------------------------------------------------- names in prose
+
+def _private_org(text: str) -> bool:
+    return bool(LEGAL_NAME_RE.fullmatch(text)) and not is_public_org(text)
+
+
+def find_names(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
+    out = []
+    for start, end, label in names.entities(pt):
+        text = pt.text[start:end]
+        lead = len(text) - len(text.lstrip(" ,.;:"))
+        start, end = start + lead, start + len(text.rstrip(" ,.;:"))
+        text = pt.text[start:end]
+        if label == "ORG":
+            text = re.sub(r"^the\s+", "", text, flags=IC)
+            start = end - len(text)
+            if _private_org(text):
+                out.append(Finding(pt.number, start, end, *pm.canonical("ORG", text), "ner", text))
+            continue
+        words = re.findall(r"[a-z]+", text.lower())
+        if (len(text) < 3 or re.search(r"\d", text) or not re.search(r"[A-Z]", text)
+                or set(words) <= FORM_WORDS or ORG_RE.search(text) or STREET_RE.search(text)):
+            continue
+        out.append(Finding(pt.number, start, end, *pm.canonical("NAME", text), "ner", text))
+    return out
+
+
+def find_orgs(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
+    """A line that is nothing but a private organization's legal name (a statement's
+    heading). Not a table cell: a holdings table full of "... Inc" stays readable."""
+    out = []
+    for line in pt.lines:
+        raw = pt.text[line.start:line.end]
+        text = raw.strip()
+        if not _private_org(text):
+            continue
+        r = line.rect
+        row = [o for o in pt.lines if o is not line and min(o.rect.y1, r.y1) - max(o.rect.y0, r.y0)
+               > 0.5 * r.height]
+        if len(row) >= 2:
+            continue
+        start = line.start + raw.index(text)
+        out.append(Finding(pt.number, start, start + len(text), *pm.canonical("ORG", text), "label", text))
+    return out
+
+
+# ---------------------------------------------------------------- repetition
+
+def repeat_values(findings: list[Finding]) -> dict[str, Finding]:
+    """Values worth looking for elsewhere in the document, each with the finding it
+    came from. A third party's full name also gives its parts, so "Mr. Varga" on a
+    later page gets the same placeholder as "Desmond Varga"."""
+    values: dict[str, Finding] = {}
+    for f in findings:
+        text = f.text.strip()
+        if f.source == "profile" or len(text) < REPEAT_MIN or is_amount(text) or "\n" in text:
+            continue  # profile values are matched everywhere already
+        values.setdefault(text, f)
+    for f in findings:
+        parts = f.text.split()
+        if not _person(f):
+            continue
+        for part in parts:
+            if len(part) >= 3 and part[0].isupper() and part.isalpha() and part.lower() not in FORM_WORDS:
+                single = values.get(part)
+                if single is None or len(single.text.split()) == 1:
+                    values[part] = f
+    return values
+
+
+def _person(f: Finding) -> bool:
+    """A full name, from the model or from a label the model agrees is a person."""
+    if f.kind != "NAME" or not 2 <= len(f.text.split()) <= 4:
+        return False
+    return f.source == "ner" or (f.source == "label" and names.is_person(f.text))
+
+
+def repeated(pt: PageText, found: list[Finding], values: dict[str, Finding]) -> list[Finding]:
+    """Occurrences of `values` on this page that nothing in `found` covers yet."""
+    taken = [(f.start, f.end) for f in found]
+    out = []
+    for text, f in values.items():
+        for m in re.finditer(r"(?<!\w)" + re.escape(text) + r"(?!\w)", pt.text):
+            if not any(m.start() < e and s < m.end() for s, e in taken):
+                out.append(Finding(pt.number, m.start(), m.end(), f.kind, f.key, "repeat", text))
+                taken.append((m.start(), m.end()))
+    return out
+
+
+def relink(findings: list[Finding], values: dict[str, Finding]) -> None:
+    """A surname the model tagged on its own takes the full name's placeholder."""
+    for f in findings:
+        source = values.get(f.text.strip())
+        if f.source == "ner" and source is not None and source is not f and source.source in ("ner", "label"):
+            f.kind, f.key = source.kind, source.key
+
+
 # ---------------------------------------------------------------- merge
 
 def merge(findings: list[Finding], pt: PageText) -> list[Finding]:
@@ -408,4 +558,6 @@ def merge(findings: list[Finding], pt: PageText) -> list[Finding]:
 
 
 def detect(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
-    return merge(pm.find(pt) + find_patterns(pt, pm) + find_labels(pt, pm), pt)
+    """Findings on one page; `repeated` adds what the rest of the document found."""
+    found = pm.find(pt) + find_patterns(pt, pm) + find_labels(pt, pm) + find_orgs(pt, pm)
+    return merge(found + find_names(pt, pm), pt)

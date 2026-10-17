@@ -16,6 +16,11 @@ FIRST = ["Jordan", "Casey", "Avery", "Riley", "Morgan", "Quinn", "Rowan", "Emers
          "Harper", "Sawyer", "Marisol", "Teodoro", "Anneliese", "Desmond", "Priya", "Kenji"]
 LAST = ["Halvorsen", "Okafor", "Lindqvist", "Castellano", "Abernathy", "Nakamura",
         "Whitfield", "Delacroix", "Brennan", "Varga", "Thorne", "Iyer"]
+# People who appear only in free text (a partnership's managers, an executor): not in the
+# household, never in the profile, and not drawn from the lists above.
+OUTSIDERS = [("Imogen", "Satterfield"), ("Bartholomew", "Achebe"), ("Lucia", "Ferreira-Kahn"),
+             ("Tobias", "Wren"), ("Margarethe", "Oyelaran"), ("Cyrus", "Pemberton"),
+             ("Ines", "Valdivia"), ("Gideon", "Marchetti")]
 STREET = ["Juniper", "Alder", "Larkspur", "Quarry", "Hollis", "Bramble", "Fenwick", "Tamarack"]
 SUFFIX = ["St", "Ave", "Ln", "Ct", "Rd", "Way"]
 CITIES = [("Madison", "WI", "537"), ("Boulder", "CO", "803"), ("Asheville", "NC", "288"),
