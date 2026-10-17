@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks commits containing SSN/EIN-shaped values, real documents, or profile files.
+# Enable once per clone:  git config core.hooksPath .githooks
+exec uv run --quiet python -m tools.check_pii

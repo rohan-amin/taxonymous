@@ -18,7 +18,7 @@ The forms we expect (W-2, 1099 family incl. 1099-G, brokerage consolidated state
 | Long multi-page PDFs with repeating headers/footers | Brokerage consolidated, IRA statements |
 | Free-form prose | DAF letters, K-1 footnote statements |
 | Photos / scans, no structure | Receipts, scanned K-1s |
-| Third-party PII (not the user's own) | Schedule H employees, IRA beneficiaries |
+| Third-party PII (not the user's own) | W-2s the household issues to its employees, IRA beneficiaries |
 
 A new document type should need no code change. If one leaks, the fix goes into a generic detector, not a special case.
 

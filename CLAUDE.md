@@ -17,6 +17,12 @@ Open-source tool that scrubs sensitive information from tax documents (1099s, W-
 - **Build plan:** `docs/PLAN.md`.
 - **Location:** stays in Dropbox. Dependency folders (`.venv`, `node_modules`) should be excluded from Dropbox sync.
 
+## Commands
+
+- `uv run pytest` / `uv run ruff check .`
+- `uv run python -m tools.fixtures.generate` builds the fake corpus into `tests/fixtures/generated/` (gitignored); `manifest.json` there is the ground truth (`redact` / `keep` per document).
+- Pre-commit PII guard: `git config core.hooksPath .githooks` (runs `tools/check_pii.py`).
+
 ## Rules
 
 - Never commit real tax documents or `profile.json`. `.gitignore` blocks all PDFs/images except `tests/fixtures/`; don't weaken it.
@@ -24,4 +30,4 @@ Open-source tool that scrubs sensitive information from tax documents (1099s, W-
 
 ## Open questions
 
-- None blocking. Next: commit, then start M0.
+- None blocking. M0 (scaffolding + fixtures) done 2026-10-16; next is M1 (text-PDF engine).

@@ -18,6 +18,9 @@ work/
 profile.json
 *.profile.json
 
+# --- Generated fixture corpus (rebuild with: uv run python -m tools.fixtures.generate) ---
+tests/fixtures/generated/
+
 # --- Documents and images: blocked everywhere... ---
 *.pdf
 *.PDF

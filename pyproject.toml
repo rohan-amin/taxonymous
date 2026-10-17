@@ -1,0 +1,37 @@
+[project]
+name = "taxonymous"
+version = "0.1.0"
+description = "Scrub personal identifiers from tax documents locally before sharing them with an AI assistant."
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [
+    { name = "rma", email = "69166804+rohan-amin@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "pillow>=13.0.0",
+    "pymupdf>=1.28.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = ["ignore:builtin type .* has no __module__ attribute:DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
