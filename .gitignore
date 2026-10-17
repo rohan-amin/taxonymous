@@ -1,0 +1,40 @@
+# --- Dependencies / build output ---
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# --- Workspace folders (real documents + vault), at any depth ---
+inbox/
+ready-to-upload/
+vault/
+work/
+
+# --- The profile JSON (your real identifiers), anywhere in the repo ---
+profile.json
+*.profile.json
+
+# --- Documents and images: blocked everywhere... ---
+*.pdf
+*.PDF
+*.jpg
+*.jpeg
+*.JPG
+*.JPEG
+*.png
+*.PNG
+*.heic
+*.HEIC
+*.tif
+*.tiff
+# ...except synthetic fixtures (fake data only)
+!tests/fixtures/**/*.pdf
+!tests/fixtures/**/*.png
+!tests/fixtures/**/*.jpg
+
+# --- OS ---
+.DS_Store
