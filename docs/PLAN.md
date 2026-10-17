@@ -114,15 +114,23 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
   - Reviewer decisions live in `vault/overrides/<doc>.json` as placeholders and boxes, never values. A drawn box becomes `<REDACTED_n>`. The text under it (text layer, or what OCR read inside it) becomes a known value, so verification checks it is gone. Removing a detected box keeps that placeholder in the clear in this document only. Verification then treats those values as allowed, and they stay redacted everywhere else.
   - Boxes are listed per document in `work/<doc>.regions.json` (page, rectangle, placeholder, kind, detector) for the UI to draw. Original and redacted page images share page coordinates.
 
-### M6 — Review UI
+### M6 — Review UI ✅ (2026-10-17)
 - React + TS (Vite): document list with pass/fail, side-by-side original/redacted viewer, click-to-redact / click-to-unredact, re-verify, export
 - **Accept:** Playwright test: load fixture → add a manual redaction → verify → file appears in `ready-to-upload/`; a failed verification blocks export in the UI.
+- **Result:** `taxonymous serve` opens the UI in the browser. `tests/test_ui.py` drives it in Chrome against a live server. It covers mirrored scrolling and paging; marking an amount, the final scrub, the preview and export, after which the released PDF no longer has the amount; a re-verify failure disabling Export until the document is run again; and leaving a detection readable, then redacting it again.
+- How it works:
+  - Original and redacted panes show every page at the same scale. Scrolling either one scrolls the other to the same spot; ‹ › (or ← → / [ ]) page both. Zoom keeps the same spot in view. What was redacted is outlined on the original too, so the two can be compared at a glance.
+  - Mark areas (M) to drag boxes on either pane. Marks show on both panes and can be removed one by one. Final scrub sends them all at once: one re-run, then a full verification. The preview outlines the newly removed areas in green and says whether verification passed.
+  - Clicking a black box shows its placeholder, kind and which detector found it. "Don't redact this here" leaves it readable in this document only; it is listed under the toolbar with "redact again". A box you drew can be removed.
+  - Export is disabled while there are unapplied marks, while the document is being processed, and unless its last verification passed.
+  - The token arrives in the URL once and is moved to session storage, out of the address bar. Files can be added with the button or by dropping them on the window. The list refreshes itself, so runs started from the CLI show up.
+  - Build with `cd ui && npm install && npm run build` (output in `ui/dist`, gitignored). `npm run dev` serves the UI on :5173 against `taxonymous serve --no-browser`.
 
 ### M7 — Hardening
 - Fuzz the redactor with odd PDFs (rotated pages, Type3 fonts, text drawn as vector paths, incremental updates, encrypted PDFs)
 - Native wrapper spike (pywebview vs Tauri)
 
-## Known limitations after M5
+## Known limitations after M6
 
 - Scanned pages are output as images, so they are bigger than the original and have no text layer except placeholders; the `.txt` carries the (redacted) OCR text instead.
 - OCR word boxes are sometimes taller than the text. The padded black box can then clip the top of the line below (seen once in 40 degraded fixtures).
@@ -134,6 +142,8 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 - The 150-page timing is on a 14-core M4 Pro; verification is CPU-bound, so a Mac with fewer cores will be slower.
 - Keeping a placeholder in the clear also keeps any shorter value that verification would otherwise flag inside it. It is a reviewer decision, and the review UI should make it a deliberate one.
 - Every reviewer change re-runs the whole document, which is slow for a long scan (a few seconds per page).
+- The UI renders every page image of a document (lazily); a several-hundred-page statement scrolls fine but zooming re-requests the images at the new resolution.
+- A merchant's or payer's own street address and phone are redacted by the patterns even when the organization is public (e.g. on a receipt). "Don't redact this here" handles it per document.
 - The public vs. private organization split is a keyword heuristic (`bank`, `securities`, `charitable`… versus `LLC`, `LP`, `family trust`). The review UI (M6) is the backstop.
 - Your first and last names are matched on their own anywhere in the text, so a first name that is also a common word (e.g. "Grant") will be over-redacted.
 - The label detector was developed against the corpus layouts. Of four held-out types, one passed untouched and three needed generic fixes; expect real documents to find more gaps, which is what review (M6) is for.

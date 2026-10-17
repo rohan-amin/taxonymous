@@ -13,12 +13,16 @@ the same browser can't drive it). It makes no outbound connections.
   POST   /api/run                               redact + verify everything (queued)
   POST   /api/documents/{id}/run                redact + verify one document (queued)
   GET    /api/status                            what the worker is doing
-  POST   /api/documents/{id}/redactions         {"page": n, "rect": [x0, y0, x1, y1]} add a box (points)
+  POST   /api/documents/{id}/redactions         {"boxes": [{"page": n, "rect": [x0, y0, x1, y1]}]}
+                                                add boxes (page points), one re-run for all of them
   DELETE /api/documents/{id}/redactions?placeholder=<P>   remove a box: a drawn one goes,
                                                 a detected one is kept in the clear in this document
   DELETE /api/documents/{id}/kept?placeholder=<P>         undo a keep
   POST   /api/documents/{id}/verify             verify the current output again (queued)
   POST   /api/documents/{id}/export             copy to ready-to-upload/, only if it passed
+
+The review UI (ui/, built into ui/dist) is served at /. Its files hold no data,
+so they need no token; every /api request does.
 
 Every change to a document re-runs it. Document ids are the output stem
 (`w2` for w2.pdf, `receipt.jpg` for receipt.jpg); real values never appear in
@@ -38,7 +42,7 @@ from pathlib import Path
 
 import pymupdf
 from fastapi import FastAPI, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -53,6 +57,7 @@ TOKEN_HEADER = "X-Taxonymous-Token"
 DEFAULT_PORT = 8765
 MAX_UPLOAD = 200 * 2**20
 DPI_RANGE = (36, 300)
+UI_DIR = Path(__file__).resolve().parents[2] / "ui" / "dist"
 
 
 def check_loopback(host: str) -> None:
@@ -180,10 +185,12 @@ def _summary(ws: Workspace, worker: Worker, src: Path) -> dict:
     stem = output_stem(src)
     regions = _read_json(ws.outputs(stem)["regions"], [])
     report = _read_json(ws.outputs(stem)["report"], None)
+    pdf = ws.outputs(stem)["pdf"]
     return {
         "id": stem,
         "name": src.name,
         "status": _status(ws, worker, stem),
+        "version": pdf.stat().st_mtime_ns if pdf.exists() else 0,  # changes whenever the output does
         "exported": all(p.exists() for p in ws.released(stem)),
         "redactions": dict(Counter(r["kind"] for r in {r["placeholder"]: r for r in regions}.values())),
         "issues": report["issues"] if report else [],
@@ -200,9 +207,13 @@ class Box(BaseModel):
     rect: tuple[float, float, float, float]
 
 
+class Boxes(BaseModel):
+    boxes: list[Box]
+
+
 # ---------------------------------------------------------------- app
 
-def create_app(ws: Workspace, token: str, ocr: bool = True) -> FastAPI:
+def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None = UI_DIR) -> FastAPI:
     ws.init()
     worker = Worker(ws, ocr)
     app = FastAPI(title="taxonymous", docs_url=None, redoc_url=None, openapi_url=None)
@@ -211,6 +222,8 @@ def create_app(ws: Workspace, token: str, ocr: bool = True) -> FastAPI:
 
     @app.middleware("http")
     async def require_token(request: Request, call_next):
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)  # the UI's own files
         given = request.headers.get(TOKEN_HEADER) or request.query_params.get("token") or ""
         if not hmac.compare_digest(given.encode(), token.encode()):
             return JSONResponse({"detail": "missing or wrong token"}, status_code=401)
@@ -306,14 +319,17 @@ def create_app(ws: Workspace, token: str, ocr: bool = True) -> FastAPI:
         return worker.status()
 
     @app.post("/api/documents/{stem}/redactions", status_code=202)
-    def add_redaction(stem: str, box: Box):
+    def add_redactions(stem: str, body: Boxes):
         src = _source(ws, stem)
         sizes = _page_sizes(ws, src, stem)
-        x0, y0, x1, y1 = box.rect
-        if not 0 <= box.page < len(sizes) or not (x0 < x1 and y0 < y1):
-            raise HTTPException(400, "rect must be [x0, y0, x1, y1] on an existing page")
+        if not body.boxes:
+            raise HTTPException(400, "no boxes")
         o = overrides(stem)
-        o.add.append((box.page, (x0, y0, x1, y1)))
+        for box in body.boxes:
+            x0, y0, x1, y1 = box.rect
+            if not 0 <= box.page < len(sizes) or not (x0 < x1 and y0 < y1):
+                raise HTTPException(400, "rect must be [x0, y0, x1, y1] on an existing page")
+            o.add.append((box.page, (x0, y0, x1, y1)))
         o.save(ws.overrides_path(stem))
         worker.submit(Job(stem, "process"))
         return {"queued": [stem]}
@@ -370,15 +386,31 @@ def create_app(ws: Workspace, token: str, ocr: bool = True) -> FastAPI:
             raise HTTPException(409, "cannot export: verification has not passed")
         return {"released": [p.name for p in released]}
 
+    if ui_dir is not None and (ui_dir / "index.html").exists():
+        root = ui_dir.resolve()
+
+        @app.get("/{path:path}", include_in_schema=False)
+        def ui(path: str):
+            target = (root / path).resolve()
+            if path and target.is_file() and target.is_relative_to(root):
+                return FileResponse(target)
+            return FileResponse(root / "index.html")  # the app routes everything else itself
+
     return app
 
 
 def serve(ws: Workspace, host: str = "127.0.0.1", port: int = DEFAULT_PORT, token: str | None = None,
-          ocr: bool = True) -> None:
+          ocr: bool = True, open_browser: bool = False) -> None:
     check_loopback(host)
     import uvicorn
     token = token or secrets.token_urlsafe(32)
     app = create_app(ws, token, ocr)
     shown = f"[{host}]" if ":" in host else host
-    print(f"taxonymous API on http://{shown}:{port}/  token: {token}", flush=True)
+    url = f"http://{shown}:{port}/?token={token}"
+    print(f"taxonymous on {url}", flush=True)
+    if not (UI_DIR / "index.html").exists():
+        print("(API only: build the review UI with `cd ui && npm install && npm run build`)", flush=True)
+    elif open_browser:
+        import webbrowser
+        threading.Timer(1.0, webbrowser.open, [url]).start()
     uvicorn.run(app, host=host, port=port, log_level="warning")

@@ -2,7 +2,7 @@
 
 Scrub personal identifiers from tax documents **on your own machine**, so you can share them with an AI assistant (e.g. Claude) for review without exposing who you are.
 
-> **Status:** early development. Text PDFs (M1), scans and photos (M3), and long and free-form documents with names in prose (M4) are redacted, and every output is verified, including by OCR, before release (M2). A local API for the coming review UI is in place (M5). Nothing has been tested on real documents yet, so **do not rely on it yet**. See [`docs/PLAN.md`](docs/PLAN.md).
+> **Status:** early development. Text PDFs (M1), scans and photos (M3), and long and free-form documents with names in prose (M4) are redacted, and every output is verified, including by OCR, before release (M2). A review screen shows each original and its redacted version side by side, lets you mark anything missed, and re-verifies before export (M6). Nothing has been tested on real documents yet, so **do not rely on it yet**. See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## What it will do
 
@@ -22,7 +22,14 @@ uv run taxonymous init --workspace ~/Dropbox/Taxes/taxonymous   # creates inbox/
 uv run taxonymous run --workspace ~/Dropbox/Taxes/taxonymous
 ```
 
-`uv run taxonymous serve --workspace ...` starts the local API that the review UI (coming in M6) talks to. It only listens on 127.0.0.1 and prints a token that every request needs.
+To review before uploading:
+
+```sh
+(cd ui && npm install && npm run build)                        # once, to build the review screen
+uv run taxonymous serve --workspace ~/Dropbox/Taxes/taxonymous  # opens it in your browser
+```
+
+Each document is shown original and redacted side by side; scrolling and paging move both together. Use **Mark areas** to drag over anything that was missed, then **Final scrub** to remove it all, re-verify, and preview the result. **Export** copies a document to `ready-to-upload/`, and only once it has passed. The server only listens on 127.0.0.1 and needs the token in the link it opens.
 
 Only files that pass verification are copied to `ready-to-upload/`. Failures stay in `work/` with a `*.report.json` that names the kind of leak and the page, never the value.
 

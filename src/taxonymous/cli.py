@@ -4,7 +4,7 @@
   taxonymous run    --workspace DIR     redact + verify everything in inbox/
   taxonymous redact FILE... --profile P --out DIR --vault DIR     (no verification)
   taxonymous verify FILE --profile P [--vault DIR] [--no-ocr]
-  taxonymous serve  --workspace DIR [--port N]    local API for the review UI (loopback only)
+  taxonymous serve  --workspace DIR [--port N]    review UI + local API (loopback only)
 """
 
 import argparse
@@ -59,12 +59,13 @@ def main(argv: list[str] | None = None) -> int:
     _workspace_arg(sv)
     sv.add_argument("--host", default="127.0.0.1", help="loopback address (127.0.0.1, ::1, localhost)")
     sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--no-browser", action="store_true", help="don't open the review UI in a browser")
     args = ap.parse_args(argv)
 
     if args.command == "serve":
         from .api import serve
         try:
-            serve(Workspace(args.workspace), args.host, args.port)
+            serve(Workspace(args.workspace), args.host, args.port, open_browser=not args.no_browser)
         except ValueError as e:
             print(e, file=sys.stderr)
             return 2

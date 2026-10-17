@@ -17,6 +17,10 @@ K1, W2 = "/api/documents/k1_statement", "/api/documents/w2"
 FILES = ["k1_statement.pdf", "w2.pdf", "1099_int_scan.pdf", "receipt_photo.jpg"]
 
 
+def boxes(page: int, rect) -> dict:
+    return {"boxes": [{"page": page, "rect": list(rect)}]}
+
+
 @pytest.fixture(scope="module")
 def network_attempts():
     """Any socket connection or name lookup from here on is refused and recorded."""
@@ -168,7 +172,7 @@ def test_add_and_remove_a_box(server):
     amount = next(i["value"] for i in docs["k1_statement.pdf"]["keep"] if i["type"] == "AMOUNT")
     box = _amount_box(src, "k1_statement.pdf", amount)
 
-    assert client.post(f"{K1}/redactions", json={"page": 0, "rect": box}).status_code == 202
+    assert client.post(f"{K1}/redactions", json=boxes(0, box)).status_code == 202
     settle(app)
     detail = client.get(K1).json()
     [drawn] = [r for r in detail["regions"] if r["source"] == "manual"]
@@ -190,7 +194,7 @@ def test_a_box_on_a_scan_is_burned_into_the_pixels(server):
     stem = "1099_int_scan"
     width, height = client.get(f"/api/documents/{stem}").json()["pages"][0]
     box = [width * 0.55, height * 0.05, width * 0.95, height * 0.25]
-    assert client.post(f"/api/documents/{stem}/redactions", json={"page": 0, "rect": box}).status_code == 202
+    assert client.post(f"/api/documents/{stem}/redactions", json=boxes(0, box)).status_code == 202
     settle(app)
     detail = client.get(f"/api/documents/{stem}").json()
     assert detail["status"] == "passed" and any(r["source"] == "manual" for r in detail["regions"])
@@ -226,8 +230,8 @@ def test_keep_a_detection_in_the_clear_and_undo_it(server):
 
 def test_bad_reviewer_requests(server):
     client, *_ = server
-    assert client.post(f"{W2}/redactions", json={"page": 7, "rect": [0, 0, 9, 9]}).status_code == 400
-    assert client.post(f"{W2}/redactions", json={"page": 0, "rect": [9, 9, 0, 0]}).status_code == 400
+    assert client.post(f"{W2}/redactions", json=boxes(7, [0, 0, 9, 9])).status_code == 400
+    assert client.post(f"{W2}/redactions", json=boxes(0, [9, 9, 0, 0])).status_code == 400
     assert client.delete(f"{W2}/redactions", params={"placeholder": "<NAME_ZZ>"}).status_code == 404
     assert client.delete(f"{W2}/kept", params={"placeholder": "<NAME_A>"}).status_code == 404
 
