@@ -60,13 +60,13 @@ The workspace lives in Dropbox at a configurable path (see Resolved).
 
 Each milestone ends with its acceptance tests passing in CI-style `uv run pytest`.
 
-### M0 — Scaffolding
+### M0 — Scaffolding ✅ (2026-10-16)
 - `uv` project, `pyproject.toml`, ruff, pytest, AGPL `LICENSE`, README, `.gitignore`
 - Synthetic fixture generator (`tools/fixtures/`): fill IRS fillable PDFs (W-2, 1099-INT/DIV/B/MISC/NEC/R/G, K-1s, Schedule H, 5498) with fake data. Brokerage statements, IRA statements, DAF letters and receipts have no IRS form to fill, so generate those directly. Fake SSNs only from the SSA advertising range `987-65-4320`–`4329`; EINs with an invalid `00-` prefix.
 - "Scan" variants: render, rotate ±3°, add noise/blur/JPEG artifacts, photo-style perspective for receipts.
 - **Accept:** `uv run pytest` passes on a clean clone; the fixture generator is deterministic (seeded).
 
-### M1 — Text-PDF engine
+### M1 — Text-PDF engine ✅ (2026-10-16)
 - Ingest, profile matching, patterns, generic label proximity, true redaction, metadata scrub, placeholder text, vault
 - CLI: `taxonymous redact <file> --profile vault/profile.json`
 - **Accept:** for every text-PDF fixture (all forms, not just a subset), all seeded identifiers are gone from the output text layer; all seeded dollar amounts are still present and unchanged; `pdfinfo`/PyMuPDF shows no metadata, annotations or form fields.
@@ -94,6 +94,14 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 ### M7 — Hardening
 - Fuzz the redactor with odd PDFs (rotated pages, Type3 fonts, text drawn as vector paths, incremental updates, encrypted PDFs)
 - Native wrapper spike (pywebview vs Tauri)
+
+## Known limitations after M1
+
+- Images inside text PDFs (embedded scans, logos with text) are not OCR'd yet; that comes in M3.
+- Third-party names are caught only next to labels (form boxes, table headers). Names in prose need NER (M4).
+- The public vs. private organization split is a keyword heuristic (`bank`, `securities`, `charitable`… versus `LLC`, `LP`, `family trust`). The review UI (M6) is the backstop.
+- Your first and last names are matched on their own anywhere in the text, so a first name that is also a common word (e.g. "Grant") will be over-redacted.
+- The label detector was developed against the corpus layouts. Other seeds with the same layouts pass. Whether it generalizes to unseen layouts is what M4's held-out test is for.
 
 ## Resolved (2026-10-16)
 

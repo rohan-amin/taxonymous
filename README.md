@@ -2,7 +2,7 @@
 
 Scrub personal identifiers from tax documents **on your own machine**, so you can share them with an AI assistant (e.g. Claude) for review without exposing who you are.
 
-> **Status:** early development (milestone M0: scaffolding and test fixtures). Nothing redacts yet. See [`docs/PLAN.md`](docs/PLAN.md).
+> **Status:** early development. Text-layer PDFs can be redacted (M1); the mandatory verification gate (M2) and scan/photo support (M3) are not built yet, so **do not rely on it for real documents**. See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## What it will do
 
