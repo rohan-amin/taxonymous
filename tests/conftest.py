@@ -5,7 +5,7 @@ import pytest
 
 from taxonymous.detect import ProfileMatcher
 from taxonymous.profile import Profile
-from taxonymous.redact import redact_pdf
+from taxonymous.redact import redact_file
 from taxonymous.vault import Vault
 from tools.fixtures.generate import generate
 
@@ -27,5 +27,5 @@ def redacted(corpus, tmp_path_factory):
     matcher = ProfileMatcher(Profile.from_dict(profile))
     vault = Vault(out / "vault" / "placeholders.json")
     docs = [d for d in manifest["documents"] if d["kind"] == "text"]
-    results = {d["file"]: (d, redact_pdf(src / d["file"], out, matcher, vault)) for d in docs}
+    results = {d["file"]: (d, redact_file(src / d["file"], out, matcher, vault)) for d in docs}
     return results, vault

@@ -2,7 +2,7 @@
 
 Scrub personal identifiers from tax documents **on your own machine**, so you can share them with an AI assistant (e.g. Claude) for review without exposing who you are.
 
-> **Status:** early development. Text-layer PDFs are redacted (M1) and every output is verified, including by OCR, before release (M2). Scans and photos (M3) are not supported yet, and nothing has been tested on real documents, so **do not rely on it yet**. See [`docs/PLAN.md`](docs/PLAN.md).
+> **Status:** early development. Text PDFs (M1), scans and photos (M3) are redacted, and every output is verified, including by OCR, before release (M2). Nothing has been tested on real documents yet, so **do not rely on it yet**. See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## What it will do
 
@@ -17,7 +17,8 @@ Scrub personal identifiers from tax documents **on your own machine**, so you ca
 
 ```sh
 uv run taxonymous init --workspace ~/Dropbox/Taxes/taxonymous   # creates inbox/ work/ ready-to-upload/ vault/
-# put your identifiers in vault/profile.json (format: src/taxonymous/profile.py), PDFs in inbox/
+# put your identifiers in vault/profile.json (format: src/taxonymous/profile.py),
+# PDFs and photos (JPG, PNG, HEIC, TIFF) in inbox/
 uv run taxonymous run --workspace ~/Dropbox/Taxes/taxonymous
 ```
 

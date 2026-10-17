@@ -75,9 +75,18 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 - Text re-extract + OCR pass + metadata checks; machine-readable report per file
 - **Accept:** a deliberately broken redactor (e.g. one that only draws boxes) is caught on 100% of fixtures. A test also confirms that a value hidden under a drawn rectangle is detected.
 
-### M3 — Scans and photos
+### M3 — Scans and photos ✅ (2026-10-17)
 - Tesseract ingest, preprocessing, pixel burn-in, rasterized output, using the same detectors as M1
 - **Accept:** on degraded scan fixtures, zero seeded identifiers in the OCR of the output. Measure amount retention: ≥ 98% of amounts are still readable by OCR (OCR-noise limit, tracked rather than hard-gated).
+- **Result:** 10 degraded fixtures per seed: 6 flatbed scans (W-2, K-1, 1099-INT, 1099-R, IRA statement, 2-page brokerage), 2 phone photos (receipt, DAF letter), a scanner-OCR PDF (scan + invisible text layer), and a text PDF with a scanned receipt attached. Seeds 7, 99, 2024, 31337: 0 leaks, 40/40 pass verification. Amount retention 98.6% on seed 7. A pixel check on the output (is a kept amount under a black box?) found one partly covered amount across all four seeds; every other unreadable amount is OCR noise.
+- How it works:
+  - Page routing: a page with visible text takes the M1 path; if it also has images, they are OCR'd and identifiers inside them are removed with `apply_redactions` (image pixels). A page with no text, or only a scanner's invisible OCR layer, is rendered at the scan's own resolution, OCR'd, burned and replaced by one fresh JPEG image.
+  - Each image is read up to 4 times (as is and deskewed × Tesseract `--psm 3` and `--psm 11`); redaction uses the union. A value redacted in any read is redacted wherever it appears in every read.
+  - OCR lines are split at column gaps and text-size jumps (form boxes), so a label's value never swallows the amount in the next column. Digit-like letters in number-like tokens are folded back (`634619IOO8` → `6346191008`). Burned boxes cover whole words plus padding.
+  - Card numbers are found after a card brand (`VISA **##88*94444`) however OCR mangles the mask. An address block under a label ends at its city/state/ZIP line.
+  - Photos: JPG/PNG/TIFF/WebP/HEIC, EXIF rotation applied, EXIF never copied. Output is `<name>.<ext>.redacted.pdf`.
+  - Verification OCRs with both modes and tolerates OCR letter confusions in names (`Iyer`/`lyer`).
+  - A file that can't be processed (password-protected, corrupt) is held back with an error report; the rest of the run continues.
 
 ### M4 — Long and free-form documents
 - Repetition detector, page streaming for big files, name detection in prose (profile plus a local NER model such as spaCy, so it catches names that aren't in the profile, like third parties)
@@ -95,9 +104,12 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 - Fuzz the redactor with odd PDFs (rotated pages, Type3 fonts, text drawn as vector paths, incremental updates, encrypted PDFs)
 - Native wrapper spike (pywebview vs Tauri)
 
-## Known limitations after M1
+## Known limitations after M3
 
-- Images inside text PDFs (embedded scans, logos with text) are not *redacted* yet; that comes in M3. Since M2, OCR verification catches them and holds the file back.
+- Scanned pages are output as images, so they are bigger than the original and have no text layer except placeholders; the `.txt` carries the (redacted) OCR text instead.
+- OCR word boxes are sometimes taller than the text. The padded black box can then clip the top of the line below (seen once in 40 degraded fixtures).
+- A value OCR can't read at all can't be detected. The verifier OCRs the output the same way, so it can't see it either. Low-quality scans should be reviewed by eye (the review UI is M6).
+- Rotated pages (`/Rotate`), and pictures layered on top of other pictures in a text PDF, are untested (M7).
 - Third-party names are caught only next to labels (form boxes, table headers). Names in prose need NER (M4).
 - The public vs. private organization split is a keyword heuristic (`bank`, `securities`, `charitable`… versus `LLC`, `LP`, `family trust`). The review UI (M6) is the backstop.
 - Your first and last names are matched on their own anywhere in the text, so a first name that is also a common word (e.g. "Grant") will be over-redacted.

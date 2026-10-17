@@ -48,6 +48,12 @@ def image_only_pdf(path, text: str):
     doc.save(path)
 
 
+def locked_pdf(path):
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "statement", fontsize=11)
+    doc.save(path, encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="secret", owner_pw="owner")
+
+
 def test_every_correctly_redacted_fixture_passes_with_ocr(redacted, matcher):
     results, _ = redacted
     failures = {}
@@ -133,7 +139,7 @@ def test_leak_in_placeholder_text_file_is_caught(redacted, matcher, corpus, tmp_
 
 def test_missing_tesseract_fails_closed(redacted, matcher, tmp_path, monkeypatch):
     src, res = _clean_copy(redacted, tmp_path)
-    monkeypatch.setattr(verify_mod.shutil, "which", lambda _: None)
+    monkeypatch.setattr(verify_mod.ocr_mod.shutil, "which", lambda _: None)
     report = verify(src, matcher, known(res))
     assert not report.passed and report.issues[0].check == "error"
 
@@ -152,16 +158,19 @@ def test_workspace_releases_only_verified_files(corpus, tmp_path):
     ws.profile_path.write_text(json.dumps(profile))
     for name in ["w2.pdf", "receipt.pdf"]:
         shutil.copyfile(src / name, ws.inbox / name)
-    # an SSN that only exists as pixels: M1 can't remove it, so verification must hold it back
     image_only_pdf(ws.inbox / "photo_of_card.pdf", f"SSN {profile['people'][0]['ssn']}")
-    (ws.ready / "photo_of_card.redacted.pdf").write_bytes(b"stale release from an earlier run")
+    # a file that can't be redacted is held back without stopping the others
+    locked_pdf(ws.inbox / "locked.pdf")
+    (ws.ready / "locked.redacted.pdf").write_bytes(b"stale release from an earlier run")
 
     outcomes = {o.source.name: o for o in run(ws)}
 
-    assert outcomes["w2.pdf"].report.passed and outcomes["receipt.pdf"].report.passed
-    assert not outcomes["photo_of_card.pdf"].report.passed
+    assert all(outcomes[n].report.passed for n in ["w2.pdf", "receipt.pdf", "photo_of_card.pdf"])
+    assert not outcomes["locked.pdf"].report.passed
+    assert outcomes["locked.pdf"].report.issues[0].check == "error"
     assert sorted(p.name for p in ws.ready.iterdir()) == [
-        "receipt.redacted.pdf", "receipt.redacted.txt", "w2.redacted.pdf", "w2.redacted.txt"]
+        "photo_of_card.redacted.pdf", "photo_of_card.redacted.txt", "receipt.redacted.pdf",
+        "receipt.redacted.txt", "w2.redacted.pdf", "w2.redacted.txt"]
     reports = " ".join(p.read_text() for p in ws.work.glob("*.report.json"))
     assert profile["people"][0]["ssn"] not in reports  # reports never contain real values
     assert (ws.inbox / "w2.pdf").read_bytes() == (src / "w2.pdf").read_bytes()  # originals untouched
@@ -172,6 +181,6 @@ def test_cli_run_exit_code_reflects_failures(corpus, tmp_path, capsys):
     ws = Workspace(tmp_path / "ws")
     assert cli(["init", "--workspace", str(ws.root)]) == 0
     ws.profile_path.write_text(json.dumps(profile))
-    image_only_pdf(ws.inbox / "bad.pdf", f"SSN {profile['people'][0]['ssn']}")
+    locked_pdf(ws.inbox / "bad.pdf")
     assert cli(["run", "--workspace", str(ws.root)]) == 1
     assert "FAIL" in capsys.readouterr().out

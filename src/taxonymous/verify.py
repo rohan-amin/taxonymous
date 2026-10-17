@@ -5,23 +5,20 @@ Checks, all fail-closed:
   text       the PDF text layer and the .txt contain no known value (anything redacted
              from this document, any profile value in any format) and no identifier-shaped
              pattern; placeholders are ignored
-  ocr        the same, on Tesseract OCR of every rendered page, so text that was only
-             covered (not removed) or that lives in image pixels is still caught
+  ocr        the same, on Tesseract OCR of every rendered page (both OCR passes), so text
+             that was only covered (not removed) or that lives in image pixels is still
+             caught; matching tolerates the digits and letters OCR confuses
 
 Issues never contain real values: only the kind of value, the check, and the page.
 """
 
-import os
 import re
-import shutil
-import subprocess
-import tempfile
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import pymupdf
 
+from . import ocr as ocr_mod
 from .detect import ProfileMatcher, digits, pattern_hits
 from .pagetext import PageText
 
@@ -29,6 +26,8 @@ PLACEHOLDER_RE = re.compile(r"<[A-Z]+_[A-Z0-9]+>")
 MASK_RE = re.compile(r"[*Xx•#]{2,}")
 # characters Tesseract commonly reads in place of each digit
 CONFUSABLE = {"0": "0Oo", "1": "1Il|i", "2": "2Z", "5": "5S", "6": "6b", "8": "8B", "9": "9g"}
+# letters OCR swaps for each other in words ("Iyer" read as "lyer")
+LETTER_FOLD = str.maketrans({"l": "i", "1": "i", "|": "i", "!": "i", "0": "o", "5": "s", "8": "b"})
 OCR_DPI = 200
 
 
@@ -58,8 +57,11 @@ class Known:
     value: str
 
 
-def _squash(s: str) -> str:
-    return " " + re.sub(r"[^a-z0-9]+", " ", s.lower()).strip() + " "
+def _squash(s: str, fuzzy: bool = False) -> str:
+    s = s.lower()
+    if fuzzy:
+        s = s.translate(LETTER_FOLD).replace("rn", "m")
+    return " " + re.sub(r"[^a-z0-9]+", " ", s).strip() + " "
 
 
 def _digit_regex(ds: str, fuzzy: bool) -> re.Pattern:
@@ -73,7 +75,7 @@ class Scanner:
     def __init__(self, matcher: ProfileMatcher, known: list[Known]):
         self.matcher = matcher
         self.numbers: list[tuple[str, re.Pattern, re.Pattern]] = []
-        self.words: list[tuple[str, str]] = []
+        self.words: list[tuple[str, str, str]] = []
         for k in known:
             if MASK_RE.search(k.value):
                 continue  # masked forms are caught by the pattern check
@@ -82,15 +84,15 @@ class Scanner:
             if len(ds) >= 7 and len(ds) >= len(letters):
                 self.numbers.append((k.kind, _digit_regex(ds, False), _digit_regex(ds, True)))
             elif len(_squash(k.value).strip()) >= 4:
-                self.words.append((k.kind, _squash(k.value)))
+                self.words.append((k.kind, _squash(k.value), _squash(k.value, True)))
 
     def scan(self, text: str, fuzzy: bool = False) -> list[str]:
         """Kinds of everything that should not be in this text."""
         text = PLACEHOLDER_RE.sub(" ", text)
         found = [kind for m, kind in pattern_hits(text)]
         found += [f.kind for f in self.matcher.find(PageText(0, text))]
-        squashed = _squash(text)
-        found += [kind for kind, value in self.words if value in squashed]
+        squashed = _squash(text, fuzzy)
+        found += [kind for kind, exact, loose in self.words if (loose if fuzzy else exact) in squashed]
         found += [kind for kind, exact, loose in self.numbers if (loose if fuzzy else exact).search(text)]
         return found
 
@@ -120,16 +122,6 @@ def _structure(doc: pymupdf.Document) -> list[Issue]:
     return issues
 
 
-def _ocr_page(page_png: bytes) -> str:
-    with tempfile.TemporaryDirectory() as tmp:
-        img = Path(tmp) / "page.png"
-        img.write_bytes(page_png)
-        proc = subprocess.run(["tesseract", str(img), "stdout"], capture_output=True, text=True, timeout=300)
-        if proc.returncode != 0:
-            raise RuntimeError(f"tesseract failed: {proc.stderr.strip()[:200]}")
-        return proc.stdout
-
-
 def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | None = None,
            ocr: bool = True) -> Report:
     report = Report(pdf=str(pdf), ocr=ocr)
@@ -141,15 +133,17 @@ def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | N
         for page in doc:
             report.issues += [Issue("text", k, page.number + 1) for k in scanner.scan(page.get_text())]
         if txt is not None:
-            report.issues += [Issue("txt", k) for k in scanner.scan(Path(txt).read_text())]
+            # text from scanned pages is OCR output, so it gets OCR tolerance too
+            report.issues += [Issue("txt", k) for k in scanner.scan(Path(txt).read_text(), fuzzy=True)]
         if ocr:
-            if shutil.which("tesseract") is None:
-                raise RuntimeError("tesseract is not installed; cannot OCR-verify (brew install tesseract)")
+            ocr_mod.require()
             images = [p.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY).tobytes("png") for p in doc]
-            with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
-                texts = list(pool.map(_ocr_page, images))
-            for n, text in enumerate(texts, start=1):
-                report.issues += [Issue("ocr", k, n) for k in scanner.scan(text, fuzzy=True)]
+            texts = iter(ocr_mod.run_all([(png, psm) for png in images for psm in ocr_mod.PASSES]))
+            for n in range(1, len(images) + 1):
+                found = set()
+                for _ in ocr_mod.PASSES:
+                    found.update(scanner.scan(next(texts), fuzzy=True))
+                report.issues += [Issue("ocr", k, n) for k in sorted(found)]
     except Exception as e:  # anything unexpected is a failure, never a pass
         report.issues.append(Issue("error", type(e).__name__, detail=str(e)[:300]))
     report.passed = not report.issues

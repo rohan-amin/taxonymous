@@ -16,7 +16,7 @@ from pathlib import Path
 from .detect import ProfileMatcher
 from .pipeline import Workspace, run
 from .profile import Profile
-from .redact import redact_pdf
+from .redact import redact_file
 from .vault import Vault
 from .verify import Known, verify
 
@@ -37,11 +37,11 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="command", required=True)
 
     _workspace_arg(sub.add_parser("init", help="create the workspace folders"))
-    r = sub.add_parser("run", help="redact and verify every PDF in inbox/")
+    r = sub.add_parser("run", help="redact and verify every PDF and image in inbox/")
     _workspace_arg(r)
     r.add_argument("--no-ocr", action="store_true", help="skip OCR verification (not for real use)")
 
-    rd = sub.add_parser("redact", help="redact text-layer PDFs without verifying")
+    rd = sub.add_parser("redact", help="redact PDFs and images without verifying")
     rd.add_argument("files", nargs="+", type=Path)
     rd.add_argument("--profile", type=Path, required=True, help="your identifiers (JSON)")
     rd.add_argument("--out", type=Path, default=Path("work"), help="output folder")
@@ -72,14 +72,14 @@ def main(argv: list[str] | None = None) -> int:
         if failed:
             print(f"{len(failed)} file(s) held back; details in {ws.work}/*.report.json", file=sys.stderr)
         if not outcomes:
-            print(f"Nothing to do: {ws.inbox} has no PDFs.")
+            print(f"Nothing to do: {ws.inbox} has no PDFs or images.")
         return 1 if failed else 0
 
     matcher = ProfileMatcher(Profile.load(args.profile))
     if args.command == "redact":
         vault = Vault(args.vault / "placeholders.json")
         for f in args.files:
-            res = redact_pdf(f, args.out, matcher, vault)
+            res = redact_file(f, args.out, matcher, vault)
             summary = ", ".join(f"{k} {n}" for k, n in sorted(res.counts().items()))
             print(f"{f.name}: {len(res.findings)} redactions ({summary}) -> {res.pdf}")
         print("Not verified: run `taxonymous verify` or use `taxonymous run`.", file=sys.stderr)

@@ -25,7 +25,15 @@ def generate(out_dir: Path, seed: int = 7, brokerage_pages: int = 30) -> dict:
     records += [
         degrade.scan(by_file["w2.pdf"], out_dir, out_dir, "w2_scan", [1], seed),
         degrade.scan(by_file["k1_1065.pdf"], out_dir, out_dir, "k1_1065_scan", [0], seed),
+        degrade.scan(by_file["1099_int.pdf"], out_dir, out_dir, "1099_int_scan", [0], seed),
+        degrade.scan(by_file["1099_r.pdf"], out_dir, out_dir, "1099_r_scan", [0], seed),
+        degrade.scan(by_file["ira_statement.pdf"], out_dir, out_dir, "ira_statement_scan", [0], seed),
+        degrade.scan(by_file["brokerage_consolidated.pdf"], out_dir, out_dir, "brokerage_scan", [0, 1], seed),
         degrade.photo(by_file["receipt.pdf"], out_dir, out_dir, "receipt_photo", seed),
+        degrade.photo(by_file["daf_acknowledgment.pdf"], out_dir, out_dir, "daf_photo", seed),
+        degrade.scanner_ocr(by_file["1099_div.pdf"], out_dir, out_dir, "1099_div_scanner_ocr", seed),
+        degrade.attach(by_file["daf_acknowledgment.pdf"], by_file["receipt.pdf"], out_dir, out_dir,
+                       "daf_with_receipt"),
     ]
     manifest = {"seed": seed, "documents": [r.to_json() for r in records]}
     (out_dir / "household.json").write_text(json.dumps(hh.profile(), indent=2) + "\n")

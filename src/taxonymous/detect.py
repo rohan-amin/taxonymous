@@ -42,7 +42,11 @@ ID_VALUE_RE = re.compile(r"(?<![\w*•#-])(?=(?:[A-Za-z*•#-]*\d){5})[A-Za-z0-9
 # words printed on forms; a "name" made only of these is a caption, not a person
 FORM_WORDS = {"state", "city", "town", "country", "zip", "code", "postal", "province", "total", "amount",
               "date", "yes", "no", "see", "instructions", "part", "line", "box", "form", "page", "schedule",
-              "copy", "void", "corrected", "other", "and", "or", "of", "the", "number", "local", "federal"}
+              "copy", "void", "corrected", "other", "and", "or", "of", "the", "number", "local", "federal",
+              # the parties a form's captions talk about ("Employer's state", "Payer's TIN")
+              "s", "employer", "employee", "payer", "recipient", "partner", "partnership", "shareholder",
+              "beneficiary", "filer", "borrower", "lender", "student", "transferor", "owner", "holder",
+              "trustee", "corporation", "estate", "trust", "id", "tin", "ein", "ssn"}
 STREET_SUFFIX = (r"st|street|ave|avenue|ln|lane|ct|court|rd|road|way|blvd|boulevard|dr|drive|pl|place|"
                  r"ter|terrace|cir|circle|pkwy|parkway|hwy|highway|trl|trail|sq|square|loop|row")
 STREET_RE = re.compile(
@@ -226,9 +230,12 @@ LABELS: list[tuple[re.Pattern, str, str]] = [
     (re.compile(r"social security number|\bssn\b|\bi?tin\b|identification number|identifying number|"
                 r"\bein\b|taxpayer id", IC), "tin", "TIN"),
     (re.compile(r"date of birth|\bdob\b|birth ?date", IC), "date", "DOB"),
+    (re.compile(r"\b(?:visa|mastercard|amex|american express|discover)\b|card (?:number|no\b\.?|#)|"
+                r"\bending in\b", IC), "card", "CARD"),
     (re.compile(r"\bname\b|\baddress\b|^\s*recipient\s*$|account holder|^\s*beneficiar(?:y|ies)\s*$", IC),
      "name", "NAME"),
 ]
+CARD_TOKEN_RE = re.compile(r"[\d*•#]")
 LABEL_CONTINUATION_RE = re.compile(
     r"\b(?:postal|zip|code|telephone|foreign|province|country|instructions|city or town|apt\. no)\b", IC)
 
@@ -248,6 +255,8 @@ def _value_in(text: str, vtype: str) -> tuple[int, int] | None:
         m = TIN_VALUE_RE.search(text)
     elif vtype == "date":
         m = DATE_RE.search(text)
+    elif vtype == "card":
+        return _card_value(text)
     elif vtype == "id":
         m = next((m for m in ID_VALUE_RE.finditer(text)
                   if not is_amount(m.group()) and not DATE_RE.fullmatch(m.group())), None)
@@ -262,6 +271,20 @@ def _value_in(text: str, vtype: str) -> tuple[int, int] | None:
         start = text.index(s)
         return start, start + len(s)
     return (m.start(), m.end()) if m else None
+
+
+def _card_value(text: str) -> tuple[int, int] | None:
+    """The card number after a brand name, however OCR mangled its mask:
+    'VISA **##88*94444' -> '**##88*94444'. Stops at an amount or a word."""
+    span = None
+    for m in re.finditer(r"\S+", text):
+        tok = m.group()
+        if is_amount(tok) or (span is None and not CARD_TOKEN_RE.search(tok)):
+            break
+        if not CARD_TOKEN_RE.search(tok) and len(tok) > 2:
+            break
+        span = (span[0] if span else m.start(), m.end())
+    return span
 
 
 def _name_kind(text: str) -> str:
@@ -324,7 +347,7 @@ def find_labels(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
                     emit(offset + hit[0], offset + hit[1], kind)
                     continue
             # value in the box below the label
-            if vtype in ("id", "tin"):
+            if vtype in ("id", "tin", "card"):
                 hit = _single_value_below(pt, line, vtype)
                 if hit:
                     emit(*hit, kind)
@@ -350,8 +373,8 @@ def find_labels(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
                     break
                 emit(ln.start + hit[0], ln.start + hit[1], kind)
                 prev_bottom, taken = ln.rect.y1, taken + 1
-                if taken >= limit:
-                    break
+                if taken >= limit or CITY_LINE_RE.search(text):
+                    break  # an address block ends with its city, state and ZIP
     return out
 
 

@@ -1,4 +1,4 @@
-"""Turn clean fixtures into scans and phone photos.
+"""Turn clean fixtures into scans, phone photos and mixed PDFs.
 
 All randomness comes from a seeded Random so output is reproducible.
 """
@@ -58,8 +58,56 @@ def scan(src_rec: DocRecord, src_dir: Path, out_dir: Path, name: str, pages: lis
     return rec
 
 
+def scanner_ocr(src_rec: DocRecord, src_dir: Path, out_dir: Path, name: str, seed: int) -> DocRecord:
+    """What a scanner with built-in OCR produces: the page as an image, plus an invisible
+    text layer of the same words on top of it."""
+    rng = Random(f"{seed}:scanner_ocr:{name}")
+    src = src_dir / src_rec.file
+    redact, keep = _subset(src_rec, src, [0])
+    rec = DocRecord(file=f"{name}.pdf", source=f"scanner-ocr:{src_rec.source}", kind="mixed",
+                    redact=redact, keep=keep)
+    original = pymupdf.open(src)[0]
+    img = _noise(_render(src, 0, 200), rng, 0.05)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=70)
+    doc = pymupdf.open()
+    page = doc.new_page(width=original.rect.width, height=original.rect.height)
+    page.insert_image(page.rect, stream=buf.getvalue())
+    for block in original.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            spans = line["spans"]
+            text = "".join(s["text"] for s in spans)
+            if text.strip():
+                page.insert_text(spans[0]["origin"], text, fontsize=spans[0]["size"], render_mode=3)
+    doc.set_metadata({})
+    doc.save(out_dir / rec.file, garbage=4, deflate=True, no_new_id=True)
+    return rec
+
+
+def attach(host_rec: DocRecord, pic_rec: DocRecord, src_dir: Path, out_dir: Path, name: str) -> DocRecord:
+    """A text PDF with a scanned picture of another document on an extra page
+    (a letter with a copy of a receipt attached)."""
+    host, pic = src_dir / host_rec.file, src_dir / pic_rec.file
+    pic_redact, pic_keep = _subset(pic_rec, pic, [0])
+    rec = DocRecord(file=f"{name}.pdf", source=f"attach:{host_rec.source}+{pic_rec.source}", kind="mixed",
+                    redact=host_rec.redact + [i for i in pic_redact if i not in host_rec.redact],
+                    keep=host_rec.keep + [i for i in pic_keep if i not in host_rec.keep])
+    doc = pymupdf.open(host)
+    img = _render(pic, 0, 200)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=75)
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 72), "Attachment: copy of receipt", fontsize=12)
+    width = 300
+    page.insert_image(pymupdf.Rect(72, 90, 72 + width, 90 + width * img.height / img.width),
+                      stream=buf.getvalue())
+    doc.set_metadata({})
+    doc.save(out_dir / rec.file, garbage=4, deflate=True, no_new_id=True)
+    return rec
+
+
 def photo(src_rec: DocRecord, src_dir: Path, out_dir: Path, name: str, seed: int) -> DocRecord:
-    """JPEG that looks like a phone photo of a paper receipt on a table."""
+    """JPEG that looks like a phone photo of a paper document on a table."""
     rng = Random(f"{seed}:photo:{name}")
     src = src_dir / src_rec.file
     redact, keep = _subset(src_rec, src, [0])
