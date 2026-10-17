@@ -2,7 +2,7 @@
 
 Scrub personal identifiers from tax documents **on your own machine**, so you can share them with an AI assistant (e.g. Claude) for review without exposing who you are.
 
-> **Status:** early development. Text PDFs (M1), scans and photos (M3), and long and free-form documents with names in prose (M4) are redacted, and every output is verified, including by OCR, before release (M2). Nothing has been tested on real documents yet, so **do not rely on it yet**. See [`docs/PLAN.md`](docs/PLAN.md).
+> **Status:** early development. Text PDFs (M1), scans and photos (M3), and long and free-form documents with names in prose (M4) are redacted, and every output is verified, including by OCR, before release (M2). A local API for the coming review UI is in place (M5). Nothing has been tested on real documents yet, so **do not rely on it yet**. See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## What it will do
 
@@ -21,6 +21,8 @@ uv run taxonymous init --workspace ~/Dropbox/Taxes/taxonymous   # creates inbox/
 # PDFs and photos (JPG, PNG, HEIC, TIFF) in inbox/
 uv run taxonymous run --workspace ~/Dropbox/Taxes/taxonymous
 ```
+
+`uv run taxonymous serve --workspace ...` starts the local API that the review UI (coming in M6) talks to. It only listens on 127.0.0.1 and prints a token that every request needs.
 
 Only files that pass verification are copied to `ready-to-upload/`. Failures stay in `work/` with a `*.report.json` that names the kind of leak and the page, never the value.
 

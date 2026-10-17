@@ -32,9 +32,16 @@ class Vault:
             self.by_key[key] = ph
             self.entries[ph] = {"kind": kind, "key": key, "values": []}
         values = self.entries[ph]["values"]
-        if value not in values:
+        if value and value not in values:
             values.append(value)
         return ph
+
+    def forget(self, key: str) -> None:
+        """Drop an identity (a reviewer removed the box they drew), so its value is no
+        longer a known value that verification looks for."""
+        ph = self.by_key.pop(key, None)
+        if ph is not None:
+            self.entries.pop(ph, None)
 
     def save(self) -> None:
         if self.path:

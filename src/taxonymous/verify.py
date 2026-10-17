@@ -11,10 +11,13 @@ Checks, all fail-closed:
              anything with an image) get both OCR passes; dense text pages (statements,
              letters) get the layout pass, which is what reads dense text best
 
+Values the reviewer chose to keep in the clear (`allowed`) are not leaks.
+
 Issues never contain real values: only the kind of value, the check, and the page.
 """
 
 import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -75,12 +78,13 @@ def _digit_regex(ds: str, fuzzy: bool) -> re.Pattern:
 class Scanner:
     """Finds known values and identifier patterns in a block of text."""
 
-    def __init__(self, matcher: ProfileMatcher, known: list[Known]):
+    def __init__(self, matcher: ProfileMatcher, known: list[Known], allowed: Iterable[str] = ()):
         self.matcher = matcher
+        self.allowed = {_squash(a) for a in allowed}
         self.numbers: list[tuple[str, re.Pattern, re.Pattern]] = []
         self.words: list[tuple[str, str, str]] = []
         for k in known:
-            if MASK_RE.search(k.value):
+            if MASK_RE.search(k.value) or _squash(k.value) in self.allowed:
                 continue  # masked forms are caught by the pattern check
             ds = digits(k.value)
             letters = re.sub(r"[^A-Za-z]", "", k.value)
@@ -92,8 +96,8 @@ class Scanner:
     def scan(self, text: str, fuzzy: bool = False) -> list[str]:
         """Kinds of everything that should not be in this text."""
         text = PLACEHOLDER_RE.sub(" ", text)
-        found = [kind for m, kind in pattern_hits(text)]
-        found += [f.kind for f in self.matcher.find(PageText(0, text))]
+        found = [kind for m, kind in pattern_hits(text) if _squash(m.group()) not in self.allowed]
+        found += [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
         squashed = _squash(text, fuzzy)
         found += [kind for kind, exact, loose in self.words if (loose if fuzzy else exact) in squashed]
         found += [kind for kind, exact, loose in self.numbers if (loose if fuzzy else exact).search(text)]
@@ -132,9 +136,9 @@ def _passes(page: pymupdf.Page) -> tuple[str, ...]:
 
 
 def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | None = None,
-           ocr: bool = True) -> Report:
+           ocr: bool = True, allowed: Iterable[str] = ()) -> Report:
     report = Report(pdf=str(pdf), ocr=ocr)
-    scanner = Scanner(matcher, known)
+    scanner = Scanner(matcher, known, allowed)
     try:
         doc = pymupdf.open(pdf)
         report.pages = doc.page_count

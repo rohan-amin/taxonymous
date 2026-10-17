@@ -11,10 +11,13 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "en-core-web-trf",
+    "fastapi>=0.143.3",
     "pillow>=13.0.0",
     "pillow-heif>=1.8.1",
     "pymupdf>=1.28.2",
+    "python-multipart>=0.0.32",
     "spacy>=3.8.16",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
@@ -26,6 +29,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest>=9.1.1",
     "ruff>=0.17.1",
 ]
@@ -38,6 +42,7 @@ markers = ["slow: long-running acceptance tests (run with: uv run pytest -m slow
 filterwarnings = [
     "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
     "ignore:`torch.jit.script` is deprecated:FutureWarning",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
 ]
 
 [tool.ruff]

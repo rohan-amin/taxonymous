@@ -2,9 +2,10 @@
 
 <workspace>/
   inbox/              originals (never modified): PDFs, scans, photos
-  work/               redacted outputs and verification reports, including failures
+  work/               redacted outputs, box lists and verification reports, including failures
   ready-to-upload/    only files whose verification passed
-  vault/              profile.json (your identifiers) and placeholders.json
+  vault/              profile.json (your identifiers), placeholders.json, and overrides/
+                      (the reviewer's per-document decisions)
 """
 
 import json
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from .detect import ProfileMatcher
 from .profile import Profile
-from .redact import SUFFIXES, output_stem, redact_file
+from .redact import SUFFIXES, Overrides, Result, output_stem, redact_file
 from .vault import Vault
 from .verify import Issue, Known, Report, verify
 
@@ -24,6 +25,7 @@ class Outcome:
     source: Path
     report: Report
     released: list[Path]
+    result: Result | None = None
 
 
 class Workspace:
@@ -42,30 +44,79 @@ class Workspace:
     def pending(self) -> list[Path]:
         return sorted(p for p in self.inbox.iterdir() if p.suffix.lower() in SUFFIXES)
 
+    def overrides_path(self, stem: str) -> Path:
+        return self.vault_dir / "overrides" / f"{stem}.json"
 
-def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr: bool = True) -> Outcome:
+    def outputs(self, stem: str) -> dict[str, Path]:
+        return {"pdf": self.work / f"{stem}.redacted.pdf", "txt": self.work / f"{stem}.redacted.txt",
+                "report": self.work / f"{stem}.report.json", "regions": self.work / f"{stem}.regions.json"}
+
+    def released(self, stem: str) -> list[Path]:
+        return [self.ready / f"{stem}.redacted.pdf", self.ready / f"{stem}.redacted.txt"]
+
+
+def allowed_values(vault: Vault, overrides: Overrides) -> set[str]:
+    """The real values behind the placeholders a reviewer kept in the clear."""
+    return {v for ph in overrides.keep for v in vault.entries.get(ph, {}).get("values", [])}
+
+
+def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr: bool = True,
+            release: bool = True) -> Outcome:
+    """Redact and verify one file. `release` copies it to ready-to-upload/ when it passes;
+    the review UI releases separately, on export."""
     stem = output_stem(Path(src))
-    ready = [ws.ready / f"{stem}.redacted.pdf", ws.ready / f"{stem}.redacted.txt"]
-    for old in ready:  # never leave a stale release behind if this run fails
+    for old in ws.released(stem):  # never leave a stale release behind if this run fails
         old.unlink(missing_ok=True)
+    out = ws.outputs(stem)
+    overrides = Overrides.load(ws.overrides_path(stem))
 
     try:
-        result = redact_file(src, ws.work, matcher, vault)
+        result = redact_file(src, ws.work, matcher, vault, overrides)
     except Exception as e:  # one unreadable file (locked, corrupt) is held back; the rest still run
         result = None
         report = Report(pdf=str(src), issues=[Issue("error", type(e).__name__, detail=str(e)[:300])])
+        out["regions"].unlink(missing_ok=True)
     else:
-        known = [Known(f.kind, f.text) for f in result.findings]
-        known += [Known(e["kind"], v) for e in vault.entries.values() for v in e["values"]]
-        report = verify(result.pdf, matcher, known, result.text, ocr=ocr)
-    (ws.work / f"{stem}.report.json").write_text(json.dumps(report.to_json(), indent=2) + "\n")
+        found = [Known(f.kind, f.text) for f in result.findings]
+        report = _verify(ws, stem, matcher, vault, overrides, found, ocr)
+        out["regions"].write_text(json.dumps(result.regions_json(), indent=2) + "\n")
+    out["report"].write_text(json.dumps(report.to_json(), indent=2) + "\n")
+    outcome = Outcome(Path(src), report, [], result)
+    if release:
+        outcome.released = export(ws, stem)
+    return outcome
 
-    released: list[Path] = []
-    if report.passed and result is not None:
-        for built, dest in zip((result.pdf, result.text), ready, strict=True):
-            shutil.copyfile(built, dest)
-            released.append(dest)
-    return Outcome(Path(src), report, released)
+
+def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, overrides: Overrides,
+            known: list[Known], ocr: bool) -> Report:
+    """Everything this document's redaction found, and every value in the vault (from any
+    document), except what the reviewer kept in the clear here."""
+    allowed = allowed_values(vault, overrides)
+    known = known + [Known(e["kind"], v) for e in vault.entries.values() for v in e["values"]]
+    out = ws.outputs(stem)
+    return verify(out["pdf"], matcher, [k for k in known if k.value not in allowed], out["txt"], ocr=ocr,
+                  allowed=allowed)
+
+
+def reverify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, ocr: bool = True) -> Report:
+    """Verify a document's current output again, without redacting it again."""
+    for old in ws.released(stem):
+        old.unlink(missing_ok=True)
+    report = _verify(ws, stem, matcher, vault, Overrides.load(ws.overrides_path(stem)), [], ocr)
+    ws.outputs(stem)["report"].write_text(json.dumps(report.to_json(), indent=2) + "\n")
+    return report
+
+
+def export(ws: Workspace, stem: str) -> list[Path]:
+    """Copy a document's outputs to ready-to-upload/, only if its last verification passed."""
+    out = ws.outputs(stem)
+    if not out["report"].exists() or not json.loads(out["report"].read_text()).get("passed"):
+        return []
+    released = []
+    for built, dest in zip((out["pdf"], out["txt"]), ws.released(stem), strict=True):
+        shutil.copyfile(built, dest)
+        released.append(dest)
+    return released
 
 
 def run(ws: Workspace, ocr: bool = True) -> list[Outcome]:

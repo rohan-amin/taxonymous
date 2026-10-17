@@ -4,6 +4,7 @@
   taxonymous run    --workspace DIR     redact + verify everything in inbox/
   taxonymous redact FILE... --profile P --out DIR --vault DIR     (no verification)
   taxonymous verify FILE --profile P [--vault DIR] [--no-ocr]
+  taxonymous serve  --workspace DIR [--port N]    local API for the review UI (loopback only)
 """
 
 import argparse
@@ -53,7 +54,21 @@ def main(argv: list[str] | None = None) -> int:
     vf.add_argument("--vault", type=Path, help="placeholder map folder (adds every vaulted value)")
     vf.add_argument("--txt", type=Path, help="placeholder text file to check too")
     vf.add_argument("--no-ocr", action="store_true")
+
+    sv = sub.add_parser("serve", help="run the local API for the review UI (127.0.0.1 only)")
+    _workspace_arg(sv)
+    sv.add_argument("--host", default="127.0.0.1", help="loopback address (127.0.0.1, ::1, localhost)")
+    sv.add_argument("--port", type=int, default=8765)
     args = ap.parse_args(argv)
+
+    if args.command == "serve":
+        from .api import serve
+        try:
+            serve(Workspace(args.workspace), args.host, args.port)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
+        return 0
 
     if args.command == "init":
         ws = Workspace(args.workspace)

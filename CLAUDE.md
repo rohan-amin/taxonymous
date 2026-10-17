@@ -22,6 +22,7 @@ Open-source tool that scrubs sensitive information from tax documents (1099s, W-
 - `uv run pytest` / `uv run ruff check .`; `uv run pytest -m slow` adds the 150-page timing test
 - `uv run python -m tools.fixtures.generate` builds the fake corpus into `tests/fixtures/generated/` (gitignored); `manifest.json` there is the ground truth (`redact` / `keep` per document).
 - `uv run taxonymous init|run --workspace DIR` (inbox → work → verify → ready-to-upload); `redact` and `verify` for single files. Takes PDFs (text, scanned, mixed) and photos.
+- `uv run taxonymous serve --workspace DIR` runs the local API (127.0.0.1 only, token required); endpoints are listed in `src/taxonymous/api.py`.
 - Pre-commit PII guard: `git config core.hooksPath .githooks` (runs `tools/check_pii.py`).
 
 ## Rules
@@ -31,4 +32,4 @@ Open-source tool that scrubs sensitive information from tax documents (1099s, W-
 
 ## Open questions
 
-- None blocking. M0–M2 done 2026-10-16, M3 (scans and photos) and M4 (long and free-form documents) 2026-10-17; next is M5 (local API).
+- None blocking. M0–M2 done 2026-10-16, M3 (scans and photos), M4 (long and free-form documents) and M5 (local API) 2026-10-17; next is M6 (review UI).

@@ -104,9 +104,15 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
   - Verification gives dense text pages (no images, > 1,500 characters) one OCR pass instead of two; that halves its time on long statements.
   - Cost: the model is 436 MB and pulls in PyTorch (the venv is ~1.2 GB). Loading it takes ~6 s and peaks at 2.7 GB of memory, 0.9 GB resident after. It loads only when a document has prose.
 
-### M5 — Local API
+### M5 — Local API ✅ (2026-10-17)
 - FastAPI bound to `127.0.0.1` only: upload, run, status, fetch original/redacted page images, add/remove a redaction, re-verify, export
 - **Accept:** a test asserts the server refuses non-loopback binds. A test monkeypatches `socket` to fail on any outbound connection and the full pipeline still runs.
+- **Result:** `taxonymous serve --workspace DIR` (`src/taxonymous/api.py` lists the endpoints). `tests/test_api.py` refuses every socket connection and name lookup for the whole module. Under that, it uploads a text PDF, a scan and a photo; processes them (OCR and the name model included); adds and removes boxes; keeps and un-keeps a detection; re-verifies; and exports. It then asserts that nothing tried to connect. Binding to `0.0.0.0`, `::`, LAN addresses or host names is refused before anything starts.
+- How it works:
+  - Access: loopback bind only; requests must name a loopback host (blocks DNS rebinding); every request needs the token printed at launch (header, or `?token=` for `<img>` URLs), so another site open in the same browser can't drive the API. No CORS, no docs endpoints.
+  - One worker thread runs every redaction and verification, so the vault and outputs have a single writer. Every reviewer change re-runs the document; export is refused while it is queued or running, or if its last verification did not pass. The API never releases on its own, unlike `taxonymous run`.
+  - Reviewer decisions live in `vault/overrides/<doc>.json` as placeholders and boxes, never values. A drawn box becomes `<REDACTED_n>`. The text under it (text layer, or what OCR read inside it) becomes a known value, so verification checks it is gone. Removing a detected box keeps that placeholder in the clear in this document only. Verification then treats those values as allowed, and they stay redacted everywhere else.
+  - Boxes are listed per document in `work/<doc>.regions.json` (page, rectangle, placeholder, kind, detector) for the UI to draw. Original and redacted page images share page coordinates.
 
 ### M6 — Review UI
 - React + TS (Vite): document list with pass/fail, side-by-side original/redacted viewer, click-to-redact / click-to-unredact, re-verify, export
@@ -116,7 +122,7 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 - Fuzz the redactor with odd PDFs (rotated pages, Type3 fonts, text drawn as vector paths, incremental updates, encrypted PDFs)
 - Native wrapper spike (pywebview vs Tauri)
 
-## Known limitations after M4
+## Known limitations after M5
 
 - Scanned pages are output as images, so they are bigger than the original and have no text layer except placeholders; the `.txt` carries the (redacted) OCR text instead.
 - OCR word boxes are sometimes taller than the text. The padded black box can then clip the top of the line below (seen once in 40 degraded fixtures).
@@ -126,6 +132,8 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 - The name model can still miss a name; a surname alone is caught reliably only when the full name also appears in the document.
 - A bare 7+ digit number on a scan is treated as an ID, so an amount OCR misread without its decimal point (`15,158.60` read as `1515880`) is redacted. A few amounts per 300 on degraded scans.
 - The 150-page timing is on a 14-core M4 Pro; verification is CPU-bound, so a Mac with fewer cores will be slower.
+- Keeping a placeholder in the clear also keeps any shorter value that verification would otherwise flag inside it. It is a reviewer decision, and the review UI should make it a deliberate one.
+- Every reviewer change re-runs the whole document, which is slow for a long scan (a few seconds per page).
 - The public vs. private organization split is a keyword heuristic (`bank`, `securities`, `charitable`… versus `LLC`, `LP`, `family trust`). The review UI (M6) is the backstop.
 - Your first and last names are matched on their own anywhere in the text, so a first name that is also a common word (e.g. "Grant") will be over-redacted.
 - The label detector was developed against the corpus layouts. Of four held-out types, one passed untouched and three needed generic fixes; expect real documents to find more gaps, which is what review (M6) is for.
