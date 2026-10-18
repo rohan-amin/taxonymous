@@ -187,3 +187,21 @@ def test_long_bare_numbers_are_ids_but_amounts_and_form_numbers_are_not(matcher,
 def test_a_role_and_a_colon_label_a_name(matcher):
     pt = page((72, 72, "Provider: Cyrus Pemberton"), (72, 86, "Executor: Ines Valdivia"))
     assert texts(pt, matcher) == ["Cyrus Pemberton", "Ines Valdivia"]
+
+
+@pytest.mark.parametrize("later", ["EIN004869455", "ID00-4869455", "00 4869455", "(00)4869455"])
+def test_a_number_found_on_one_page_is_redacted_however_another_prints_it(tmp_path, later):
+    """A W-2 statement names the employer's EIN normally on page 1 and prints it run
+    together with a label or spaced differently further on. Verification matches a number
+    by its digits, so redaction has to as well."""
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 90), "Employer identification number (EIN): 00-4869455", fontsize=10)
+    doc.new_page().insert_text((72, 90), f"State wage detail  {later}  Wages 1,234.56", fontsize=10)
+    doc.save(tmp_path / "statement.pdf")
+    matcher = ProfileMatcher(Profile.from_dict({"people": [{"name": "Avery F Abernathy"}]}))
+    vault = Vault(tmp_path / "vault.json")
+    result = redact_file(tmp_path / "statement.pdf", tmp_path / "out", matcher, vault)
+    known = [Known(f.kind, f.text) for f in result.findings]
+    report = verify(result.pdf, matcher, known, result.text, ocr=False)
+    assert report.passed, report.issues
+    assert "1,234.56" in pymupdf.open(result.pdf)[1].get_text()

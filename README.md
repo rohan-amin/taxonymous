@@ -28,7 +28,7 @@ Each document is shown original and redacted side by side; scrolling and paging 
 
 To try the review screen in a native window instead of the browser (an experiment, see [`docs/NATIVE.md`](docs/NATIVE.md)): `uv run --with pywebview python -m tools.native_window --workspace DIR`.
 
-Only files that pass verification are copied to `ready-to-upload/`. Failures stay in `work/` with a `*.report.json` that names the kind of leak and the page, never the value.
+Only files that pass verification are copied to `ready-to-upload/`. To see why one failed without revealing what it says, run `uv run taxonymous explain --workspace DIR file.pdf`: it shows each leak's surroundings with letters and digits masked. Failures stay in `work/` with a `*.report.json` that names the kind of leak and the page, never the value.
 
 ## Development
 

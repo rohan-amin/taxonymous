@@ -20,7 +20,12 @@ function issueText(d: DocDetail): string {
   const issues = d.report?.issues ?? d.issues;
   if (d.error) return d.error;
   if (!issues.length) return "";
-  return issues.map((i) => `${i.kind}${i.page ? ` on page ${i.page}` : ""} (${i.check})`).join(", ");
+  const counts = new Map<string, number>();
+  for (const i of issues) {
+    const key = `${i.kind}${i.page ? ` on page ${i.page}` : ""} (${i.check}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts].map(([key, n]) => `${key}${n > 1 ? ` ×${n}` : ""})`).join(", ");
 }
 
 export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged: () => void }) {

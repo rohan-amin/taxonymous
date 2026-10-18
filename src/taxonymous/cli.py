@@ -17,7 +17,7 @@ from pathlib import Path
 from .detect import ProfileMatcher
 from .pipeline import Workspace, run
 from .profile import Profile
-from .redact import redact_file
+from .redact import output_stem, redact_file
 from .vault import Vault
 from .verify import Known, verify
 
@@ -55,6 +55,10 @@ def main(argv: list[str] | None = None) -> int:
     vf.add_argument("--txt", type=Path, help="placeholder text file to check too")
     vf.add_argument("--no-ocr", action="store_true")
 
+    ex = sub.add_parser("explain", help="why a document failed verification, with every value masked")
+    _workspace_arg(ex)
+    ex.add_argument("document", help="its name in inbox/ (w2.pdf), or its id (w2)")
+    ex.add_argument("--no-ocr", action="store_true", help="skip re-reading pages with OCR (faster)")
     sv = sub.add_parser("serve", help="run the local API for the review UI (127.0.0.1 only)")
     _workspace_arg(sv)
     sv.add_argument("--host", default="127.0.0.1", help="loopback address (127.0.0.1, ::1, localhost)")
@@ -69,6 +73,18 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as e:
             print(e, file=sys.stderr)
             return 2
+        return 0
+
+    if args.command == "explain":
+        from .explain import explain, render
+        ws = Workspace(args.workspace)
+        stem = next((output_stem(p) for p in ws.pending() if args.document in (p.name, output_stem(p))), None)
+        if stem is None or not ws.outputs(stem)["report"].exists():
+            print(f"No processed document {args.document!r} in {ws.inbox}", file=sys.stderr)
+            return 2
+        issues = json.loads(ws.outputs(stem)["report"].read_text())["issues"]
+        print("Values are masked: letters are a/A and digits #, except common form words.\n")
+        print(render(explain(ws.root, stem, ocr=not args.no_ocr), issues))
         return 0
 
     if args.command == "init":

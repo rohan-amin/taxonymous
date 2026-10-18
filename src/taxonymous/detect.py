@@ -102,6 +102,22 @@ def luhn(ds: str) -> bool:
     return total % 10 == 0
 
 
+NUMBER_SEP = r"[\s.\-()/,]{0,2}"  # what may sit between the digits of the same number
+
+
+def number_regex(ds: str) -> str:
+    """The digits `ds` however they are spaced or punctuated, as their own number (not
+    inside a longer one). Verification uses the same rule, so whatever it would call
+    a copy of a value, redaction finds too."""
+    return r"(?<![0-9])" + NUMBER_SEP.join(ds) + r"(?![0-9])"
+
+
+def is_number_value(text: str) -> bool:
+    """Mostly digits and long enough to be matched by its digits alone."""
+    ds = digits(text)
+    return len(ds) >= 7 and len(ds) >= len(re.sub(r"[^A-Za-z]", "", text))
+
+
 def digit_pattern(value: str) -> str | None:
     ds = digits(value)
     if len(ds) < 4:
@@ -525,11 +541,16 @@ def _person(f: Finding) -> bool:
 
 
 def repeated(pt: PageText, found: list[Finding], values: dict[str, Finding]) -> list[Finding]:
-    """Occurrences of `values` on this page that nothing in `found` covers yet."""
+    """Occurrences of `values` on this page that nothing in `found` covers yet. A number is
+    found by its digits, however it is spaced or punctuated here."""
     taken = [(f.start, f.end) for f in found]
     out = []
     for text, f in values.items():
-        for m in re.finditer(r"(?<!\w)" + re.escape(text) + r"(?!\w)", pt.text):
+        if is_number_value(text):
+            pattern = number_regex(digits(text))
+        else:
+            pattern = r"(?<!\w)" + r"\s+".join(map(re.escape, text.split())) + r"(?!\w)"
+        for m in re.finditer(pattern, pt.text):
             if not any(m.start() < e and s < m.end() for s, e in taken):
                 out.append(Finding(pt.number, m.start(), m.end(), f.kind, f.key, "repeat", text))
                 taken.append((m.start(), m.end()))
