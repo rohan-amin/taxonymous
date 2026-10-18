@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { DragEvent } from "react";
 import { api, busy, token } from "./api";
 import type { DocSummary } from "./api";
+import { Details } from "./Details";
 import { Viewer } from "./Viewer";
 
 const ACCEPT = ".pdf,.jpg,.jpeg,.png,.tif,.tiff,.heic,.heif,.webp";
@@ -11,6 +12,16 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [hasProfile, setHasProfile] = useState<boolean | null>(null);
+  const [view, setView] = useState<"documents" | "details">("documents");
+
+  // until your details are saved there is nothing to redact against: start there
+  useEffect(() => {
+    api.profile().then((p) => {
+      setHasProfile(p.exists);
+      if (!p.exists) setView("details");
+    }).catch((err) => setError((err as Error).message));
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -63,6 +74,15 @@ export function App() {
   }
 
   const current = docs?.find((d) => d.id === selected) ?? null;
+  const runAll = async () => {
+    try {
+      await api.runAll();
+      setView("documents");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+    refresh();
+  };
   const counts = (d: DocSummary) => Object.values(d.redactions).reduce((a, b) => a + b, 0);
 
   return (
@@ -70,20 +90,26 @@ export function App() {
          onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)} onDrop={onDrop}>
       <aside className="sidebar">
         <div className="brand">Taxonymous</div>
+        <button type="button" className={`side-details${view === "details" ? " active" : ""}`}
+                onClick={() => setView("details")}>
+          Your details
+          {hasProfile === false && <span className="badge needed">needed</span>}
+        </button>
         <div className="side-actions">
           <label className="button">
             Add files
             <input type="file" multiple accept={ACCEPT} hidden
                    onChange={(e) => e.target.files && upload(e.target.files)} />
           </label>
-          <button type="button" onClick={async () => { await api.runAll(); refresh(); }}
-                  disabled={!docs?.length}>Run all</button>
+          <button type="button" onClick={runAll} disabled={!docs?.length || !hasProfile}
+                  title={hasProfile ? "Redact and verify every document" : "Add your details first"}>Run all</button>
         </div>
         {error && <div className="side-error">{error}</div>}
         <ul className="docs" data-testid="documents">
           {docs?.map((d) => (
             <li key={d.id}>
-              <button type="button" className={d.id === selected ? "active" : ""} onClick={() => setSelected(d.id)}>
+              <button type="button" className={d.id === selected && view === "documents" ? "active" : ""}
+                      onClick={() => { setSelected(d.id); setView("documents"); }}>
                 <span className="name">{d.name}</span>
                 <span className="meta">
                   <span className={`badge ${d.status}`}>{d.status}</span>
@@ -98,8 +124,9 @@ export function App() {
         <div className="foot muted">Everything stays on this computer.</div>
       </aside>
       <main>
-        {current ? <Viewer key={current.id} summary={current} onChanged={refresh} />
-                 : <div className="viewer empty">{docs ? "No document selected" : "Loading…"}</div>}
+        {view === "details" ? <Details onSaved={() => setHasProfile(true)} onRunAll={runAll} />
+          : current ? <Viewer key={current.id} summary={current} onChanged={refresh} />
+          : <div className="viewer empty">{docs ? "No document selected" : "Loading…"}</div>}
       </main>
     </div>
   );

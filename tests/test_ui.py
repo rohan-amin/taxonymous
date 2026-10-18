@@ -218,3 +218,61 @@ def test_clicking_a_box_can_leave_just_that_box_readable(page, site):
     app.state.worker.wait()
     wait_status(page, "passed")
     assert regions_of(page, placeholder) == before
+
+
+@pytest.fixture
+def fresh_page(browser, tmp_path):
+    """A first run: an empty workspace, no details yet."""
+    import uvicorn
+    ws = Workspace(tmp_path / "fresh")
+    app = create_app(ws, TOKEN, ocr=False)
+    port = free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    threading.Thread(target=server.run, daemon=True).start()
+    while not server.started:
+        time.sleep(0.05)
+    pg = browser.new_page(viewport={"width": 1500, "height": 950}, base_url=f"http://127.0.0.1:{port}")
+    errors: list[str] = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    pg.goto(f"/?token={TOKEN}")
+    yield pg, ws
+    pg.close()
+    server.should_exit = True
+    assert not errors
+
+
+def test_first_run_asks_for_your_details_in_a_form(fresh_page):
+    pg, ws = fresh_page
+    pg.get_by_role("heading", name="Your details").wait_for()
+    assert pg.get_by_role("button", name="Run all").is_disabled()
+
+    person = pg.get_by_test_id("person").first
+    person.get_by_label("Full name").fill("Avery F Abernathy")
+    person.get_by_label("SSN or ITIN").fill("987-65-432")  # a digit short
+    person.get_by_label("Date of birth").fill("04/07/1984")
+    pg.get_by_role("button", name="Add a person").click()
+    spouse = pg.get_by_test_id("person").nth(1)
+    spouse.get_by_label("Full name").fill("Quinn L Abernathy")
+    spouse.get_by_label("Who").select_option("spouse")
+    address = pg.get_by_test_id("address").first
+    address.get_by_label("Street").fill("5842 Fenwick Ave")
+    address.get_by_label("City").fill("Tacoma")
+    address.get_by_label("State").fill("WA")
+    address.get_by_label("ZIP").fill("98458")
+    pg.get_by_role("button", name="Add account number").click()
+    pg.get_by_label("Account number 1").fill("8320968305")
+
+    pg.get_by_role("button", name="Save").click()
+    pg.get_by_text("An SSN or ITIN has 9 digits.").wait_for()
+    assert not ws.profile_path.exists()
+
+    person.get_by_label("SSN or ITIN").fill("987654323")
+    pg.get_by_role("button", name="Save").click()
+    pg.wait_for_function("document.querySelector('[data-testid=details-message]')?.innerText === 'Saved.'")
+    saved = json.loads(ws.profile_path.read_text())
+    assert [p["role"] for p in saved["people"]] == ["taxpayer", "spouse"]
+    assert saved["people"][0]["ssn"] == "987-65-4323" and saved["accounts"] == ["8320968305"]
+    assert pg.locator(".badge.needed").count() == 0
+
+    pg.get_by_label("hide numbers on screen").check()
+    assert "secret" in person.get_by_label("SSN or ITIN").get_attribute("class")

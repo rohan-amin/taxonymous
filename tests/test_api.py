@@ -336,5 +336,69 @@ def test_a_change_is_not_exportable_until_it_has_run(server, monkeypatch):
     assert client.post(f"{W2}/export").status_code == 200
 
 
+# ---------------------------------------------------------------- your details
+
+@pytest.fixture
+def fresh(network_attempts, tmp_path):
+    """A workspace that has never been set up: no profile yet."""
+    ws = Workspace(tmp_path / "fresh")
+    app = create_app(ws, TOKEN, ocr=False)
+    return TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: TOKEN}), ws
+
+
+FORM = {
+    "people": [{"name": " Avery  F Abernathy ", "ssn": "987654323", "dob": "4/7/1984", "role": "taxpayer"},
+               {"name": "", "ssn": "", "dob": "", "role": "spouse"}],  # an empty row
+    "addresses": [{"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "wa", "zip": "98458"}],
+    "phones": ["(555) 555-0188", ""],
+    "emails": ["avery.abernathy@example.com"],
+    "eins": ["004869454"],
+    "accounts": ["8320968305"],
+    "cards": [],
+}
+
+
+def test_details_start_empty_and_running_waits_for_them(fresh):
+    client, ws = fresh
+    r = client.get("/api/profile").json()
+    assert r["exists"] is False and r["profile"]["people"] == []
+    assert client.post("/api/run").status_code == 409
+
+
+def test_details_are_cleaned_saved_and_private(fresh):
+    client, ws = fresh
+    r = client.put("/api/profile", json=FORM)
+    assert r.status_code == 200
+    saved = json.loads(ws.profile_path.read_text())
+    assert saved["people"] == [{"name": "Avery F Abernathy", "ssn": "987-65-4323", "dob": "04/07/1984",
+                                "role": "taxpayer"}]
+    assert saved["addresses"][0]["state"] == "WA" and saved["eins"] == ["00-4869454"]
+    assert saved["phones"] == ["(555) 555-0188"]
+    assert ws.profile_path.stat().st_mode & 0o777 == 0o600
+    assert client.get("/api/profile").json()["profile"] == saved
+    assert client.post("/api/run").status_code == 202
+
+
+def test_bad_details_name_the_fields_and_save_nothing(fresh):
+    client, ws = fresh
+    bad = {**FORM, "people": [{"name": "Avery", "ssn": "987-65-432", "dob": "13/40/1984"}],
+           "addresses": [{"street": "", "city": "Tacoma", "state": "Wash", "zip": "984"}],
+           "eins": ["12345"], "phones": ["", "555-0188"]}
+    r = client.put("/api/profile", json=bad)
+    assert r.status_code == 422
+    fields = r.json()["detail"]["fields"]
+    assert set(fields) == {"people.0.name", "people.0.ssn", "people.0.dob", "addresses.0.street",
+                           "addresses.0.state", "addresses.0.zip", "eins.0", "phones.1"}
+    assert not any("987" in m or "Avery" in m for m in fields.values())  # messages never echo values
+    assert not ws.profile_path.exists()
+    assert client.put("/api/profile", json={}).status_code == 422  # at least one person
+
+
+def test_details_need_the_token(fresh):
+    client, _ = fresh
+    assert client.get("/api/profile", headers={TOKEN_HEADER: "wrong"}).status_code == 401
+    assert client.put("/api/profile", json=FORM, headers={TOKEN_HEADER: "wrong"}).status_code == 401
+
+
 def test_nothing_tried_to_reach_the_network(server, network_attempts):
     assert network_attempts == []

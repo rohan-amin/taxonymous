@@ -154,6 +154,11 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
   - **Native wrapper:** pywebview runs the unchanged UI in a WKWebView window (`tools/native_window.py`). Recommendation and packaging notes in [`NATIVE.md`](NATIVE.md). The app's size (~1.1 GB) comes from torch and the name model, whichever wrapper is used.
   - UI fix: a "Verifying…" banner stayed up when a job finished before the first poll.
 
+### After M7: Your details form ✅
+- The profile is entered in the review screen (**Your details**) instead of by editing `vault/profile.json`. It opens automatically until the details are saved, and Run all waits for them.
+- `GET/PUT /api/profile`: same loopback and token rules as the rest of the API. Values are trimmed, empty rows dropped, and SSNs, EINs and dates normalized. A 422 names the fields to fix, and its messages never repeat a value. The file is written readable only by the user (0600).
+- The inputs ask browsers and password managers not to fill or save them, and a toggle hides the numbers on screen. After a change, documents already redacted with the earlier details are offered a re-run.
+
 ## Known limitations after M7
 
 - Scanned pages are output as images, so they are bigger than the original and have no text layer except placeholders; the `.txt` carries the (redacted) OCR text instead.

@@ -66,9 +66,41 @@ function loadToken(): string {
 export const token = loadToken();
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public fields: Record<string, string> = {}) {
     super(message);
   }
+}
+
+export interface Person {
+  name: string;
+  ssn: string;
+  dob: string;
+  role: string;
+}
+
+export interface Address {
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+}
+
+export interface Profile {
+  people: Person[];
+  addresses: Address[];
+  phones: string[];
+  emails: string[];
+  eins: string[];
+  accounts: string[];
+  cards: string[];
+}
+
+export interface ProfileState {
+  exists: boolean;
+  profile: Profile;
+  errors: Record<string, string>;
+  path: string;
+  processed?: string[]; // documents redacted before this save
 }
 
 async function call<T>(method: string, path: string, body?: unknown, form?: FormData): Promise<T> {
@@ -80,13 +112,17 @@ async function call<T>(method: string, path: string, body?: unknown, form?: Form
     body: form ?? (body !== undefined ? JSON.stringify(body) : undefined),
   });
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail: unknown = res.statusText;
     try {
       detail = (await res.json()).detail ?? detail;
     } catch {
       /* not JSON */
     }
-    throw new ApiError(res.status, detail);
+    if (detail && typeof detail === "object" && "message" in detail) {
+      const d = detail as { message: string; fields?: Record<string, string> };
+      throw new ApiError(res.status, d.message, d.fields ?? {});
+    }
+    throw new ApiError(res.status, String(detail));
   }
   const type = res.headers.get("content-type") ?? "";
   return (type.includes("json") ? res.json() : res.text()) as Promise<T>;
@@ -95,6 +131,8 @@ async function call<T>(method: string, path: string, body?: unknown, form?: Form
 const doc = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 
 export const api = {
+  profile: () => call<ProfileState>("GET", "/api/profile"),
+  saveProfile: (p: Profile) => call<ProfileState>("PUT", "/api/profile", p),
   documents: () => call<DocSummary[]>("GET", "/api/documents"),
   document: (id: string) => call<DocDetail>("GET", doc(id)),
   text: (id: string) => call<string>("GET", `${doc(id)}/text`),

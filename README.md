@@ -16,18 +16,13 @@ Scrub personal identifiers from tax documents **on your own machine**, so you ca
 ## Usage (preview)
 
 ```sh
-uv run taxonymous init --workspace ~/Dropbox/Taxes/taxonymous   # creates inbox/ work/ ready-to-upload/ vault/
-# put your identifiers in vault/profile.json (format: src/taxonymous/profile.py),
-# PDFs and photos (JPG, PNG, HEIC, TIFF) in inbox/
-uv run taxonymous run --workspace ~/Dropbox/Taxes/taxonymous
-```
-
-To review before uploading:
-
-```sh
 (cd ui && npm install && npm run build)                        # once, to build the review screen
-uv run taxonymous serve --workspace ~/Dropbox/Taxes/taxonymous  # opens it in your browser
+uv run taxonymous serve --workspace ~/Dropbox/Taxes/taxonymous  # creates the folders and opens it in your browser
 ```
+
+1. **Your details:** enter the names, SSNs, birth dates, addresses and account numbers to remove. They are saved only in the workspace's `vault/profile.json` and never uploaded.
+2. **Add files** (or drop PDFs and photos on the window), then **Run all**.
+3. Review each document, then **Export** it to `ready-to-upload/`.
 
 Each document is shown original and redacted side by side; scrolling and paging move both together. Use **Mark areas** to drag over anything that was missed, then **Final scrub** to remove it all, re-verify, and preview the result. **Export** copies a document to `ready-to-upload/`, and only once it has passed. The server only listens on 127.0.0.1 and needs the token in the link it opens.
 

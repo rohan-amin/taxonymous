@@ -5,6 +5,8 @@ addressed to a loopback host name (so a web page can't reach it through DNS
 rebinding), and only with the token printed at launch (so another site open in
 the same browser can't drive it). It makes no outbound connections.
 
+  GET    /api/profile                           your identifiers (vault/profile.json), as a form edits them
+  PUT    /api/profile                           save them (validated; 422 names the fields to fix)
   GET    /api/documents                         every document in inbox/, with its status
   POST   /api/documents                         upload a file into inbox/ (multipart "file")
   GET    /api/documents/{id}                    status, report, boxes, reviewer decisions, page sizes
@@ -30,7 +32,7 @@ so they need no token; every /api request does.
 
 Every change to a document re-runs it. Document ids are the output stem
 (`w2` for w2.pdf, `receipt.jpg` for receipt.jpg); real values never appear in
-any response except the original page images.
+any response except the original page images and /api/profile.
 """
 
 import hmac
@@ -43,16 +45,18 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Annotated
 
 import pymupdf
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .detect import ProfileMatcher
 from .pipeline import Workspace, export, process, reverify
-from .profile import Profile
+from .profile import Profile, clean
+from .profile import save as save_profile
 from .redact import IMAGE_SUFFIXES, SUFFIXES, Overrides, load_image, manual_key, output_stem
 from .vault import Vault
 
@@ -236,6 +240,29 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
     def overrides(stem: str) -> Overrides:
         return Overrides.load(ws.overrides_path(stem))
 
+    def need_profile() -> None:
+        if not ws.profile_path.exists():
+            raise HTTPException(409, "Add your details first, so they can be found and removed.")
+
+    @app.get("/api/profile")
+    def get_profile():
+        exists = ws.profile_path.exists()
+        profile, errors = clean(json.loads(ws.profile_path.read_text()) if exists else {})
+        return {"exists": exists, "profile": profile, "errors": errors, "path": str(ws.profile_path)}
+
+    @app.put("/api/profile")
+    def put_profile(body: Annotated[dict, Body()]):
+        profile, errors = clean(body)
+        if not errors and not profile["people"]:
+            errors["people.0.name"] = "Add at least yourself."
+        if errors:
+            raise HTTPException(422, {"message": "Some details need fixing.", "fields": errors})
+        save_profile(profile, ws.profile_path)
+        stems = [output_stem(src) for src in ws.pending()]
+        processed = [stem for stem in stems if ws.outputs(stem)["report"].exists()]
+        return {"exists": True, "profile": profile, "errors": {}, "path": str(ws.profile_path),
+                "processed": processed}
+
     @app.get("/api/documents")
     def documents():
         return [_summary(ws, worker, src) for src in ws.pending()]
@@ -307,6 +334,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
 
     @app.post("/api/run", status_code=202)
     def run_all():
+        need_profile()
         stems = [output_stem(src) for src in ws.pending()]
         for stem in stems:
             if not worker.busy(stem):
@@ -316,6 +344,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
     @app.post("/api/documents/{stem}/run", status_code=202)
     def run_one(stem: str):
         _source(ws, stem)
+        need_profile()
         worker.submit(Job(stem, "process"))
         return {"queued": [stem]}
 
