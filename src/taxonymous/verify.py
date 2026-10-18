@@ -11,7 +11,11 @@ Checks, all fail-closed:
              anything with an image) get both OCR passes; dense text pages (statements,
              letters) get the layout pass, which is what reads dense text best
 
-Values the reviewer chose to keep in the clear (`allowed`) are not leaks.
+Values the reviewer chose to keep in the clear everywhere in the document
+(`allowed`) are not leaks. A single box they left in the clear (`shown`) is not
+checked at that spot only: it is blanked in a scratch copy before the text and
+OCR checks, and the .txt may hold its value once on that page. The same value
+anywhere else is still a leak.
 
 Issues never contain real values: only the kind of value, the check, and the page.
 """
@@ -61,6 +65,14 @@ class Report:
 class Known:
     kind: str
     value: str
+
+
+@dataclass
+class Shown:
+    """A box the reviewer left in the clear: where, and the values it may hold."""
+    page: int  # 0-based
+    rect: tuple[float, float, float, float]
+    values: list[str]
 
 
 def _squash(s: str, fuzzy: bool = False) -> str:
@@ -129,6 +141,46 @@ def _structure(doc: pymupdf.Document) -> list[Issue]:
     return issues
 
 
+def _without_shown(doc: pymupdf.Document, shown: list[Shown]) -> pymupdf.Document:
+    """A scratch copy with the shown boxes blanked (text removed, pixels whited out)."""
+    copy = pymupdf.open("pdf", doc.tobytes())
+    for n in {s.page for s in shown}:
+        if 0 <= n < copy.page_count:
+            page = copy[n]
+            for s in shown:
+                if s.page == n:
+                    page.add_redact_annot(pymupdf.Rect(s.rect), fill=(1, 1, 1))
+            page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,
+                                  graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
+                                  text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+    return copy
+
+
+PAGE_HEADER_RE = re.compile(r"^=== Page (\d+) ===$", re.M)
+
+
+def _txt_without_shown(text: str, shown: list[Shown]) -> str:
+    """The .txt with one copy of each shown box's value taken out of its page. A value
+    that isn't there as expected stays in, and is reported like any other."""
+    parts = PAGE_HEADER_RE.split(text)  # [preamble, "1", page 1, "2", page 2, ...]
+    for s in shown:
+        i = 2 * s.page + 2
+        if i >= len(parts):
+            continue
+        for v in sorted(s.values, key=len, reverse=True):
+            words = v.split()
+            if not words:
+                continue
+            m = re.search(r"\s+".join(map(re.escape, words)), parts[i], re.I)
+            if m:
+                parts[i] = parts[i][:m.start()] + " " + parts[i][m.end():]
+                break
+    out = parts[0]
+    for n, body in zip(parts[1::2], parts[2::2], strict=True):
+        out += f"=== Page {n} ===" + body
+    return out
+
+
 def _passes(page: pymupdf.Page) -> tuple[str, ...]:
     if not page.get_images() and len(page.get_text()) > DENSE_CHARS:
         return ocr_mod.PASSES[:1]
@@ -136,18 +188,21 @@ def _passes(page: pymupdf.Page) -> tuple[str, ...]:
 
 
 def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | None = None,
-           ocr: bool = True, allowed: Iterable[str] = ()) -> Report:
+           ocr: bool = True, allowed: Iterable[str] = (), shown: list[Shown] = ()) -> Report:
     report = Report(pdf=str(pdf), ocr=ocr)
     scanner = Scanner(matcher, known, allowed)
     try:
         doc = pymupdf.open(pdf)
         report.pages = doc.page_count
         report.issues += _structure(doc)
+        if shown:
+            doc = _without_shown(doc, list(shown))
         for page in doc:
             report.issues += [Issue("text", k, page.number + 1) for k in scanner.scan(page.get_text())]
         if txt is not None:
             # text from scanned pages is OCR output, so it gets OCR tolerance too
-            report.issues += [Issue("txt", k) for k in scanner.scan(Path(txt).read_text(), fuzzy=True)]
+            text = _txt_without_shown(Path(txt).read_text(), list(shown))
+            report.issues += [Issue("txt", k) for k in scanner.scan(text, fuzzy=True)]
         if ocr:
             ocr_mod.require()
             passes = [_passes(p) for p in doc]

@@ -29,11 +29,18 @@ export interface Region {
   source: string;
 }
 
+export interface Shown {
+  page: number;
+  rect: Rect;
+  placeholder: string;
+}
+
 export interface DocDetail extends DocSummary {
   pages: [number, number][];
   regions: Region[];
   report: { passed: boolean; issues: Issue[]; pages: number } | null;
   kept: string[];
+  shown: Shown[]; // single boxes left in the clear
   added: { page: number; rect: Rect }[];
 }
 
@@ -101,6 +108,8 @@ export const api = {
   addBoxes: (id: string, boxes: Box[]) => call("POST", `${doc(id)}/redactions`, { boxes }),
   removeRedaction: (id: string, placeholder: string) =>
     call("DELETE", `${doc(id)}/redactions?placeholder=${encodeURIComponent(placeholder)}`),
+  showOne: (id: string, box: Box) => call("POST", `${doc(id)}/shown`, box),
+  unshow: (id: string, index: number) => call("DELETE", `${doc(id)}/shown/${index}`),
   unkeep: (id: string, placeholder: string) =>
     call("DELETE", `${doc(id)}/kept?placeholder=${encodeURIComponent(placeholder)}`),
   verify: (id: string) => call("POST", `${doc(id)}/verify`),

@@ -33,6 +33,7 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
   const [draft, setDraft] = useState<Mark | null>(null);
   const [scrubbed, setScrubbed] = useState<Rect[] | null>(null); // the last final scrub, for the preview
   const [selected, setSelected] = useState<Region | null>(null);
+  const [selectedShown, setSelectedShown] = useState<number | null>(null); // index into detail.shown
   const [showOnOriginal, setShowOnOriginal] = useState(true);
   const [message, setMessage] = useState<{ tone: "ok" | "bad" | "info"; text: string } | null>(null);
   const panes = { original: useRef<HTMLDivElement>(null), redacted: useRef<HTMLDivElement>(null) };
@@ -52,6 +53,7 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
     setMarks([]);
     setScrubbed(null);
     setSelected(null);
+    setSelectedShown(null);
     setMessage(null);
     setPage(0);
     load();
@@ -162,6 +164,7 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
       else if (e.key === "Escape") {
         setMarking(false);
         setSelected(null);
+        setSelectedShown(null);
         setDraft(null);
       } else return;
       e.preventDefault();
@@ -227,6 +230,7 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
   const act = async (what: () => Promise<unknown>, info: string) => {
     setMessage({ tone: "info", text: info });
     setSelected(null);
+    setSelectedShown(null);
     setScrubbed(null);
     try {
       await what();
@@ -258,6 +262,7 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
     : marks.length ? "Apply your marks with Final scrub first"
     : detail.status !== "passed" ? "Only a document that passed verification can be exported"
     : "";
+  const sameCount = selected ? detail.regions.filter((r) => r.placeholder === selected.placeholder).length : 0;
   const newBoxes = scrubbed
     ? detail.regions.filter((r) => r.source === "manual" && scrubbed.some((s) => same(s, r.rect)))
     : [];
@@ -285,7 +290,18 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
               <button key={i} type="button"
                       className={`region ${side === "original" ? "ghost" : ""} ${selected === r ? "selected" : ""}`}
                       style={box(r.rect)} title={`${r.placeholder} · ${r.kind} · found by ${SOURCE_LABEL[r.source] ?? r.source}`}
-                      onClick={(e) => { if (!marking) { e.stopPropagation(); setSelected(r); } }}
+                      onClick={(e) => {
+                        if (!marking) { e.stopPropagation(); setSelected(r); setSelectedShown(null); }
+                      }}
+                      tabIndex={side === "redacted" ? 0 : -1} />
+            ))}
+            {(side === "redacted" || showOnOriginal) && detail.shown.map((s, i) => s.page === n && (
+              <button key={`shown${i}`} type="button" data-testid="shown"
+                      className={`region shown ${selectedShown === i ? "selected" : ""}`}
+                      style={box(s.rect)} title={`${s.placeholder} · left readable here by you`}
+                      onClick={(e) => {
+                        if (!marking) { e.stopPropagation(); setSelectedShown(i); setSelected(null); }
+                      }}
                       tabIndex={side === "redacted" ? 0 : -1} />
             ))}
             {side === "redacted" && newBoxes.filter((r) => r.page === n).map((r, i) => (
@@ -369,14 +385,21 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
         </div>
       )}
 
-      {detail.kept.length > 0 && (
+      {(detail.kept.length > 0 || detail.shown.length > 0) && (
         <div className="kept">
-          Shown in this document:{" "}
+          Readable in this document:{" "}
           {detail.kept.map((ph) => (
             <span key={ph} className="chip">
-              {ph}
+              <code>{ph}</code> everywhere
               <button type="button" onClick={() => act(() => api.unkeep(id, ph), `Redacting ${ph} again…`)}
-                      title="Redact it again">redact again</button>
+                      title="Redact it again everywhere in this document">redact again</button>
+            </span>
+          ))}
+          {detail.shown.map((s, i) => (
+            <span key={`shown${i}`} className="chip">
+              <code>{s.placeholder}</code> one box, page {s.page + 1}
+              <button type="button" onClick={() => act(() => api.unshow(id, i), `Redacting that ${s.placeholder} again…`)}
+                      title="Redact this box again">redact again</button>
             </span>
           ))}
         </div>
@@ -400,13 +423,37 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
                 Remove my box
               </button>
             ) : (
-              <button type="button" title="Leave this value readable in this document only"
-                      onClick={() => act(() => api.removeRedaction(id, selected.placeholder),
-                                         `Showing ${selected.placeholder} in this document…`)}>
-                Don't redact this here
-              </button>
+              <>
+                <button type="button" title="Leave only this box readable; the same value stays redacted elsewhere"
+                        onClick={() => act(() => api.showOne(id, { page: selected.page, rect: selected.rect }),
+                                           `Showing this ${selected.placeholder}…`)}>
+                  Show this box only
+                </button>
+                {sameCount > 1 && (
+                  <button type="button" title="Leave this value readable everywhere in this document"
+                          onClick={() => act(() => api.removeRedaction(id, selected.placeholder),
+                                             `Showing every ${selected.placeholder} in this document…`)}>
+                    Show it everywhere in this document ({sameCount} boxes)
+                  </button>
+                )}
+              </>
             )}
             <button type="button" onClick={() => setSelected(null)}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {selectedShown !== null && detail.shown[selectedShown] && (
+        <div className="popover" role="dialog">
+          <div><strong>{detail.shown[selectedShown].placeholder}</strong> · readable here</div>
+          <div className="muted">Page {detail.shown[selectedShown].page + 1}, left readable by you.
+            The same value is still redacted everywhere else.</div>
+          <div className="popover-actions">
+            <button type="button"
+                    onClick={() => act(() => api.unshow(id, selectedShown), "Redacting this box again…")}>
+              Redact this box again
+            </button>
+            <button type="button" onClick={() => setSelectedShown(null)}>Close</button>
           </div>
         </div>
       )}

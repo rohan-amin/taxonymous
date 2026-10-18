@@ -17,7 +17,7 @@ from .detect import ProfileMatcher
 from .profile import Profile
 from .redact import SUFFIXES, Overrides, Result, output_stem, redact_file
 from .vault import Vault
-from .verify import Issue, Known, Report, verify
+from .verify import Issue, Known, Report, Shown, verify
 
 
 @dataclass
@@ -90,12 +90,14 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
 def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, overrides: Overrides,
             known: list[Known], ocr: bool) -> Report:
     """Everything this document's redaction found, and every value in the vault (from any
-    document), except what the reviewer kept in the clear here."""
+    document), except what the reviewer kept in the clear here: a whole placeholder, or
+    single boxes."""
     allowed = allowed_values(vault, overrides)
     known = known + [Known(e["kind"], v) for e in vault.entries.values() for v in e["values"]]
+    shown = [Shown(n, r, vault.entries.get(ph, {}).get("values", [])) for n, r, ph in overrides.show]
     out = ws.outputs(stem)
     return verify(out["pdf"], matcher, [k for k in known if k.value not in allowed], out["txt"], ocr=ocr,
-                  allowed=allowed)
+                  allowed=allowed, shown=shown)
 
 
 def reverify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, ocr: bool = True) -> Report:

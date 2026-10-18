@@ -173,14 +173,48 @@ def test_a_failed_verification_blocks_export(page, site):
     assert page.get_by_role("button", name="Export", exact=True).is_enabled()
 
 
-def test_clicking_a_box_can_leave_it_readable_here(page, site):
+def _repeated_region(pg):
+    """The first box on the redacted side whose placeholder has other boxes too."""
+    boxes = "[data-testid=pane-redacted] .region:not(.shown)"
+    titles = pg.eval_on_selector_all(boxes, "els => els.map(e => e.title)")
+    placeholders = [t.split(" · ")[0] for t in titles]
+    i = next(i for i, ph in enumerate(placeholders) if placeholders.count(ph) > 1)
+    return pg.locator("[data-testid=pane-redacted] .region:not(.shown)").nth(i), placeholders[i]
+
+
+def regions_of(pg, placeholder: str) -> int:
+    return pg.locator(f"[data-testid=pane-redacted] .region[title^='{placeholder} · ']:not(.shown)").count()
+
+
+def test_clicking_a_box_can_leave_it_readable_everywhere(page, site):
     _, app, *_ = site
     open_doc(page, app, "k1_statement.pdf")
-    region = page.locator("[data-testid=pane-redacted] .region").first
-    placeholder = region.get_attribute("title").split(" · ")[0]
+    region, placeholder = _repeated_region(page)
     region.click()
-    page.get_by_role("button", name="Don't redact this here").click()
-    page.wait_for_selector(f".kept .chip:has-text('{placeholder}')", timeout=60_000)
+    page.get_by_role("button", name="Show it everywhere in this document").click()
+    page.wait_for_selector(f".kept .chip:has-text('{placeholder} everywhere')", timeout=60_000)
     app.state.worker.wait()
+    wait_status(page, "passed")
+    assert regions_of(page, placeholder) == 0
     page.get_by_role("button", name="redact again").click()
     page.wait_for_selector(".kept", state="detached", timeout=60_000)
+
+
+def test_clicking_a_box_can_leave_just_that_box_readable(page, site):
+    _, app, *_ = site
+    open_doc(page, app, "k1_statement.pdf")
+    region, placeholder = _repeated_region(page)
+    before = regions_of(page, placeholder)
+    region.click()
+    page.get_by_role("button", name="Show this box only").click()
+    page.wait_for_selector("[data-testid=pane-redacted] [data-testid=shown]", timeout=60_000)
+    app.state.worker.wait()
+    wait_status(page, "passed")
+    assert regions_of(page, placeholder) == before - 1  # the other copies are still redacted
+    assert page.locator(f".kept .chip:has-text('{placeholder} one box')").count() == 1
+    page.locator("[data-testid=pane-redacted] [data-testid=shown]").click()
+    page.get_by_role("button", name="Redact this box again").click()
+    page.wait_for_selector("[data-testid=shown]", state="detached", timeout=60_000)
+    app.state.worker.wait()
+    wait_status(page, "passed")
+    assert regions_of(page, placeholder) == before

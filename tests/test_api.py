@@ -3,6 +3,7 @@
 import json
 import shutil
 import socket
+from collections import Counter
 
 import pymupdf
 import pytest
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 from taxonymous import api as api_mod
 from taxonymous.api import TOKEN_HEADER, check_loopback, create_app, serve
 from taxonymous.pipeline import Workspace
+from taxonymous.redact import Overrides
 
 TOKEN = "test-token"
 K1, W2 = "/api/documents/k1_statement", "/api/documents/w2"
@@ -228,8 +230,60 @@ def test_keep_a_detection_in_the_clear_and_undo_it(server):
     assert detail["kept"] == [] and name not in client.get(f"{K1}/text").text
 
 
+def _repeated_box(client, doc: str) -> tuple[str, list[dict]]:
+    regions = [r for r in client.get(doc).json()["regions"] if r["source"] != "manual"]
+    counts = Counter(r["placeholder"] for r in regions)
+    ph = next(p for p, n in counts.most_common() if n >= 3)
+    return ph, [r for r in regions if r["placeholder"] == ph]
+
+
+def test_show_a_single_box_and_redact_it_again(server):
+    client, app, ws, *_ = server
+    ph, before = _repeated_box(client, K1)
+    one = before[0]
+    assert client.post(f"{K1}/shown", json={"page": one["page"], "rect": one["rect"]}).status_code == 202
+    settle(app)
+    detail = client.get(K1).json()
+    assert detail["status"] == "passed" and detail["kept"] == []
+    assert detail["shown"] == [{"page": one["page"], "rect": one["rect"], "placeholder": ph}]
+    after = [r for r in detail["regions"] if r["placeholder"] == ph]
+    assert len(after) == len(before) - 1  # only that box: the others stay redacted
+    page = pymupdf.open(ws.outputs("k1_statement")["pdf"])[one["page"]]
+    assert page.get_textbox(pymupdf.Rect(one["rect"])).strip() not in ("", ph)  # readable there
+
+    assert client.delete(f"{K1}/shown/0").status_code == 202
+    settle(app)
+    detail = client.get(K1).json()
+    assert detail["shown"] == [] and detail["status"] == "passed"
+    assert len([r for r in detail["regions"] if r["placeholder"] == ph]) == len(before)
+
+
+def test_a_shown_box_does_not_excuse_the_same_value_elsewhere(server):
+    """Two copies left visible, but only one of them recorded as the reviewer's choice:
+    verification must still find the other."""
+    client, app, ws, *_ = server
+    ph, before = _repeated_box(client, K1)
+    for r in before[:2]:
+        client.post(f"{K1}/shown", json={"page": r["page"], "rect": r["rect"]})
+        settle(app)
+    assert client.get(K1).json()["status"] == "passed"
+    o = Overrides.load(ws.overrides_path("k1_statement"))
+    o.show = o.show[:1]
+    o.save(ws.overrides_path("k1_statement"))
+    client.post(f"{K1}/verify")
+    settle(app)
+    detail = client.get(K1).json()
+    assert detail["status"] == "failed"
+    assert {i["check"] for i in detail["report"]["issues"]} >= {"text", "txt"}
+    client.delete(f"{K1}/shown/0")
+    settle(app)
+    assert client.get(K1).json()["status"] == "passed"
+
+
 def test_bad_reviewer_requests(server):
     client, *_ = server
+    assert client.post(f"{W2}/shown", json={"page": 0, "rect": [1, 1, 2, 2]}).status_code == 404
+    assert client.delete(f"{W2}/shown/5").status_code == 404
     assert client.post(f"{W2}/redactions", json=boxes(7, [0, 0, 9, 9])).status_code == 400
     assert client.post(f"{W2}/redactions", json=boxes(0, [9, 9, 0, 0])).status_code == 400
     assert client.delete(f"{W2}/redactions", params={"placeholder": "<NAME_ZZ>"}).status_code == 404

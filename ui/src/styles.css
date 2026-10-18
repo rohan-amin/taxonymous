@@ -317,7 +317,6 @@ main {
   gap: 6px;
   align-items: center;
   margin-right: 8px;
-  font-family: ui-monospace, monospace;
 }
 
 .chip button {
@@ -406,6 +405,14 @@ main {
   pointer-events: none;
 }
 
+.region.shown {
+  border: 1.5px dashed var(--accent);
+}
+
+.pane.original .region.shown {
+  pointer-events: none;
+}
+
 .pane.marking .region {
   pointer-events: none;
 }
@@ -460,6 +467,7 @@ main {
 
 .popover-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 4px;
 }

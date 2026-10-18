@@ -20,7 +20,9 @@ Then for every file: scrub metadata, XMP, attachments, JavaScript, links,
 hidden text, and write the placeholder text.
 
 The reviewer's decisions for a document (Overrides) are applied on every run:
-placeholders to keep in the clear, and boxes they drew to redact.
+placeholders to keep in the clear everywhere in it, single boxes to leave in the
+clear (only that spot; the same value elsewhere is still redacted), and boxes they
+drew to redact.
 """
 
 import io
@@ -59,18 +61,36 @@ class Overrides:
     """A reviewer's decisions for one document. Holds placeholders and boxes, no values."""
     keep: set[str] = field(default_factory=set)  # placeholders left in the clear in this document
     add: list[tuple[int, tuple[float, float, float, float]]] = field(default_factory=list)  # (page, rect)
+    # single boxes left in the clear: (page, rect, placeholder)
+    show: list[tuple[int, tuple[float, float, float, float], str]] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> "Overrides":
         if not Path(path).exists():
             return cls()
         d = json.loads(Path(path).read_text())
-        return cls(set(d.get("keep", [])), [(a["page"], tuple(a["rect"])) for a in d.get("add", [])])
+        return cls(set(d.get("keep", [])), [(a["page"], tuple(a["rect"])) for a in d.get("add", [])],
+                   [(a["page"], tuple(a["rect"]), a["placeholder"]) for a in d.get("show", [])])
 
     def save(self, path: Path) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         add = [{"page": n, "rect": list(r)} for n, r in self.add]
-        Path(path).write_text(json.dumps({"keep": sorted(self.keep), "add": add}, indent=2) + "\n")
+        show = [{"page": n, "rect": list(r), "placeholder": ph} for n, r, ph in self.show]
+        data = {"keep": sorted(self.keep), "add": add, "show": show}
+        Path(path).write_text(json.dumps(data, indent=2) + "\n")
+
+    def shown(self, page: int) -> list[pymupdf.Rect]:
+        return [pymupdf.Rect(r) for n, r, _ in self.show if n == page]
+
+
+def overlaps(a: pymupdf.Rect, b: pymupdf.Rect) -> bool:
+    """The same box: they share more than 30% of the smaller one."""
+    both = a & b
+    return not both.is_empty and both.get_area() > 0.3 * min(a.get_area(), b.get_area())
+
+
+def _is_shown(rects, shown: list[pymupdf.Rect]) -> bool:
+    return any(overlaps(pymupdf.Rect(r), s) for r in rects for s in shown)
 
 
 def manual_key(stem: str, page: int, rect) -> str:
@@ -93,11 +113,8 @@ class Result:
     def region(self, page: int, rect: pymupdf.Rect, ph: str, kind: str, source: str) -> None:
         """Record a box, once: OCR reads and repeats find the same thing many times over."""
         for r in self.regions:
-            if r.page == page and r.placeholder == ph:
-                other = pymupdf.Rect(r.rect)
-                overlap = other & rect
-                if not overlap.is_empty and overlap.get_area() > 0.3 * min(abs(other), abs(rect)):
-                    return
+            if r.page == page and r.placeholder == ph and overlaps(pymupdf.Rect(r.rect), rect):
+                return
         self.regions.append(Region(page, tuple(round(v, 2) for v in rect), ph, kind, source))
 
     def regions_json(self) -> list[dict]:
@@ -143,11 +160,8 @@ def _label(page: pymupdf.Page, rect: pymupdf.Rect, ph: str) -> None:
 
 def _add_label(labels: list[tuple[pymupdf.Rect, str]], rect: pymupdf.Rect, ph: str) -> None:
     """One placeholder per box, even when two OCR passes found the same thing."""
-    for other, _ in labels:
-        overlap = rect & other
-        if not overlap.is_empty and overlap.get_area() > 0.3 * min(rect.get_area(), other.get_area()):
-            return
-    labels.append((rect, ph))
+    if not any(overlaps(rect, other) for other, _ in labels):
+        labels.append((rect, ph))
 
 
 def _dpi(page: pymupdf.Page) -> float:
@@ -213,8 +227,9 @@ def _whole_words(pt: PageText, f: Finding) -> tuple[int, int]:
 
 
 def _ocr_regions(p: _Ocr, vault: Vault, result: Result, within: list[pymupdf.Rect] | None = None,
-                 ) -> list[tuple[pymupdf.Rect, str, Finding]]:
-    """Padded rectangles (page points) to remove, from every read of the page."""
+                 shown: list[pymupdf.Rect] = ()) -> list[tuple[pymupdf.Rect, str, Finding]]:
+    """Padded rectangles (page points) to remove, from every read of the page, except
+    the boxes the reviewer chose to leave in the clear."""
     out = []
     counted: set[tuple[str, str]] = set()
     for pt, f in p.found:
@@ -223,14 +238,18 @@ def _ocr_regions(p: _Ocr, vault: Vault, result: Result, within: list[pymupdf.Rec
         rects = pt.rects(*_whole_words(pt, f))
         if within is not None and not any(r.intersects(w) for r in rects for w in within):
             continue
+        padded = []
+        for r in rects:
+            pad = 0.25 * r.height
+            padded.append(pymupdf.Rect(r.x0 - pad, r.y0 - 0.6 * pad, r.x1 + pad, r.y1 + 0.6 * pad))
+        if _is_shown(padded, shown):
+            continue
         ph = vault.placeholder(f.kind, f.key, f.text)
         if (f.key, f.text) not in counted:  # the same value seen by several reads counts once
             counted.add((f.key, f.text))
             result.findings.append(f)
         result.placeholders[ph] = f.kind
-        for r in rects:
-            pad = 0.25 * r.height
-            out.append((pymupdf.Rect(r.x0 - pad, r.y0 - 0.6 * pad, r.x1 + pad, r.y1 + 0.6 * pad), ph, f))
+        out += [(r, ph, f) for r in padded]
     return out
 
 
@@ -341,7 +360,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         drop_kept(photo)
         _repeat_ocr(photo, repeat_values([f for _, f in photo.found]))
         drop_kept(photo)
-        regions = _ocr_regions(photo, vault, result)
+        regions = _ocr_regions(photo, vault, result, shown=overrides.shown(0))
         regions += _manual_ocr(photo, stem, manual.get(0, []), vault, result)
         texts[0] = _rebuild(doc, photo, regions, None, result)
         result.image_pages.append(1)
@@ -382,11 +401,12 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
             if ocr_page is not None:
                 _repeat_ocr(ocr_page, values)
                 drop_kept(ocr_page)
-            _redact_text_page(page, pt, found, vault, result, ocr_page, stem, manual.get(page.number, []))
+            _redact_text_page(page, pt, found, vault, result, ocr_page, stem, manual.get(page.number, []),
+                              overrides.shown(page.number))
         for p in scans:
             _repeat_ocr(p, values)
             drop_kept(p)
-            regions = _ocr_regions(p, vault, result)
+            regions = _ocr_regions(p, vault, result, shown=overrides.shown(p.number))
             regions += _manual_ocr(p, stem, manual.get(p.number, []), vault, result)
             texts[p.number] = _rebuild(doc, p, regions, p.number, result)
             result.image_pages.append(p.number + 1)
@@ -412,24 +432,27 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
 
 
 def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], vault: Vault,
-                      result: Result, images: _Ocr | None, stem: str, manual: list[pymupdf.Rect]) -> None:
+                      result: Result, images: _Ocr | None, stem: str, manual: list[pymupdf.Rect],
+                      shown: list[pymupdf.Rect]) -> None:
     labels: list[tuple[pymupdf.Rect, str]] = []
     for f in found:
+        # trim to the middle of the line: char boxes are taller than glyphs and
+        # overlap the lines above/below, which would otherwise be removed too
+        rects = [pymupdf.Rect(r.x0, r.y0 + 0.2 * r.height, r.x1, r.y1 - 0.2 * r.height)
+                 for r in pt.rects(f.start, f.end)]
+        if _is_shown(rects, shown):  # the reviewer left this one in the clear
+            continue
         ph = vault.placeholder(f.kind, f.key, f.text)
         result.findings.append(f)
         result.placeholders[ph] = f.kind
-        for i, line_rect in enumerate(pt.rects(f.start, f.end)):
-            # trim to the middle of the line: char boxes are taller than glyphs and
-            # overlap the lines above/below, which would otherwise be removed too
-            h = line_rect.height
-            rect = pymupdf.Rect(line_rect.x0, line_rect.y0 + 0.2 * h, line_rect.x1, line_rect.y1 - 0.2 * h)
+        for i, rect in enumerate(rects):
             page.add_redact_annot(rect, fill=(0, 0, 0))
             result.region(page.number, rect, ph, f.kind, f.source)
             if i == 0:
                 labels.append((rect, ph))
     if images is not None:
         # identifiers inside pictures on the page: only the image pixels go, text is handled above
-        for rect, ph, f in _ocr_regions(images, vault, result, within=_image_rects(page)):
+        for rect, ph, f in _ocr_regions(images, vault, result, within=_image_rects(page), shown=shown):
             page.add_redact_annot(rect, fill=(0, 0, 0))
             result.region(page.number, rect, ph, f.kind, f.source)
             _add_label(labels, rect, ph)

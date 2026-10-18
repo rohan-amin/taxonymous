@@ -16,8 +16,12 @@ the same browser can't drive it). It makes no outbound connections.
   POST   /api/documents/{id}/redactions         {"boxes": [{"page": n, "rect": [x0, y0, x1, y1]}]}
                                                 add boxes (page points), one re-run for all of them
   DELETE /api/documents/{id}/redactions?placeholder=<P>   remove a box: a drawn one goes,
-                                                a detected one is kept in the clear in this document
+                                                a detected one is kept in the clear everywhere
+                                                in this document
   DELETE /api/documents/{id}/kept?placeholder=<P>         undo a keep
+  POST   /api/documents/{id}/shown              {"page": n, "rect": [...]} leave one detected box
+                                                in the clear (the rect of a box in `regions`)
+  DELETE /api/documents/{id}/shown/{i}          redact a shown box again (its index in `shown`)
   POST   /api/documents/{id}/verify             verify the current output again (queued)
   POST   /api/documents/{id}/export             copy to ready-to-upload/, only if it passed
 
@@ -262,6 +266,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
                 "regions": _read_json(out["regions"], []),
                 "report": _read_json(out["report"], None),
                 "kept": sorted(o.keep),
+                "shown": [{"page": n, "rect": list(r), "placeholder": ph} for n, r, ph in o.show],
                 "added": [{"page": n, "rect": list(r)} for n, r in o.add]}
 
     @app.get("/api/documents/{stem}/pages/{n}/{which}.png")
@@ -354,6 +359,33 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
             o.keep.add(placeholder)
         o.save(ws.overrides_path(stem))
         worker.submit(Job(stem, "process", forget))
+        return {"queued": [stem]}
+
+    @app.post("/api/documents/{stem}/shown", status_code=202)
+    def show_one(stem: str, body: Box):
+        _source(ws, stem)
+        regions = _read_json(ws.outputs(stem)["regions"], [])
+        match = next((r for r in regions if r["page"] == body.page
+                      and all(abs(a - b) < 0.6 for a, b in zip(r["rect"], body.rect, strict=True))), None)
+        if match is None:
+            raise HTTPException(404, "no redaction box there in this document")
+        if match["source"] == "manual":
+            raise HTTPException(400, "that is a box you drew: remove it instead")
+        o = overrides(stem)
+        o.show.append((body.page, tuple(match["rect"]), match["placeholder"]))
+        o.save(ws.overrides_path(stem))
+        worker.submit(Job(stem, "process"))
+        return {"queued": [stem]}
+
+    @app.delete("/api/documents/{stem}/shown/{index}", status_code=202)
+    def unshow(stem: str, index: int):
+        _source(ws, stem)
+        o = overrides(stem)
+        if not 0 <= index < len(o.show):
+            raise HTTPException(404, "no such shown box in this document")
+        del o.show[index]
+        o.save(ws.overrides_path(stem))
+        worker.submit(Job(stem, "process"))
         return {"queued": [stem]}
 
     @app.delete("/api/documents/{stem}/kept", status_code=202)
