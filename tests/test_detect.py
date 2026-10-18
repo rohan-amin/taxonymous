@@ -120,3 +120,13 @@ def test_public_institution_names_are_kept_but_private_ones_are_not():
 
 def test_prose_is_left_alone():
     assert texts("The account was opened in 2019 and the name on it did not change.") == []
+
+
+@pytest.mark.parametrize("entered", ["5555550142", "(555) 555-0142", "+1 555 555 0142", "1-555-555-0142"])
+@pytest.mark.parametrize("ssn", ["987654323", "987-65-4323", "987 65 4323"])
+def test_numbers_match_however_they_were_entered(entered, ssn):
+    profile = Profile.from_dict({"people": [{"name": "Avery F Abernathy", "ssn": ssn}], "phones": [entered]})
+    for line, value in [("Call (555) 555-0142", "(555) 555-0142"), ("tel 555.555.0142", "555.555.0142"),
+                        ("ph 5555550142", "5555550142"), ("SSN 987-65-4323", "987-65-4323"),
+                        ("TIN 987654323", "987654323")]:
+        assert value in [f.text for f in findings(line, profile=profile)], (line, entered, ssn)

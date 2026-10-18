@@ -106,7 +106,7 @@ def digit_pattern(value: str) -> str | None:
     ds = digits(value)
     if len(ds) < 4:
         return None
-    return r"(?<![0-9])" + r"[\s.\-()]{0,2}".join(ds) + r"(?![0-9])"
+    return r"(?<![0-9])\(?" + r"[\s.\-()]{0,2}".join(ds) + r"(?![0-9])"  # "(" of "(555) 555-0188" too
 
 
 def date_patterns(value: str) -> list[str]:
@@ -172,8 +172,12 @@ class ProfileMatcher:
                 add(rf"\b{re.escape(a.state)}\s+{re.escape(a.zip)}(?:-\d{{4}})?\b", "ADDR", f"addr:{i}")
         for i, v in enumerate(profile.emails):
             add(re.escape(v), "EMAIL", f"email:{i}")
-        for kind, values in [("PHONE", profile.phones), ("EIN", profile.eins),
-                             ("ACCT", profile.accounts), ("CARD", profile.cards)]:
+        for i, v in enumerate(profile.phones):
+            ds = digits(v)
+            if len(ds) == 11 and ds[0] == "1":  # +1 / 1- country code: documents mostly leave it out
+                ds = ds[1:]
+            add_number(ds, "PHONE", f"phone:{i}")
+        for kind, values in [("EIN", profile.eins), ("ACCT", profile.accounts), ("CARD", profile.cards)]:
             for i, v in enumerate(values):
                 add_number(v, kind, f"{kind.lower()}:{i}")
 

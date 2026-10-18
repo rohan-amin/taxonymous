@@ -125,7 +125,8 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
         out["addresses"].append(a)
 
     checks = {
-        "phones": (lambda v: len(_digits(v)) in (10, 11), "Enter a 10-digit phone number."),
+        "phones": (lambda v: len(_digits(v)) == 10 or len(_digits(v)) == 11 and _digits(v)[0] == "1",
+                   "Enter a 10-digit US phone number."),
         "emails": (lambda v: EMAIL_RE.fullmatch(v), "Enter an email address."),
         "eins": (lambda v: len(_digits(v)) == 9, "An EIN has 9 digits."),
         "accounts": (lambda v: len(re.sub(r"[^A-Za-z0-9]", "", v)) >= 4,
@@ -142,6 +143,9 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
             elif key == "eins":
                 ds = _digits(v)
                 v = f"{ds[:2]}-{ds[2:]}"
+            elif key == "phones":
+                ds = _digits(v)[-10:]  # without the +1 country code
+                v = f"({ds[:3]}) {ds[3:6]}-{ds[6:]}"
             out[key].append(v)
     return out, errors
 
