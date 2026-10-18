@@ -2,7 +2,8 @@
 
 Schema (plain JSON, lives in the vault folder, never committed):
 {
-  "people":    [{"name": "First M Last", "ssn": "...", "dob": "MM/DD/YYYY", "role": "taxpayer"}],
+  "people":    [{"name": "First M Last", "ssn": "...", "dob": "MM/DD/YYYY", "role": "taxpayer",
+                 "deceased": false, "dod": "MM/DD/YYYY"}],
   "addresses": [{"street": "...", "city": "...", "state": "XX", "zip": "....."}],
   "phones": [...], "emails": [...], "eins": [...], "accounts": [...], "cards": [...]
 }
@@ -21,6 +22,8 @@ class Person:
     ssn: str = ""
     dob: str = ""
     role: str = ""
+    deceased: bool = False
+    dod: str = ""  # date of death: for the record, and left readable in documents (it matters for taxes)
 
     @property
     def parts(self) -> tuple[str, list[str], str]:
@@ -83,9 +86,21 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
     def text(v) -> str:
         return " ".join(str(v or "").split())
 
-    for i, p in enumerate(d.get("people") or []):
-        p = {k: text(p.get(k)) for k in ("name", "ssn", "dob", "role")}
-        if not any(p[k] for k in ("name", "ssn", "dob")):
+    def when(value: str, field: str, message: str) -> date | None:
+        m = DOB_RE.fullmatch(value)
+        try:
+            if not m:
+                raise ValueError
+            month, day, year = map(int, m.groups())
+            return date(year, month, day)
+        except ValueError:
+            errors[field] = message
+            return None
+
+    for i, raw in enumerate(d.get("people") or []):
+        p = {k: text(raw.get(k)) for k in ("name", "ssn", "dob", "role", "dod")}
+        p["deceased"] = bool(raw.get("deceased"))
+        if not any(p[k] for k in ("name", "ssn", "dob", "dod")):
             continue
         at = f"people.{i}"
         if len(p["name"].split()) < 2:
@@ -96,16 +111,19 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                 errors[f"{at}.ssn"] = "An SSN or ITIN has 9 digits."
             else:
                 p["ssn"] = f"{ds[:3]}-{ds[3:5]}-{ds[5:]}"
-        if p["dob"]:
-            m = DOB_RE.fullmatch(p["dob"])
-            try:
-                if not m:
-                    raise ValueError
-                month, day, year = map(int, m.groups())
-                date(year, month, day)
-                p["dob"] = f"{month:02d}/{day:02d}/{year}"
-            except ValueError:
-                errors[f"{at}.dob"] = "Use MM/DD/YYYY."
+        born = when(p["dob"], f"{at}.dob", "Use MM/DD/YYYY.") if p["dob"] else None
+        if born:
+            p["dob"] = f"{born:%m/%d/%Y}"
+        if not p["deceased"]:
+            p["dod"] = ""
+        elif not p["dod"]:
+            errors[f"{at}.dod"] = "Enter the date of death (MM/DD/YYYY)."
+        elif died := when(p["dod"], f"{at}.dod", "Use MM/DD/YYYY."):
+            if died > date.today():
+                errors[f"{at}.dod"] = "The date of death can't be in the future."
+            elif born and died < born:
+                errors[f"{at}.dod"] = "The date of death is before the date of birth."
+            p["dod"] = f"{died:%m/%d/%Y}"
         p["role"] = p["role"] if p["role"] in ROLES else "other"
         out["people"].append(p)
 

@@ -605,6 +605,30 @@ input.secret {
   -webkit-text-security: disc;
 }
 
+.row.person {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 140px 120px 110px auto 120px auto;
+}
+
+.row.person .field {
+  width: auto;
+}
+
+@media (max-width: 1100px) {
+  .row.person {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.deceased {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin-top: 25px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .row .remove {
   margin-top: 18px;
   padding: 5px 9px;

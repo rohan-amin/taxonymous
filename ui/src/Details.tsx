@@ -8,7 +8,7 @@ type ListKey = "phones" | "emails" | "accounts" | "eins" | "cards";
 const ROLES: [string, string][] = [
   ["taxpayer", "You"], ["spouse", "Spouse"], ["dependent", "Dependent"], ["other", "Other"],
 ];
-const NEW_PERSON: Person = { name: "", ssn: "", dob: "", role: "taxpayer" };
+const NEW_PERSON: Person = { name: "", ssn: "", dob: "", role: "taxpayer", deceased: false, dod: "" };
 const NEW_ADDRESS: Address = { street: "", city: "", state: "", zip: "" };
 const LISTS: { key: ListKey; title: string; hint: string; placeholder: string; secret?: boolean }[] = [
   { key: "accounts", title: "Account numbers", placeholder: "e.g. 8320968305", secret: true,
@@ -107,9 +107,12 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
 
       <section>
         <h2>People</h2>
-        <p className="muted">You, your spouse and your dependents: whoever appears on your return.</p>
+        <p className="muted">
+          You, your spouse and your dependents: whoever appears on your return, including anyone who has
+          died. A date of death is kept for reference and left readable in documents, since it matters for taxes.
+        </p>
         {form.people.map((p, i) => (
-          <div className="row" key={i} data-testid="person">
+          <div className="row person" key={i} data-testid="person">
             <Field label="Full name" error={errors[`people.${i}.name`]} wide>
               <input value={p.name} placeholder="e.g. First Middle Last" {...quiet}
                      onChange={(e) => setPerson(i, { name: e.target.value })} />
@@ -127,6 +130,17 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
                 {ROLES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
               </select>
             </Field>
+            <label className="deceased">
+              <input type="checkbox" checked={!!p.deceased}
+                     onChange={(e) => setPerson(i, { deceased: e.target.checked, dod: e.target.checked ? p.dod : "" })} />
+              Deceased
+            </label>
+            {p.deceased ? (
+              <Field label="Date of death" error={errors[`people.${i}.dod`]}>
+                <input value={p.dod ?? ""} placeholder="MM/DD/YYYY" {...quiet}
+                       onChange={(e) => setPerson(i, { dod: e.target.value })} />
+              </Field>
+            ) : <div />}
             <button type="button" className="remove" title="Remove this person" aria-label="Remove this person"
                     onClick={() => remove("people", i)}>×</button>
           </div>

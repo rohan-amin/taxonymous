@@ -130,3 +130,12 @@ def test_numbers_match_however_they_were_entered(entered, ssn):
                         ("ph 5555550142", "5555550142"), ("SSN 987-65-4323", "987-65-4323"),
                         ("TIN 987654323", "987654323")]:
         assert value in [f.text for f in findings(line, profile=profile)], (line, entered, ssn)
+
+
+def test_a_date_of_death_stays_readable():
+    profile = Profile.from_dict({"people": [{"name": "Quinn L Abernathy", "dob": "09/24/1976",
+                                             "deceased": True, "dod": "03/14/2025"}]})
+    found = [f.text for f in findings("Decedent: Quinn L Abernathy", "Date of birth: 09/24/1976",
+                                      "Date of death: 03/14/2025", profile=profile)]
+    assert "Quinn L Abernathy" in found and "09/24/1976" in found
+    assert not any("2025" in t for t in found)

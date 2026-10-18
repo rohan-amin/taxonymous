@@ -76,6 +76,8 @@ export interface Person {
   ssn: string;
   dob: string;
   role: string;
+  deceased: boolean;
+  dod: string; // date of death: kept readable in documents
 }
 
 export interface Address {

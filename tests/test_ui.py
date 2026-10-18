@@ -259,6 +259,9 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     address.get_by_label("City").fill("Tacoma")
     address.get_by_label("State").fill("WA")
     address.get_by_label("ZIP").fill("98458")
+    assert spouse.get_by_label("Date of death").count() == 0
+    spouse.get_by_label("Deceased").check()
+    spouse.get_by_label("Date of death").fill("3/14/2025")
     pg.get_by_role("button", name="Add account number").click()
     pg.get_by_label("Account number 1").fill("8320968305")
 
@@ -272,6 +275,7 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     saved = json.loads(ws.profile_path.read_text())
     assert [p["role"] for p in saved["people"]] == ["taxpayer", "spouse"]
     assert saved["people"][0]["ssn"] == "987-65-4323" and saved["accounts"] == ["8320968305"]
+    assert saved["people"][1]["deceased"] is True and saved["people"][1]["dod"] == "03/14/2025"
     assert pg.locator(".badge.needed").count() == 0
 
     pg.get_by_label("hide numbers on screen").check()

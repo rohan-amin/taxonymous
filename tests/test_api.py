@@ -371,7 +371,7 @@ def test_details_are_cleaned_saved_and_private(fresh):
     assert r.status_code == 200
     saved = json.loads(ws.profile_path.read_text())
     assert saved["people"] == [{"name": "Avery F Abernathy", "ssn": "987-65-4323", "dob": "04/07/1984",
-                                "role": "taxpayer"}]
+                                "role": "taxpayer", "dod": "", "deceased": False}]
     assert saved["addresses"][0]["state"] == "WA" and saved["eins"] == ["00-4869454"]
     assert saved["phones"] == ["(555) 555-0188"]
     assert ws.profile_path.stat().st_mode & 0o777 == 0o600
@@ -392,6 +392,24 @@ def test_bad_details_name_the_fields_and_save_nothing(fresh):
     assert not any("987" in m or "Avery" in m for m in fields.values())  # messages never echo values
     assert not ws.profile_path.exists()
     assert client.put("/api/profile", json={}).status_code == 422  # at least one person
+
+
+def test_a_person_can_be_marked_deceased_with_a_date_of_death(fresh):
+    client, ws = fresh
+    spouse = {"name": "Quinn L Abernathy", "dob": "9/24/1976", "role": "spouse", "deceased": True}
+    def with_spouse(**extra):
+        return {**FORM, "people": [FORM["people"][0], {**spouse, **extra}]}
+
+    r = client.put("/api/profile", json=with_spouse())
+    assert r.status_code == 422 and set(r.json()["detail"]["fields"]) == {"people.1.dod"}  # it's required
+    for dod, problem in [("3/14/2999", "future"), ("3/14/1970", "before the date of birth")]:
+        r = client.put("/api/profile", json=with_spouse(dod=dod))
+        assert problem in r.json()["detail"]["fields"]["people.1.dod"]
+    r = client.put("/api/profile", json=with_spouse(dod="3/14/2025"))
+    assert r.status_code == 200
+    people = json.loads(ws.profile_path.read_text())["people"]
+    assert people[1]["deceased"] is True and people[1]["dod"] == "03/14/2025"
+    assert people[0]["deceased"] is False and people[0]["dod"] == ""
 
 
 def test_details_need_the_token(fresh):
