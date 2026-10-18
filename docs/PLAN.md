@@ -126,16 +126,44 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
   - The token arrives in the URL once and is moved to session storage, out of the address bar. Files can be added with the button or by dropping them on the window. The list refreshes itself, so runs started from the CLI show up.
   - Build with `cd ui && npm install && npm run build` (output in `ui/dist`, gitignored). `npm run dev` serves the UI on :5173 against `taxonymous serve --no-browser`.
 
-### M7 — Hardening
+### M7 — Hardening ✅
 - Fuzz the redactor with odd PDFs (rotated pages, Type3 fonts, text drawn as vector paths, incremental updates, encrypted PDFs)
 - Native wrapper spike (pywebview vs Tauri)
+- **Result:** `tools/fixtures/odd.py` builds 23 odd PDFs carrying the household's identifiers. `tests/test_odd_pdfs.py` runs them through the pipeline. Each output is checked independently of the verifier: the raw bytes of every object and stream, all text including text off the page, the outline and the page labels.
+  - **Handled before M7, now covered by tests:** rotated pages (90/180/270), sideways text, Type3 fonts, white and 1-pt text, invisible text, text under an opaque picture, Form XObjects used on two pages, pages sharing one content stream, incremental updates, owner-password encryption, truncated files. A user password is refused with a clear message.
+  - **Found leaking silently, now fixed:**
+    - text drawn outside the page;
+    - text outside the CropBox;
+    - text in a hidden layer;
+    - `/ActualText` on marked content;
+    - bookmarks;
+    - page labels.
 
-## Known limitations after M6
+    All of these passed verification while the value was still in the file. `sanitize.py` now runs before detection:
+    - The document and page dictionaries are cut down to an allow-list (no outline, labels, layers, structure tree, names, forms).
+    - Hidden layers are made visible, so they are detected and redacted.
+    - `/ActualText`, `/Alt` and `/E` are stripped from content.
+    - Each page is clipped to its visible area. Page coordinates don't change.
+  - **Caught by verification but not fixed, now fixed:** a broken font encoding, text drawn as outlines, and letter-spaced text. When OCR of the output finds something on a text page that its text layer doesn't have, that page is redacted again as an image from OCR. The report says so (shown in the UI and CLI).
+  - **Verifier:**
+    - A new *raw* check reads every object and non-binary stream (literal, hex and UTF-16 strings) for known values.
+    - The *structure* check enforces the same allow-list and flags anything drawn outside the page.
+    - Run on the untouched odd files, it fails each hiding place by itself.
+  - **Corpus run in one shared workspace (new slow test):** this exposed a pre-M7 false positive. The label detector took the 1099-G footer "Rev. 12-2026" for an account number. Every later form printing that revision then failed. A month-year is no longer an ID value.
+  - **Time:** 150 pages redact + verify in 50 s (47 s before; the raw scan and sanitizing cost ~7%).
+  - **Native wrapper:** pywebview runs the unchanged UI in a WKWebView window (`tools/native_window.py`). Recommendation and packaging notes in [`NATIVE.md`](NATIVE.md). The app's size (~1.1 GB) comes from torch and the name model, whichever wrapper is used.
+  - UI fix: a "Verifying…" banner stayed up when a job finished before the first poll.
+
+## Known limitations after M7
 
 - Scanned pages are output as images, so they are bigger than the original and have no text layer except placeholders; the `.txt` carries the (redacted) OCR text instead.
 - OCR word boxes are sometimes taller than the text. The padded black box can then clip the top of the line below (seen once in 40 degraded fixtures).
 - A value OCR can't read at all can't be detected. The verifier OCRs the output the same way, so it can't see it either. Low-quality scans should be reviewed by eye (the review UI is M6).
-- Rotated pages (`/Rotate`), and pictures layered on top of other pictures in a text PDF, are untested (M7).
+- Pictures layered on top of other pictures in a text PDF are untested.
+- A page rebuilt as an image (text layer didn't match the page) loses its text layer, like a scan.
+- Values found in one document are checked for in every other document in the workspace (fail closed). A false positive in one document can therefore fail others until it is fixed or shown in the review UI.
+- `/ActualText` is removed by matching strings after `/ActualText`, `/Alt` and `/E` in content streams, not by a full content-stream parser. The raw check catches any that survive.
+- No native app yet: `tools/native_window.py` is a spike. Bundling Tesseract and the name model, plus signing and notarization, is the remaining work ([`NATIVE.md`](NATIVE.md)).
 - A third party's name that is neither next to a label nor in prose (a name alone in a table cell, a heading that isn't a legal entity name) is not caught unless it also appears somewhere that is.
 - The name model can still miss a name; a surname alone is caught reliably only when the full name also appears in the document.
 - A bare 7+ digit number on a scan is treated as an ID, so an amount OCR misread without its decimal point (`15,158.60` read as `1515880`) is redacted. A few amounts per 300 on degraded scans.

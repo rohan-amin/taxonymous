@@ -1,7 +1,11 @@
 """Verification gate. A redacted file is released only if every check passes.
 
 Checks, all fail-closed:
-  structure  no metadata, XMP, annotations, form fields, attachments, JavaScript, links
+  structure  no metadata, XMP, annotations, form fields, attachments, JavaScript, links;
+             document and page dictionaries hold only allow-listed keys (no outline,
+             page labels, layers, structure tree...); nothing drawn outside the page
+  raw        no known value in any object or stream of the file, as text or UTF-16,
+             wherever it is (catches hiding places the other checks don't render)
   text       the PDF text layer and the .txt contain no known value (anything redacted
              from this document, any profile value in any format) and no identifier-shaped
              pattern; placeholders are ignored
@@ -30,6 +34,7 @@ import pymupdf
 from . import ocr as ocr_mod
 from .detect import ProfileMatcher, digits, pattern_hits
 from .pagetext import PageText
+from .sanitize import CATALOG_KEYS, PAGE_KEYS, outside
 
 PLACEHOLDER_RE = re.compile(r"<[A-Z]+_[A-Z0-9]+>")
 MASK_RE = re.compile(r"[*Xx•#]{2,}")
@@ -56,6 +61,7 @@ class Report:
     issues: list[Issue] = field(default_factory=list)
     pages: int = 0
     ocr: bool = True
+    notes: list[str] = field(default_factory=list)  # what was done to make it pass, for the reviewer
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -105,6 +111,15 @@ class Scanner:
             elif len(_squash(k.value).strip()) >= 4:
                 self.words.append((k.kind, _squash(k.value), _squash(k.value, True)))
 
+    def known(self, text: str) -> list[str]:
+        """Kinds of known values (not generic patterns) in raw file text: exact matches only."""
+        text = PLACEHOLDER_RE.sub(" ", text)
+        found = [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
+        squashed = _squash(text)
+        found += [kind for kind, exact, _ in self.words if exact in squashed]
+        found += [kind for kind, exact, _ in self.numbers if exact.search(text)]
+        return found
+
     def scan(self, text: str, fuzzy: bool = False) -> list[str]:
         """Kinds of everything that should not be in this text."""
         text = PLACEHOLDER_RE.sub(" ", text)
@@ -114,6 +129,11 @@ class Scanner:
         found += [kind for kind, exact, loose in self.words if (loose if fuzzy else exact) in squashed]
         found += [kind for kind, exact, loose in self.numbers if (loose if fuzzy else exact).search(text)]
         return found
+
+
+def _keys(doc: pymupdf.Document, xref: int) -> list[str]:
+    """Keys that are set: a null value is the same as no key."""
+    return [k for k in doc.xref_get_keys(xref) if doc.xref_get_key(xref, k)[0] != "null"]
 
 
 def _structure(doc: pymupdf.Document) -> list[Issue]:
@@ -131,7 +151,15 @@ def _structure(doc: pymupdf.Document) -> list[Issue]:
         issues.append(Issue("structure", "javascript-or-actions"))
     if "/AcroForm" in catalog:
         issues.append(Issue("structure", "form"))
+    for key in _keys(doc, doc.pdf_catalog()):
+        if key not in CATALOG_KEYS:
+            issues.append(Issue("structure", f"document-{key}"))
     for page in doc:
+        for key in _keys(doc, page.xref):
+            if key not in PAGE_KEYS and not (key == "Annots" and page.first_annot is None):
+                issues.append(Issue("structure", f"page-{key}", page.number + 1))
+        if outside(page):
+            issues.append(Issue("structure", "outside-the-page", page.number + 1))
         if page.first_annot is not None:
             issues.append(Issue("structure", "annotations", page.number + 1))
         if page.first_widget is not None:
@@ -139,6 +167,40 @@ def _structure(doc: pymupdf.Document) -> list[Issue]:
         if page.get_links():
             issues.append(Issue("structure", "links", page.number + 1))
     return issues
+
+
+HEX_RE = re.compile(rb"<([0-9A-Fa-f\s]+)>")
+BINARY_SUBTYPES = {"/Image", "/Type1C", "/CIDFontType0C", "/OpenType"}
+
+
+def _decode(raw: bytes) -> str:
+    text = raw.decode("latin-1")
+    for m in HEX_RE.finditer(raw):  # hex strings: <FEFF...> is UTF-16
+        h = re.sub(rb"\s", b"", m.group(1))
+        b = bytes.fromhex((h + b"0" * (len(h) % 2)).decode())
+        text += " " + (b[2:].decode("utf-16-be", "replace") if b[:2] == b"\xfe\xff" else b.decode("latin-1"))
+    if b"\xfe\xff" in raw:  # literal UTF-16 strings
+        for chunk in raw.split(b"\xfe\xff")[1:]:
+            text += " " + chunk[: len(chunk) // 2 * 2].decode("utf-16-be", "replace")
+    return text
+
+
+def _raw(doc: pymupdf.Document, scanner: Scanner) -> list[Issue]:
+    """Every object and every non-binary stream, read as text."""
+    found = set()
+    for xref in range(1, doc.xref_length()):
+        try:
+            parts = [doc.xref_object(xref, compressed=False).encode("latin-1", "replace")]
+            if doc.xref_is_stream(xref):
+                keys = doc.xref_get_keys(xref)
+                binary = doc.xref_get_key(xref, "Subtype")[1] in BINARY_SUBTYPES or "Length1" in keys
+                if not binary:
+                    parts.append(doc.xref_stream(xref) or b"")
+        except Exception:  # a free or broken object: nothing to read
+            continue
+        for part in parts:
+            found.update(scanner.known(_decode(part)))
+    return [Issue("raw", k) for k in sorted(found)]
 
 
 def _without_shown(doc: pymupdf.Document, shown: list[Shown]) -> pymupdf.Document:
@@ -190,11 +252,16 @@ def _passes(page: pymupdf.Page) -> tuple[str, ...]:
 def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | None = None,
            ocr: bool = True, allowed: Iterable[str] = (), shown: list[Shown] = ()) -> Report:
     report = Report(pdf=str(pdf), ocr=ocr)
+    allowed = list(allowed)
     scanner = Scanner(matcher, known, allowed)
     try:
         doc = pymupdf.open(pdf)
         report.pages = doc.page_count
         report.issues += _structure(doc)
+        # a value left readable in one spot is in the file's raw text; the text and OCR
+        # checks below hold it to that spot
+        excused = [v for s in shown for v in s.values]
+        report.issues += _raw(doc, Scanner(matcher, known, [*allowed, *excused]))
         if shown:
             doc = _without_shown(doc, list(shown))
         for page in doc:

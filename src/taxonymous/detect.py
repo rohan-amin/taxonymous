@@ -45,6 +45,7 @@ AMOUNT_RE = re.compile(r"^\(?-?\$?\s*-?\d[\d,]*\.\d{2}\)?%?$")
 DATE_RE = re.compile(
     r"\b(?:\d{1,2}[/-]\d{1,2}[/-](?:\d{4}|\d{2})|\d{4}-\d{2}-\d{2}|"
     r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})\b", IC)
+MONTH_YEAR_RE = re.compile(r"(?:0?[1-9]|1[0-2])[/-](?:19|20)\d{2}")  # "Rev. 12-2026", "exp 04/2027"
 TIN_VALUE_RE = re.compile(r"(?<![\w*•])(?:[\dXx*•]{3}[- ]?[\dXx*•]{2}[- ]?\d{4}|\d{2}-?\d{7})(?!\d)")
 # just the last four, printed right after the label: "SSN 5455", "SSN: ending in 5455"
 LAST4_VALUE_RE = re.compile(r"^(?:\(?(?:ending in|last (?:4|four)(?: digits)?)\)?[\s:]*)?"
@@ -301,7 +302,8 @@ def _value_in(text: str, vtype: str, inline: bool = False) -> tuple[int, int] | 
         return _card_value(text)
     elif vtype == "id":
         m = next((m for m in ID_VALUE_RE.finditer(text)
-                  if not is_amount(m.group()) and not DATE_RE.fullmatch(m.group())), None)
+                  if not is_amount(m.group()) and not DATE_RE.fullmatch(m.group())
+                  and not MONTH_YEAR_RE.fullmatch(m.group())), None)
     else:
         s = text.strip()
         if not s or len(s) > 80 or not re.search(r"[A-Za-z]{2}", s) or is_amount(s):

@@ -12,6 +12,7 @@ from taxonymous.detect import ProfileMatcher, detect
 from taxonymous.pagetext import extract
 from taxonymous.pipeline import Workspace, run
 from taxonymous.profile import Profile
+from taxonymous.sanitize import allow_list
 from taxonymous.verify import Known, verify
 
 
@@ -45,6 +46,7 @@ def image_only_pdf(path, text: str):
     doc = pymupdf.open()
     page = doc.new_page(width=400, height=60)
     page.insert_image(page.rect, stream=png)
+    allow_list(doc)  # MuPDF writes its name into the catalog; the redactor removes it too
     doc.save(path)
 
 

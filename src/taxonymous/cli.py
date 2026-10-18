@@ -84,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
         for o in outcomes:
             status = "PASS -> ready-to-upload" if o.report.passed else f"FAIL ({_summary(o.report.issues)})"
             print(f"{o.source.name}: {status}")
+            for note in o.report.notes:
+                print(f"  note: {note}")
         failed = [o for o in outcomes if not o.report.passed]
         if failed:
             print(f"{len(failed)} file(s) held back; details in {ws.work}/*.report.json", file=sys.stderr)

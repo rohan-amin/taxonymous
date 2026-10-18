@@ -37,6 +37,7 @@ from PIL import Image, ImageDraw, ImageOps
 from . import ocr
 from .detect import Finding, ProfileMatcher, detect, merge, relink, repeat_values, repeated
 from .pagetext import PageText, extract
+from .sanitize import allow_list, sanitize
 from .vault import Vault
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif", ".webp"}
@@ -336,7 +337,9 @@ def _image_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
 
 
 def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
-                overrides: Overrides | None = None) -> Result:
+                overrides: Overrides | None = None, as_images: frozenset[int] = frozenset()) -> Result:
+    """`as_images`: 0-based pages to rebuild from OCR even though they have a text layer
+    (one that doesn't match what the page shows)."""
     src, out_dir = Path(src), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = output_stem(src)
@@ -369,11 +372,12 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         if doc.needs_pass:
             raise ValueError(f"{src.name} is password-protected; remove the password first")
         doc.bake(annots=True, widgets=True)
+        sanitize(doc)  # only what the pages show is left to detect
         # pass 1: find everything, on every page
         text_pages: dict[int, tuple[PageText, list[Finding]]] = {}
         scan_numbers, mixed_numbers = [], []
         for page in doc:
-            if not _visible_text(page):
+            if page.number in as_images or not _visible_text(page):
                 scan_numbers.append(page.number)
                 continue
             pt = extract(page)
@@ -420,6 +424,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         for widget in list(page.widgets()):
             page.delete_widget(widget)
     doc.set_metadata({})
+    allow_list(doc)  # rebuilding pages and clearing metadata can add keys back
     doc.save(result.pdf, garbage=4, deflate=True, clean=True)
     doc.close()
 

@@ -19,7 +19,8 @@ Open-source tool that scrubs sensitive information from tax documents (1099s, W-
 
 ## Commands
 
-- `uv run pytest` / `uv run ruff check .`; `uv run pytest -m slow` adds the 150-page timing test
+- `uv run pytest` / `uv run ruff check .`; `uv run pytest -m slow` adds the 150-page timing test and the whole corpus in one workspace
+- `tools/fixtures/odd.py` builds odd PDFs (hidden text, broken fonts, rotation, encryption...) for `tests/test_odd_pdfs.py`; `src/taxonymous/sanitize.py` is what makes a PDF hold only what its pages show
 - `uv run python -m tools.fixtures.generate` builds the fake corpus into `tests/fixtures/generated/` (gitignored); `manifest.json` there is the ground truth (`redact` / `keep` per document).
 - `uv run taxonymous init|run --workspace DIR` (inbox → work → verify → ready-to-upload); `redact` and `verify` for single files. Takes PDFs (text, scanned, mixed) and photos.
 - `uv run taxonymous serve --workspace DIR` runs the review UI + local API (127.0.0.1 only, token required); endpoints are listed in `src/taxonymous/api.py`.
@@ -33,4 +34,4 @@ Open-source tool that scrubs sensitive information from tax documents (1099s, W-
 
 ## Open questions
 
-- None blocking. M0–M2 done 2026-10-16, M3 (scans and photos), M4 (long and free-form documents), M5 (local API) and M6 (review UI) 2026-10-17; next is M7 (hardening).
+- None blocking. M0–M2 done 2026-10-16, M3 (scans and photos), M4 (long and free-form documents), M5 (local API) and M6 (review UI) 2026-10-17, M7 (hardening: odd PDFs, native wrapper spike) 2026-10-18. All planned milestones are done; native packaging is the open follow-up (`docs/NATIVE.md`).

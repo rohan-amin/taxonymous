@@ -38,7 +38,7 @@ export interface Shown {
 export interface DocDetail extends DocSummary {
   pages: [number, number][];
   regions: Region[];
-  report: { passed: boolean; issues: Issue[]; pages: number } | null;
+  report: { passed: boolean; issues: Issue[]; pages: number; notes?: string[] } | null;
   kept: string[];
   shown: Shown[]; // single boxes left in the clear
   added: { page: number; rect: Rect }[];

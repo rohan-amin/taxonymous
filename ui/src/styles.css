@@ -305,6 +305,14 @@ main {
   color: var(--info);
 }
 
+.note {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+  background: var(--info-bg);
+  color: var(--info);
+}
+
 .kept {
   padding: 6px 14px;
   font-size: 13px;

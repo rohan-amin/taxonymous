@@ -69,13 +69,15 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
     if (!detail || !busy(detail.status)) return;
     const t = setInterval(async () => {
       const d = await load();
-      if (!busy(d.status)) {
-        setMessage((m) => (m?.tone === "info" ? null : m)); // "Verifying…" is over: show the outcome
-        onChanged();
-      }
+      if (!busy(d.status)) onChanged();
     }, 700);
     return () => clearInterval(t);
   }, [detail, load, onChanged]);
+
+  // "Verifying…" is over (even if it finished before the first poll): show the outcome
+  useEffect(() => {
+    if (detail && !busy(detail.status)) setMessage((m) => (m?.tone === "info" ? null : m));
+  }, [detail]);
 
   // after a final scrub, report how it went
   useEffect(() => {
@@ -384,6 +386,10 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
             : message?.text ?? `Verification ${detail.status === "error" ? "could not run" : "failed"}: ${issueText(detail)}. Export is blocked.`}
         </div>
       )}
+
+      {!working && detail.report?.notes?.map((note) => (
+        <div key={note} className="note" data-testid="note">{note}</div>
+      ))}
 
       {(detail.kept.length > 0 || detail.shown.length > 0) && (
         <div className="kept">

@@ -105,6 +105,13 @@ def test_amounts_are_never_taken_by_patterns_or_labels():
     assert texts("Account number: 1,234.56", "Control number", "98,765.43") == []
 
 
+def test_a_month_and_year_is_not_an_account_number():
+    """A form's revision date under an ID label (1099-G: "State identification no." above
+    "Form 1099-G (Rev. 12-2026)")."""
+    assert texts("Account number", "Form 1099-G (Rev. 12-2026)") == []
+    assert texts("Card expires: 04/2027") == []
+
+
 def test_public_institution_names_are_kept_but_private_ones_are_not():
     kept = texts("PAYER'S name", "Contoso Bank, N.A.")
     assert "Contoso Bank, N.A." not in kept

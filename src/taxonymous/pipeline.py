@@ -79,12 +79,32 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
     else:
         found = [Known(f.kind, f.text) for f in result.findings]
         report = _verify(ws, stem, matcher, vault, overrides, found, ocr)
+        retry = _text_layer_mismatch(report, result)
+        if retry:
+            # what OCR sees on these pages isn't what their text layer says (a broken font
+            # encoding, text drawn as outlines): redact them from what they show instead
+            result = redact_file(src, ws.work, matcher, vault, overrides, as_images=retry)
+            found = [Known(f.kind, f.text) for f in result.findings]
+            report = _verify(ws, stem, matcher, vault, overrides, found, ocr)
+            pages = ", ".join(str(n + 1) for n in sorted(retry))
+            report.notes.append(f"Page(s) {pages}: the text layer didn't match what the page shows, "
+                                "so the page was rebuilt as an image from OCR.")
         out["regions"].write_text(json.dumps(result.regions_json(), indent=2) + "\n")
     out["report"].write_text(json.dumps(report.to_json(), indent=2) + "\n")
     outcome = Outcome(Path(src), report, [], result)
     if release:
         outcome.released = export(ws, stem)
     return outcome
+
+
+def _text_layer_mismatch(report: Report, result: Result) -> frozenset[int]:
+    """0-based text pages where OCR of the output found something their text layer doesn't
+    have. When the text layer has it too, the value is plainly there, and rebuilding the
+    page from OCR would find no more than the text layer did."""
+    in_text = {(i.page, i.kind) for i in report.issues if i.check == "text"}
+    return frozenset(i.page - 1 for i in report.issues
+                     if i.check == "ocr" and i.page and i.page not in result.image_pages
+                     and (i.page, i.kind) not in in_text)
 
 
 def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, overrides: Overrides,
