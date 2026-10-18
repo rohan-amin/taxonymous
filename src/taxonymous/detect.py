@@ -52,6 +52,10 @@ LAST4_VALUE_RE = re.compile(r"^(?:\(?(?:ending in|last (?:4|four)(?: digits)?)\)
                             r"(\d{4})(?![\w.,/-])", IC)
 # an account/ID value has at least 5 digits, so form numbers ("1099-R", "5498") and years don't qualify
 ID_VALUE_RE = re.compile(r"(?<![\w*•#-])(?=(?:[A-Za-z*•#-]*\d){5})[A-Za-z0-9*•#-]{5,}(?![\w-])")
+# lowercase words that make a run of text a sentence; names and addresses don't have them
+SENTENCE_WORDS = {"is", "are", "was", "were", "be", "being", "been", "this", "that", "these", "those",
+                  "it", "its", "you", "your", "if", "will", "may", "must", "not", "has", "have", "had",
+                  "should", "can", "we", "our", "they", "their", "there", "which", "who", "would", "could"}
 # words printed on forms; a "name" made only of these is a caption, not a person
 FORM_WORDS = {"state", "city", "town", "country", "zip", "code", "postal", "province", "total", "amount",
               "date", "yes", "no", "see", "instructions", "part", "line", "box", "form", "page", "schedule",
@@ -332,6 +336,8 @@ def _value_in(text: str, vtype: str, inline: bool = False) -> tuple[int, int] | 
             return None  # a box caption like "15 State", not a name or address
         if set(re.findall(r"[a-z]+", s.lower())) <= FORM_WORDS:
             return None
+        if SENTENCE_WORDS & set(re.findall(r"\b[a-z]+\b", s)):
+            return None  # a sentence ("This information is being furnished..."), not a name or address
         start = text.index(s)
         return start, start + len(s)
     return (m.start(), m.end()) if m else None
@@ -584,7 +590,46 @@ def merge(findings: list[Finding], pt: PageText) -> list[Finding]:
     return merged
 
 
+CHECK_DIGITS_RE = re.compile(r" (\d{1,3})(?=\s|$)")
+NUMBER_KINDS = {"SSN", "EIN", "TIN", "ACCT", "CARD", "ID"}
+
+
+def _box_gap(pt: PageText, i: int, j: int) -> float | None:
+    """Horizontal gap between the boxes of text[i] and text[j], in units of their height;
+    None when they aren't side by side on one line."""
+    a, b = pt.boxes[i], pt.boxes[j]
+    if a is None or b is None or min(a.y1, b.y1) - max(a.y0, b.y0) < 0.5 * min(a.height, b.height):
+        return None
+    return (b.x0 - a.x1) / max(a.height, b.height, 1e-6)
+
+
+def continue_numbers(findings: list[Finding], pt: PageText) -> None:
+    """An identifier printed with a short trailing group after a word space ("185-2732 5",
+    a state employer ID's check digit) covers that group too, when the group ends the
+    cell: the line ends, or a column gap follows."""
+    for f in findings:
+        if f.kind not in NUMBER_KINDS or f.end < 1:
+            continue
+        m = CHECK_DIGITS_RE.match(pt.text, f.end)
+        if not m:
+            continue
+        gap = _box_gap(pt, f.end - 1, m.start(1))
+        if gap is None or gap > 0.6:  # wider than a word space: the next column
+            continue
+        after = m.end()
+        while after < len(pt.text) and pt.text[after] == " ":
+            after += 1
+        if after < len(pt.text) and pt.text[after] != "\n":
+            next_gap = _box_gap(pt, m.end() - 1, after)
+            if next_gap is not None and next_gap < 1.0:  # more of the same cell follows
+                continue
+        f.end = m.end()
+        f.text = pt.text[f.start:f.end]
+
+
 def detect(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
     """Findings on one page; `repeated` adds what the rest of the document found."""
     found = pm.find(pt) + find_patterns(pt, pm) + find_labels(pt, pm) + find_orgs(pt, pm)
-    return merge(found + find_names(pt, pm), pt)
+    found = merge(found + find_names(pt, pm), pt)
+    continue_numbers(found, pt)
+    return found

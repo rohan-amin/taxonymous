@@ -154,3 +154,44 @@ def test_a_date_of_death_stays_readable():
                                       "Date of death: 03/14/2025", profile=profile)]
     assert "Quinn L Abernathy" in found and "09/24/1976" in found
     assert not any("2025" in t for t in found)
+
+
+def placed(*items: tuple[float, str]) -> list[str]:
+    """Texts found on one line made of pieces drawn at the given x positions."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    for x, s in items:
+        page.insert_text((x, 100), s, fontsize=10)
+    return [f.text for f in detect(extract(page), ProfileMatcher(PROFILE))]
+
+
+@pytest.mark.parametrize("items, expected", [
+    ([(72, "Employer's state ID number")], None),
+    ([(72, "CA"), (110, "000-0000 5"), (250, "54367.87")], "000-0000 5"),  # check digit, then the next column
+    ([(72, "ID 0000000 5")], "0000000 5"),  # ends the line
+    ([(72, "Ref 0000000 3 shares")], "0000000"),  # more words in the same cell: not a check digit
+    ([(72, "Ref 0000000"), (160, "12")], "0000000"),  # a column away: a different cell
+])
+def test_a_trailing_check_digit_belongs_to_the_number(items, expected):
+    found = placed(*items)
+    if expected is None:
+        assert found == []
+    else:
+        assert expected in found and "54367.87" not in " ".join(found)
+
+
+@pytest.mark.parametrize("lines", [
+    ["Employee's name", "This information is"],
+    ["Employee's address and ZIP code", "This information is being furnished to the IRS."],
+    ["Recipient's name", "If you are required to file a return"],
+])
+def test_a_sentence_under_a_name_or_address_label_is_not_a_value(lines):
+    assert texts(*lines) == []
+
+
+@pytest.mark.parametrize("lines, expected", [
+    (["Employee's name", "Morgan May Delacroix"], "Morgan May Delacroix"),  # May the name, not "may"
+    (["Employee's address and ZIP code", "17 Will Rogers Ln"], "17 Will Rogers Ln"),
+])
+def test_names_and_addresses_with_word_like_parts_still_count(lines, expected):
+    assert expected in texts(*lines)
