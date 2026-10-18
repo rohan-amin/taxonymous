@@ -352,9 +352,10 @@ FORM = {
     "addresses": [{"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "wa", "zip": "98458"}],
     "phones": ["(555) 555-0188", ""],
     "emails": ["avery.abernathy@example.com"],
-    "eins": ["004869454"],
-    "accounts": ["8320968305"],
-    "cards": [],
+    "eins": [{"ein": "004869454", "description": "Household employer"}],
+    "accounts": [{"institution": "Contoso Bank", "number": "8320968305", "name": "Joint checking"},
+                 {"institution": "", "number": "", "name": ""}],  # an empty row
+    "cards": [{"number": "4111111111111111", "description": "Travel card"}],
 }
 
 
@@ -372,7 +373,11 @@ def test_details_are_cleaned_saved_and_private(fresh):
     saved = json.loads(ws.profile_path.read_text())
     assert saved["people"] == [{"name": "Avery F Abernathy", "ssn": "987-65-4323", "dob": "04/07/1984",
                                 "role": "taxpayer", "dod": "", "deceased": False}]
-    assert saved["addresses"][0]["state"] == "WA" and saved["eins"] == ["00-4869454"]
+    assert saved["addresses"][0]["state"] == "WA"
+    assert saved["eins"] == [{"ein": "00-4869454", "description": "Household employer"}]
+    assert saved["accounts"] == [{"institution": "Contoso Bank", "number": "8320968305",
+                                  "name": "Joint checking"}]
+    assert saved["cards"] == [{"number": "4111 1111 1111 1111", "description": "Travel card"}]
     assert saved["phones"] == ["(555) 555-0188"]
     assert ws.profile_path.stat().st_mode & 0o777 == 0o600
     assert client.get("/api/profile").json()["profile"] == saved
@@ -383,12 +388,14 @@ def test_bad_details_name_the_fields_and_save_nothing(fresh):
     client, ws = fresh
     bad = {**FORM, "people": [{"name": "Avery", "ssn": "987-65-432", "dob": "13/40/1984"}],
            "addresses": [{"street": "", "city": "Tacoma", "state": "Wash", "zip": "984"}],
-           "eins": ["12345"], "phones": ["", "555-0188"]}
+           "eins": [{"ein": "12345", "description": "x"}], "phones": ["", "555-0188"],
+           "accounts": [{"institution": "Contoso Bank", "number": "", "name": ""}]}
     r = client.put("/api/profile", json=bad)
     assert r.status_code == 422
     fields = r.json()["detail"]["fields"]
     assert set(fields) == {"people.0.name", "people.0.ssn", "people.0.dob", "addresses.0.street",
-                           "addresses.0.state", "addresses.0.zip", "eins.0", "phones.1"}
+                           "addresses.0.state", "addresses.0.zip", "eins.0.ein", "phones.1",
+                           "accounts.0.number"}
     assert not any("987" in m or "Avery" in m for m in fields.values())  # messages never echo values
     assert not ws.profile_path.exists()
     assert client.put("/api/profile", json={}).status_code == 422  # at least one person
@@ -410,6 +417,18 @@ def test_a_person_can_be_marked_deceased_with_a_date_of_death(fresh):
     people = json.loads(ws.profile_path.read_text())["people"]
     assert people[1]["deceased"] is True and people[1]["dod"] == "03/14/2025"
     assert people[0]["deceased"] is False and people[0]["dod"] == ""
+
+
+def test_an_older_profile_with_plain_numbers_still_loads(fresh):
+    client, ws = fresh
+    ws.profile_path.parent.mkdir(parents=True, exist_ok=True)
+    older = {"people": [{"name": "Avery F Abernathy"}], "accounts": ["8320968305"],
+             "eins": ["00-4869454"], "cards": ["4111111111111111"]}
+    ws.profile_path.write_text(json.dumps(older))
+    p = client.get("/api/profile").json()["profile"]
+    assert p["accounts"] == [{"institution": "", "number": "8320968305", "name": ""}]
+    assert p["eins"] == [{"ein": "00-4869454", "description": ""}]
+    assert p["cards"] == [{"number": "4111 1111 1111 1111", "description": ""}]
 
 
 def test_details_need_the_token(fresh):

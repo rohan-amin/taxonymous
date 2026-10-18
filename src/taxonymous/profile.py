@@ -5,8 +5,13 @@ Schema (plain JSON, lives in the vault folder, never committed):
   "people":    [{"name": "First M Last", "ssn": "...", "dob": "MM/DD/YYYY", "role": "taxpayer",
                  "deceased": false, "dod": "MM/DD/YYYY"}],
   "addresses": [{"street": "...", "city": "...", "state": "XX", "zip": "....."}],
-  "phones": [...], "emails": [...], "eins": [...], "accounts": [...], "cards": [...]
+  "phones": [...], "emails": [...],
+  "accounts":  [{"institution": "...", "number": "...", "name": "..."}],
+  "eins":      [{"ein": "..", "description": "..."}],
+  "cards":     [{"number": "...", "description": "..."}]
 }
+Only the numbers are redacted; institution, account name and description are the user's
+own labels. Older profiles listed plain strings for accounts, EINs and cards; both load.
 """
 
 import json
@@ -60,10 +65,30 @@ class Profile:
             addresses=[Address(**a) for a in d.get("addresses", [])],
             phones=list(d.get("phones", [])),
             emails=list(d.get("emails", [])),
-            eins=list(d.get("eins", [])),
-            accounts=list(d.get("accounts", [])),
-            cards=list(d.get("cards", [])),
+            eins=[_number(e, "eins") for e in d.get("eins", [])],
+            accounts=[_number(a, "accounts") for a in d.get("accounts", [])],
+            cards=[_number(c, "cards") for c in d.get("cards", [])],
         )
+
+
+# per kind of record: the field that is the identifier, and all of its fields
+RECORDS = {
+    "accounts": ("number", ("institution", "number", "name")),
+    "eins": ("ein", ("ein", "description")),
+    "cards": ("number", ("number", "description")),
+}
+
+
+def _record(item, key: str) -> dict:
+    """A record as a dict, from either form (a plain string is the older format)."""
+    main, fields = RECORDS[key]
+    if isinstance(item, dict):
+        return {f: item.get(f) or "" for f in fields}
+    return {f: (item if f == main else "") for f in fields}
+
+
+def _number(item, key: str) -> str:
+    return str(_record(item, key)[RECORDS[key][0]])
 
 
 ROLES = ("taxpayer", "spouse", "dependent", "other")
@@ -74,6 +99,15 @@ EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 def _digits(s: str) -> str:
     return re.sub(r"\D", "", s)
+
+
+def _phone_ok(v: str) -> bool:
+    ds = _digits(v)
+    return len(ds) == 10 or len(ds) == 11 and ds[0] == "1"
+
+
+def _account_ok(v: str) -> bool:
+    return len(re.sub(r"[^A-Za-z0-9]", "", v)) >= 4
 
 
 def clean(d: dict) -> tuple[dict, dict[str, str]]:
@@ -142,29 +176,42 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
             errors[f"{at}.zip"] = "Use 5 digits (or ZIP+4)."
         out["addresses"].append(a)
 
-    checks = {
-        "phones": (lambda v: len(_digits(v)) == 10 or len(_digits(v)) == 11 and _digits(v)[0] == "1",
-                   "Enter a 10-digit US phone number."),
+    lists = {
+        "phones": (_phone_ok, "Enter a 10-digit US phone number."),
         "emails": (lambda v: EMAIL_RE.fullmatch(v), "Enter an email address."),
-        "eins": (lambda v: len(_digits(v)) == 9, "An EIN has 9 digits."),
-        "accounts": (lambda v: len(re.sub(r"[^A-Za-z0-9]", "", v)) >= 4,
-                     "Enter at least 4 letters or digits."),
-        "cards": (lambda v: 13 <= len(_digits(v)) <= 19, "A card number has 13 to 19 digits."),
     }
-    for key, (ok, message) in checks.items():
+    for key, (ok, message) in lists.items():
         for i, v in enumerate(d.get(key) or []):
             v = text(v)
             if not v:
                 continue
             if not ok(v):
                 errors[f"{key}.{i}"] = message
-            elif key == "eins":
-                ds = _digits(v)
-                v = f"{ds[:2]}-{ds[2:]}"
             elif key == "phones":
                 ds = _digits(v)[-10:]  # without the +1 country code
                 v = f"({ds[:3]}) {ds[3:6]}-{ds[6:]}"
             out[key].append(v)
+
+    numbers = {  # the identifier of each record: (valid?, message, stored as)
+        "accounts": (_account_ok, "Enter at least 4 letters or digits.", lambda v: v),
+        "eins": (lambda v: len(_digits(v)) == 9, "An EIN has 9 digits.",
+                 lambda v: f"{_digits(v)[:2]}-{_digits(v)[2:]}"),
+        "cards": (lambda v: 13 <= len(_digits(v)) <= 19, "A card number has 13 to 19 digits.",
+                  lambda v: " ".join(re.findall(r"\d{1,4}", _digits(v)))),
+    }
+    for key, (ok, message, stored) in numbers.items():
+        main = RECORDS[key][0]
+        for i, item in enumerate(d.get(key) or []):
+            r = {f: text(v) for f, v in _record(item, key).items()}
+            if not any(r.values()):
+                continue
+            if not r[main]:
+                errors[f"{key}.{i}.{main}"] = "Enter the number."
+            elif not ok(r[main]):
+                errors[f"{key}.{i}.{main}"] = message
+            else:
+                r[main] = stored(r[main])
+            out[key].append(r)
     return out, errors
 
 

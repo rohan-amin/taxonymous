@@ -87,14 +87,30 @@ export interface Address {
   zip: string;
 }
 
+export interface Account {
+  institution: string;
+  number: string;
+  name: string;
+}
+
+export interface Ein {
+  ein: string;
+  description: string;
+}
+
+export interface Card {
+  number: string;
+  description: string;
+}
+
 export interface Profile {
   people: Person[];
   addresses: Address[];
   phones: string[];
   emails: string[];
-  eins: string[];
-  accounts: string[];
-  cards: string[];
+  accounts: Account[];
+  eins: Ein[];
+  cards: Card[];
 }
 
 export interface ProfileState {

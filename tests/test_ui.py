@@ -262,8 +262,11 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     assert spouse.get_by_label("Date of death").count() == 0
     spouse.get_by_label("Deceased").check()
     spouse.get_by_label("Date of death").fill("3/14/2025")
-    pg.get_by_role("button", name="Add account number").click()
-    pg.get_by_label("Account number 1").fill("8320968305")
+    pg.get_by_role("button", name="Add an account").click()
+    account = pg.get_by_test_id("record-accounts").first
+    account.get_by_label("Institution").fill("Contoso Bank")
+    account.get_by_label("Account number").fill("8320968305")
+    account.get_by_label("Account name").fill("Joint checking")
 
     pg.get_by_role("button", name="Save").click()
     pg.get_by_text("An SSN or ITIN has 9 digits.").wait_for()
@@ -274,7 +277,9 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     pg.wait_for_function("document.querySelector('[data-testid=details-message]')?.innerText === 'Saved.'")
     saved = json.loads(ws.profile_path.read_text())
     assert [p["role"] for p in saved["people"]] == ["taxpayer", "spouse"]
-    assert saved["people"][0]["ssn"] == "987-65-4323" and saved["accounts"] == ["8320968305"]
+    assert saved["people"][0]["ssn"] == "987-65-4323"
+    assert saved["accounts"] == [{"institution": "Contoso Bank", "number": "8320968305",
+                                  "name": "Joint checking"}]
     assert saved["people"][1]["deceased"] is True and saved["people"][1]["dod"] == "03/14/2025"
     assert pg.locator(".badge.needed").count() == 0
 

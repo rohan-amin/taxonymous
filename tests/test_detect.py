@@ -132,6 +132,21 @@ def test_numbers_match_however_they_were_entered(entered, ssn):
         assert value in [f.text for f in findings(line, profile=profile)], (line, entered, ssn)
 
 
+def test_only_the_number_of_an_account_ein_or_card_is_matched():
+    profile = Profile.from_dict({
+        "accounts": [{"institution": "Contoso Bank", "number": "8320968305", "name": "Joint checking"}],
+        "eins": [{"ein": "00-4869454", "description": "Household employer"}],
+        "cards": [{"number": "4111 1111 1111 1111", "description": "Travel card"}]})
+    found = texts_with(profile, "Contoso Bank Joint checking acct 8320968305", "EIN 00-4869454",
+                       "Card 4111111111111111")
+    assert {"8320968305", "00-4869454", "4111111111111111"} <= set(found)
+    assert not any("Contoso" in t or "checking" in t for t in found)
+
+
+def texts_with(profile, *lines):
+    return [f.text for f in findings(*lines, profile=profile)]
+
+
 def test_a_date_of_death_stays_readable():
     profile = Profile.from_dict({"people": [{"name": "Quinn L Abernathy", "dob": "09/24/1976",
                                              "deceased": True, "dod": "03/14/2025"}]})
