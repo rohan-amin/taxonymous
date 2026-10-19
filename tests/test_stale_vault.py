@@ -241,3 +241,19 @@ def test_a_name_another_document_redacted_is_only_a_leak_where_it_is_a_name(ws):
     matcher = ProfileMatcher(Profile.load(ws.profile_path))
     report = reverify(ws, "w2", matcher, Vault(ws.vault_dir / "placeholders.json"), ocr=False)
     assert ("text", "NAME") in {(i.check, i.kind) for i in report.issues}
+
+
+def test_your_name_in_the_file_name_fails_nothing_and_isnt_exported(ws):
+    """"30 - Fidelity Avery Abernathy Trust 1099.pdf": the text file used to start with the
+    file name, so every such document failed; and the export carried the name to Claude."""
+    from taxonymous.pipeline import export
+    name = "30 - Fidelity Avery F Abernathy Trust 1099.pdf"
+    pdf(ws.inbox / name, "Account holder: Avery F Abernathy", "Dividends 1,234.56")
+    outcome = run(ws, name)
+    assert outcome.report.passed, outcome.report.issues
+    stem = name[:-4]
+    assert "Abernathy" not in ws.outputs(stem)["txt"].read_text()
+    (ws.ready / f"{stem}.redacted.pdf").write_bytes(b"an export under the old name")
+    released = export(ws, stem)
+    assert [p.name for p in released] == ["30 - Fidelity NAME Trust 1099.redacted.pdf"]
+    assert [p.name for p in ws.ready.iterdir()] == ["30 - Fidelity NAME Trust 1099.redacted.pdf"]

@@ -445,7 +445,8 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     out = pymupdf.open(result.pdf)
     pages = [f"=== Page {p.number + 1} ===\n"
              f"{texts[p.number] if p.number in texts else p.get_text(sort=True).rstrip()}\n" for p in out]
-    result.text.write_text(f"[{src.name} — redacted by taxonymous]\n\n" + "\n".join(pages))
+    # no file name: one like "Fidelity Rohan Trust 1099.pdf" carries the very name redacted inside
+    result.text.write_text("[redacted by taxonymous]\n\n" + "\n".join(pages))
     vault.save()
     return result
 

@@ -9,11 +9,13 @@
 """
 
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from .detect import ProfileMatcher
+from .detect import ProfileMatcher, pattern_hits
+from .pagetext import PageText
 from .profile import Profile
 from .progress import NONE, Progress
 from .redact import SUFFIXES, Overrides, Result, output_stem, redact_file
@@ -53,8 +55,44 @@ class Workspace:
                 "report": self.work / f"{stem}.report.json", "regions": self.work / f"{stem}.regions.json"}
 
     def released(self, stem: str) -> list[Path]:
-        """What export puts in ready-to-upload/: the redacted PDF only (the .txt stays in work/)."""
-        return [self.ready / f"{stem}.redacted.pdf"]
+        """What export puts in ready-to-upload/: the redacted PDF only (the .txt stays in work/),
+        under a name with your details taken out, as the pages have them: Claude sees it too."""
+        return [self.ready / f"{self.public_name(stem)}.redacted.pdf"]
+
+    def stale(self, stem: str) -> list[Path]:
+        """Everything an export of this document may have left in ready-to-upload/, by any name."""
+        return [*self.released(stem), *(self.ready / f"{stem}.redacted.{ext}" for ext in ("pdf", "txt"))]
+
+    def public_name(self, stem: str) -> str:
+        """The file name with each of your details and anything shaped like an identifier
+        replaced by its kind: "30 - Fidelity Rohan Trust 1099" -> "30 - Fidelity NAME Trust 1099"."""
+        if not self.profile_path.exists():
+            return stem
+        spots = [(f.start, f.end, f.kind) for f in _matcher(self.profile_path).find(PageText(0, stem))]
+        spots += [(m.start(), m.end(), kind) for m, kind in pattern_hits(stem)]
+        merged: list[list] = []
+        for start, stop, kind in sorted(spots):
+            # overlapping, or one name in pieces with an initial between ("Avery F Abernathy")
+            between = stem[merged[-1][1]:start] if merged else ""
+            if merged and (start < merged[-1][1]
+                           or merged[-1][2] == kind and re.fullmatch(r"\s*(?:\w\.?\s+)?", between)):
+                merged[-1][1] = max(merged[-1][1], stop)
+            else:
+                merged.append([start, stop, kind])
+        for start, stop, kind in reversed(merged):
+            stem = stem[:start] + kind + stem[stop:]
+        return stem
+
+
+_matchers: dict[tuple[Path, int], ProfileMatcher] = {}
+
+
+def _matcher(profile: Path) -> ProfileMatcher:
+    key = (profile, profile.stat().st_mtime_ns)  # asked for every document on every listing
+    if key not in _matchers:
+        _matchers.clear()
+        _matchers[key] = ProfileMatcher(Profile.load(profile))
+    return _matchers[key]
 
 
 def in_use(ws: Workspace, current: tuple[str, Result] | None = None) -> set[str]:
@@ -90,7 +128,7 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
     """Redact and verify one file. `release` copies it to ready-to-upload/ when it passes;
     the review UI releases separately, on export."""
     stem = output_stem(Path(src))
-    for old in ws.released(stem):  # never leave a stale release behind if this run fails
+    for old in ws.stale(stem):  # never leave a stale release behind if this run fails
         old.unlink(missing_ok=True)
     out = ws.outputs(stem)
     overrides = Overrides.load(ws.overrides_path(stem))
@@ -150,7 +188,7 @@ def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, ove
 def reverify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, ocr: bool = True,
              progress: Progress = NONE) -> Report:
     """Verify a document's current output again, without redacting it again."""
-    for old in ws.released(stem):
+    for old in ws.stale(stem):
         old.unlink(missing_ok=True)
     overrides = Overrides.load(ws.overrides_path(stem))
     report = _verify(ws, stem, matcher, vault, overrides, [], ocr, None, progress)
@@ -163,7 +201,8 @@ def export(ws: Workspace, stem: str) -> list[Path]:
     out = ws.outputs(stem)
     if not out["report"].exists() or not json.loads(out["report"].read_text()).get("passed"):
         return []
-    (ws.ready / f"{stem}.redacted.txt").unlink(missing_ok=True)  # exports used to include it
+    for old in ws.stale(stem):  # a .txt (exports used to include it), or the file under its old name
+        old.unlink(missing_ok=True)
     released = []
     for built, dest in zip((out["pdf"],), ws.released(stem), strict=True):
         shutil.copyfile(built, dest)
