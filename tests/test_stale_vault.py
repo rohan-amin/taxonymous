@@ -73,3 +73,21 @@ def test_forgetting_an_entry_never_hands_out_a_name_still_in_use():
     vault.forget("manual:0")
     d = vault.placeholder("REDACTED", "manual:3", "box 3")
     assert d not in {b, c} and vault.entries[c]["values"] == ["box 2"]
+
+
+def test_wages_whose_digits_match_an_id_elsewhere_stay_readable(tmp_path):
+    """An ID found on one page ("6123450") repeats onto every copy of it, but not onto an
+    amount with the same digits on another page, and verification agrees."""
+    ws = Workspace(tmp_path)
+    ws.init()
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}]}))
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 90), "Employer's state ID number: 6123450", fontsize=10)
+    page = doc.new_page()
+    page.insert_text((72, 90), "16 State wages, tips etc.", fontsize=10)
+    page.insert_text((72, 106), "DE 61234.50   MA 612-3450", fontsize=10)
+    doc.save(ws.inbox / "w2.pdf")
+    outcome = run(ws, "w2.pdf")
+    assert outcome.report.passed, outcome.report.issues
+    text = pymupdf.open(ws.outputs("w2")["pdf"])[1].get_text()
+    assert "61234.50" in text and "612-3450" not in text

@@ -107,13 +107,16 @@ def luhn(ds: str) -> bool:
 
 
 NUMBER_SEP = r"[\s.\-()/,]{0,2}"  # what may sit between the digits of the same number
+# an amount ("61234.50", "1,234.56") is never a copy of a number, whatever its digits:
+# "6123450" (an OCR read that lost the point) must not black out the wages
+NOT_AMOUNT = r"(?![0-9][0-9,]*\.[0-9]{2}(?!\.?[0-9]))"
 
 
 def number_regex(ds: str) -> str:
     """The digits `ds` however they are spaced or punctuated, as their own number (not
-    inside a longer one). Verification uses the same rule, so whatever it would call
-    a copy of a value, redaction finds too."""
-    return r"(?<![0-9])" + NUMBER_SEP.join(ds) + r"(?![0-9])"
+    inside a longer one, and not an amount). Verification uses the same rule, so whatever
+    it would call a copy of a value, redaction finds too."""
+    return r"(?<![0-9])" + NOT_AMOUNT + NUMBER_SEP.join(ds) + r"(?![0-9])"
 
 
 def is_number_value(text: str) -> bool:

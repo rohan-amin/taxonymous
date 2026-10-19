@@ -19,8 +19,10 @@ import pymupdf
 from . import ocr as ocr_mod
 from .detect import (
     FORM_WORDS,
+    NOT_AMOUNT,
     NUMBER_SEP,
     ProfileMatcher,
+    detect,
     digits,
     is_number_value,
     number_regex,
@@ -85,15 +87,15 @@ def _regex(v: Value, fuzzy: bool) -> re.Pattern:
         ds = digits(v.text)
         if fuzzy:
             parts = [f"[{re.escape(CONFUSABLE.get(d, d))}]" for d in ds]
-            return re.compile(r"(?<![0-9])" + NUMBER_SEP.join(parts) + r"(?![0-9])")
+            return re.compile(r"(?<![0-9])" + NOT_AMOUNT + NUMBER_SEP.join(parts) + r"(?![0-9])")
         return re.compile(number_regex(ds))
     words = re.findall(r"[A-Za-z0-9]+", v.text)
     between = r"[^A-Za-z0-9]+"
     return re.compile(r"(?<![A-Za-z0-9])" + between.join(map(re.escape, words)) + r"(?![A-Za-z0-9])", re.I)
 
 
-def _around(text: str, start: int, end: int) -> str:
-    a, b = max(0, start - CONTEXT), min(len(text), end + CONTEXT)
+def _around(text: str, start: int, end: int, context: int = CONTEXT) -> str:
+    a, b = max(0, start - context), min(len(text), end + context)
     while a > 0 and not text[a - 1].isspace():
         a -= 1
     while b < len(text) and not text[b].isspace():
@@ -189,4 +191,58 @@ def render(hits: list[Hit], issues: list[dict]) -> str:
         lines.append(f"    {h.context}")
         if h.split:
             lines.append("    not in one piece in the redactor's reading of the original page")
+    return "\n".join(lines)
+
+
+SOURCES = {"profile": "your details", "pattern": "its shape", "label": "a nearby label",
+           "ner": "the name model", "repeat": "appearing elsewhere in the document", "manual": "you"}
+
+
+def explain_placeholder(workspace, stem: str, placeholder: str) -> str:
+    """Why one box is there: the value it stands for (masked), which detector found it and
+    on which page, with what was around it, and every page it was redacted on. For a box
+    that hides something it shouldn't, such as an amount taken for an ID."""
+    from .pipeline import Workspace
+    from .redact import output_stem
+
+    ws = Workspace(Path(workspace))
+    ph = placeholder if placeholder.startswith("<") else f"<{placeholder}>"
+    vault = Vault(ws.vault_dir / "placeholders.json")
+    entry = vault.entries.get(ph)
+    if entry is None:
+        return f"{ph} is not in the vault."
+    out = ws.outputs(stem)
+    regions = json.loads(out["regions"].read_text()) if out["regions"].exists() else []
+    lines = [f"{ph} ({entry['kind']}) stands for: " + ", ".join(mask(v) for v in entry["values"])]
+    boxes: dict[tuple[int, str], int] = {}
+    for r in regions:
+        if r["placeholder"] == ph:
+            boxes[(r["page"] + 1, r["source"])] = boxes.get((r["page"] + 1, r["source"]), 0) + 1
+    lines.append("Boxes in this document: " + ("; ".join(
+        f"page {p} by {SOURCES.get(s, s)}" + (f" ×{n}" if n > 1 else "")
+        for (p, s), n in sorted(boxes.items())) or "none"))
+
+    source = next(p for p in ws.pending() if output_stem(p) == stem)
+    if source.suffix.lower() != ".pdf":
+        lines.append("(a photo: its OCR reads aren't shown)")
+        return "\n".join(lines)
+    matcher = ProfileMatcher(Profile.load(ws.profile_path))
+    found = False
+    lines.append("Found in the original by:")
+    for page in pymupdf.open(source):
+        pt = extract(page)
+        if not pt.text.strip():
+            continue  # a scanned page: read by OCR, not shown here
+        hits = [f for f in detect(pt, matcher) if vault.by_key.get(f.key) == ph]
+        for f in hits:
+            found = True
+            lines.append(f"  page {page.number + 1} · {SOURCES.get(f.source, f.source)} · {mask(f.text)}")
+            lines.append(f"      {_around(pt.text, f.start, f.end, 60)}")
+        for v in entry["values"]:  # what the repeat step redacts: copies no detector found
+            for m in _regex(Value(entry["kind"], v, ""), fuzzy=False).finditer(pt.text):
+                if not any(f.start < m.end() and m.start() < f.end for f in hits):
+                    lines.append(f"  page {page.number + 1} · a copy of it: {mask(m.group())}")
+                    lines.append(f"      {_around(pt.text, m.start(), m.end(), 60)}")
+    if not found:
+        lines.append("  no detector on a text page (it may come from a scanned page, or another document)")
     return "\n".join(lines)

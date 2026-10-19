@@ -195,3 +195,22 @@ def test_a_sentence_under_a_name_or_address_label_is_not_a_value(lines):
 ])
 def test_names_and_addresses_with_word_like_parts_still_count(lines, expected):
     assert expected in texts(*lines)
+
+
+@pytest.mark.parametrize("text, copy", [
+    ("6123450", True), ("612-3450", True), ("612 34 50", True), ("ID 6123450.", True),
+    ("61234.50", False), ("$61,234.50", False), ("(61234.50)", False), ("wages 61234.50.", False),
+])
+def test_an_amount_is_never_a_copy_of_a_number(text, copy):
+    """A state ID read as "6123450" somewhere must not black out "61234.50" in the wages box."""
+    import re
+
+    from taxonymous.detect import number_regex
+    assert bool(re.search(number_regex("6123450"), text)) is copy
+
+
+def test_dotted_ids_are_still_copies():
+    import re
+
+    from taxonymous.detect import number_regex
+    assert re.search(number_regex("123456"), "Ref 12.34.56 issued")

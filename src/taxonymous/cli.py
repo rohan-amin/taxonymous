@@ -58,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     ex = sub.add_parser("explain", help="why a document failed verification, with every value masked")
     _workspace_arg(ex)
     ex.add_argument("document", help="its name in inbox/ (w2.pdf), or its id (w2)")
+    ex.add_argument("placeholder", nargs="?", help="explain one box instead, e.g. ID_10: why it is there")
     ex.add_argument("--no-ocr", action="store_true", help="skip re-reading pages with OCR (faster)")
     sv = sub.add_parser("serve", help="run the local API for the review UI (127.0.0.1 only)")
     _workspace_arg(sv)
@@ -76,14 +77,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "explain":
-        from .explain import explain, render
+        from .explain import explain, explain_placeholder, render
         ws = Workspace(args.workspace)
         stem = next((output_stem(p) for p in ws.pending() if args.document in (p.name, output_stem(p))), None)
         if stem is None or not ws.outputs(stem)["report"].exists():
             print(f"No processed document {args.document!r} in {ws.inbox}", file=sys.stderr)
             return 2
-        issues = json.loads(ws.outputs(stem)["report"].read_text())["issues"]
         print("Values are masked: letters are a/A and digits #, except common form words.\n")
+        if args.placeholder:
+            print(explain_placeholder(ws.root, stem, args.placeholder))
+            return 0
+        issues = json.loads(ws.outputs(stem)["report"].read_text())["issues"]
         print(render(explain(ws.root, stem, ocr=not args.no_ocr), issues))
         return 0
 

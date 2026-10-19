@@ -32,7 +32,7 @@ from pathlib import Path
 import pymupdf
 
 from . import ocr as ocr_mod
-from .detect import NUMBER_SEP, ProfileMatcher, digits, is_number_value, pattern_hits
+from .detect import NOT_AMOUNT, NUMBER_SEP, ProfileMatcher, digits, is_number_value, pattern_hits
 from .pagetext import PageText
 from .progress import NONE, Progress
 from .sanitize import CATALOG_KEYS, PAGE_KEYS, outside
@@ -91,7 +91,7 @@ def _squash(s: str, fuzzy: bool = False) -> str:
 
 def _digit_regex(ds: str, fuzzy: bool) -> re.Pattern:
     parts = [f"[{re.escape(CONFUSABLE.get(d, d))}]" if fuzzy else d for d in ds]
-    return re.compile(r"(?<![0-9])" + NUMBER_SEP.join(parts) + r"(?![0-9])")
+    return re.compile(r"(?<![0-9])" + NOT_AMOUNT + NUMBER_SEP.join(parts) + r"(?![0-9])")
 
 
 class Scanner:

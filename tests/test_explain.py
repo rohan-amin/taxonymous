@@ -61,3 +61,17 @@ def test_explain_shows_where_without_showing_what(failed, capsys):
 
 def test_explain_says_so_when_there_is_nothing_to_explain():
     assert render([], []) == "Verification passed: nothing to explain."
+
+
+def test_explain_one_box_says_where_it_came_from(failed, capsys):
+    from taxonymous.explain import explain_placeholder
+    vault = Vault(failed.vault_dir / "placeholders.json")
+    ein = next(ph for ph, e in vault.entries.items() if e["kind"] == "EIN")
+    out = explain_placeholder(failed.root, "w2_statement", ein.strip("<>"))
+    assert f"{ein} (EIN) stands for: ##-#######" in out
+    assert "page 1 · a nearby label" in out or "page 1 · its shape" in out
+    assert "a copy of it" in out  # "ID00-..." in the state wages line: not a detector's, the repeat's
+    assert cli(["explain", "--workspace", str(failed.root), "w2_statement.pdf", ein.strip("<>")]) == 0
+    printed = capsys.readouterr().out
+    for secret in [*(w for w in NAME.split() if len(w) > 1), *re.findall(r"\d{2,}", SSN + EIN)]:
+        assert secret not in printed, secret
