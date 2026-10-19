@@ -17,6 +17,7 @@ PROFILE = Profile.from_dict({
     "phones": ["(555) 555-0142"],
     "emails": ["avery@example.com"],
     "accounts": ["6346191"],
+    "find_others": True,
 })
 
 

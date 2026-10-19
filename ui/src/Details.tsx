@@ -118,9 +118,10 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
       <div className="details-head">
         <h1>Your details</h1>
         <p className="muted">
-          Everything you enter here is removed from every document, in whatever format it appears
-          (<code>987654323</code>, <code>XXX-XX-4323</code>, <code>ABERNATHY, AVERY</code>…). Other people's
-          names and numbers are found without being listed.
+          What you enter here is removed from every document, in whatever format it appears
+          (<code>987654323</code>, <code>XXX-XX-4323</code>, <code>ABERNATHY, AVERY</code>…), and so is anything
+          shaped like an SSN. Everything else stays readable, such as an employer's name and EIN. If a document
+          shows something you want removed, add it here, or use <em>Add to my details</em> while reviewing it.
         </p>
         <p className="muted small">Saved only on this computer, never uploaded: <code>{path}</code></p>
         <label className="check">
@@ -240,6 +241,19 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
           </button>
         </section>
       ))}
+
+      <section>
+        <h2>Anything else</h2>
+        <label className="check">
+          <input type="checkbox" checked={!!form.find_others} data-testid="find-others"
+                 onChange={(e) => change({ ...form, find_others: e.target.checked })} />
+          Also try to find other names and numbers that aren't listed here
+        </label>
+        <p className="muted small">
+          Other people's names, account and ID numbers, employers' EINs. It guesses, so it removes some
+          things it shouldn't, and verification can fail on them.
+        </p>
+      </section>
 
       <div className="details-foot">
         <button type="button" className="primary" onClick={save} disabled={saving}>

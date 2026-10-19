@@ -7,7 +7,7 @@ Scrub personal identifiers from tax documents **on your own machine**, so you ca
 ## What it will do
 
 - Take any tax document: W-2s, 1099s, K-1s, brokerage statements, IRA statements, letters, receipts, as text PDFs or scans/photos.
-- Remove identifiers (SSNs, EINs, account numbers, names, addresses, dates of birth, phones, emails) while keeping dollar amounts and box numbers.
+- Remove the identifiers you list (names, SSNs, addresses, dates of birth, account numbers, phones, emails), plus anything shaped like an SSN, while keeping dollar amounts and box numbers.
 - **Really remove them**: the underlying text and pixels are deleted, not just covered with a black box, and metadata and form fields are stripped.
 - Replace them with consistent placeholders (`<SSN_A>`, `<ACCT_1>`) and keep the mapping in a local `vault/` that is never uploaded.
 - **Verify every output** by re-extracting the text and OCR-ing the result. A file only reaches `ready-to-upload/` if nothing leaks.
@@ -20,7 +20,7 @@ Scrub personal identifiers from tax documents **on your own machine**, so you ca
 uv run taxonymous serve --workspace ~/Dropbox/Taxes/taxonymous  # creates the folders and opens it in your browser
 ```
 
-1. **Your details:** enter the names, SSNs, birth dates, addresses and account numbers to remove. They are saved only in the workspace's `vault/profile.json` and never uploaded.
+1. **Your details:** enter the names, SSNs, birth dates, addresses and account numbers to remove. They are saved only in the workspace's `vault/profile.json` and never uploaded. Only these (in any format, including masked forms like `XXX-XX-1234`) and anything shaped like an SSN are removed; everything else, such as an employer's name and EIN, stays readable. If review shows something of yours left in, **Add to my details** adds it and redacts the document again. To also guess at other people's names and numbers, turn on *Also try to find other names and numbers* (more false alarms).
 2. **Add files** (or drop PDFs and photos on the window), then **Run all**.
 3. Review each document, then **Export** it to `ready-to-upload/`.
 

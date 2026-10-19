@@ -8,7 +8,8 @@ Checks, all fail-closed:
              wherever it is (catches hiding places the other checks don't render)
   text       the PDF text layer and the .txt contain no known value (anything redacted
              from this document, any profile value in any format) and no identifier-shaped
-             pattern; placeholders are ignored
+             pattern (only SSN shapes, unless the profile's `find_others` is set);
+             placeholders are ignored
   ocr        the same, on Tesseract OCR of every rendered page, so text that was only
              covered (not removed) or that lives in image pixels is still caught; matching
              tolerates the digits and letters OCR confuses. Sparse pages (forms, receipts,
@@ -136,7 +137,8 @@ class Scanner:
     def scan(self, text: str, fuzzy: bool = False) -> list[str]:
         """Kinds of everything that should not be in this text."""
         text = PLACEHOLDER_RE.sub(" ", text)
-        found = [kind for m, kind in pattern_hits(text) if _squash(m.group()) not in self.allowed]
+        found = [kind for m, kind in pattern_hits(text, self.matcher.find_others)
+                 if _squash(m.group()) not in self.allowed]
         found += [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
         squashed = _squash(text, fuzzy)
         found += [kind for kind, exact, loose, rx in self.words

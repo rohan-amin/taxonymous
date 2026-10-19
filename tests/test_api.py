@@ -439,3 +439,22 @@ def test_details_need_the_token(fresh):
 
 def test_nothing_tried_to_reach_the_network(server, network_attempts):
     assert network_attempts == []
+
+
+def test_a_detail_seen_in_a_document_is_added_to_your_details(fresh):
+    client, ws = fresh
+    morgan = {"kind": "name", "value": "Morgan Delacroix"}
+    assert client.post("/api/profile/items", json=morgan).status_code == 409  # no details yet
+    assert client.put("/api/profile", json=FORM).status_code == 200
+    r = client.post("/api/profile/items", json={"kind": "name", "value": " Morgan  Delacroix "})
+    assert r.status_code == 200 and "Morgan" not in r.text  # real values stay out of responses
+    assert client.post("/api/profile/items", json={"kind": "account", "value": "0047812"}).status_code == 200
+    saved = json.loads(ws.profile_path.read_text())
+    assert saved["people"][-1]["name"] == "Morgan Delacroix" and saved["people"][-1]["role"] == "other"
+    assert saved["accounts"][-1]["number"] == "0047812"
+    assert len(saved["people"]) == 2 and len(saved["accounts"]) == 2
+
+    r = client.post("/api/profile/items", json={"kind": "ein", "value": "12345"})
+    assert r.status_code == 422 and r.json()["detail"]["message"] == "An EIN has 9 digits."
+    assert client.post("/api/profile/items", json={"kind": "shoe size", "value": "9"}).status_code == 422
+    assert len(json.loads(ws.profile_path.read_text())["eins"]) == 1  # nothing saved

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import { api, ApiError, busy, pageImage, SOURCE_LABEL } from "./api";
-import type { Box, DocDetail, DocSummary, Progress, Rect, Region } from "./api";
+import type { Box, DetailKind, DocDetail, DocSummary, Progress, Rect, Region } from "./api";
 
 const GAP = 16; // px between pages
 const PAD = 16; // px around the page column
@@ -13,6 +13,13 @@ interface Mark extends Box {
 }
 
 type Side = "original" | "redacted";
+
+// what "Add to my details" can add, and an example of each
+const DETAIL_KINDS: [DetailKind, string, string][] = [
+  ["name", "Name", "First Last"], ["address", "Street address", "123 Main St"],
+  ["account", "Account or other number", "Full number, as printed"], ["phone", "Phone", "(555) 555-0100"],
+  ["email", "Email", "you@example.com"], ["ein", "EIN of yours", "00-1234567"], ["card", "Card number", "Full number"],
+];
 
 const same = (a: Rect, b: Rect) => a.every((v, i) => Math.abs(v - b[i]) < 0.6);
 
@@ -45,6 +52,8 @@ export function Viewer({ summary, onChanged, onMarks }: {
   const [selectedShown, setSelectedShown] = useState<number | null>(null); // index into detail.shown
   const [showOnOriginal, setShowOnOriginal] = useState(true);
   const [message, setMessage] = useState<{ tone: "ok" | "bad" | "info"; text: string } | null>(null);
+  const [adding, setAdding] = useState<{ kind: DetailKind; value: string; error?: string } | null>(null);
+  const [addedAt, setAddedAt] = useState<number | null>(null); // the version before the re-run it started
   const panes = { original: useRef<HTMLDivElement>(null), redacted: useRef<HTMLDivElement>(null) };
   const syncing = useRef<Side | null>(null);
   const nextId = useRef(1);
@@ -99,6 +108,16 @@ export function Viewer({ summary, onChanged, onMarks }: {
       setMessage({ tone: "bad", text: `Final scrub ran, but verification failed: ${issueText(detail)}` });
     }
   }, [detail, scrubbed]);
+
+  // after adding to your details, say how the re-run went, and that the others need one too
+  useEffect(() => {
+    if (!detail || addedAt === null || busy(detail.status) || detail.version <= addedAt) return;
+    setAddedAt(null);
+    const others = "Use Run all to apply it to your other documents too.";
+    setMessage(detail.status === "passed"
+      ? { tone: "ok", text: `Added to your details and redacted again. ${others}` }
+      : { tone: "bad", text: `Added to your details, but verification failed: ${issueText(detail)}. ${others}` });
+  }, [detail, addedAt]);
 
   const sizes = detail?.pages ?? [];
   const maxWidth = Math.max(1, ...sizes.map(([w]) => w));
@@ -252,6 +271,20 @@ export function Viewer({ summary, onChanged, onMarks }: {
     }
   };
 
+  const addDetail = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!adding?.value.trim()) return;
+    try {
+      await api.addDetail(adding.kind, adding.value);
+    } catch (err) {
+      setAdding({ ...adding, error: (err as Error).message });
+      return;
+    }
+    setAdding(null);
+    setAddedAt(detail?.version ?? 0);
+    await act(() => api.run(id), "Added to your details; redacting this document again…");
+  };
+
   const doExport = async () => {
     try {
       const r = await api.export(id);
@@ -383,6 +416,11 @@ export function Viewer({ summary, onChanged, onMarks }: {
                       title="Redact this document again from the original, keeping your marks and shown boxes">
                 Run again
               </button>
+              <button type="button" className={adding ? "on" : ""} disabled={working}
+                      onClick={() => setAdding(adding ? null : { kind: "name", value: "" })}
+                      title="Something of yours is still readable: add it to your details and redact again">
+                Add to my details
+              </button>
             </>
           )}
           <button type="button" className="export" onClick={doExport} disabled={!!exportBlock}
@@ -402,6 +440,23 @@ export function Viewer({ summary, onChanged, onMarks }: {
             </>
           ) : message?.text ?? `Verification ${detail.status === "error" ? "could not run" : "failed"}: ${issueText(detail)}. Export is blocked.`}
         </div>
+      )}
+
+      {adding && (
+        <form className="add-detail" onSubmit={addDetail} data-testid="add-detail">
+          <span>Add to your details, then redact this document again:</span>
+          <select value={adding.kind} aria-label="Kind of detail"
+                  onChange={(e) => setAdding({ ...adding, kind: e.target.value as DetailKind, error: undefined })}>
+            {DETAIL_KINDS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+          <input autoFocus value={adding.value} aria-label="Value"
+                 placeholder={DETAIL_KINDS.find(([k]) => k === adding.kind)?.[2]}
+                 autoComplete="off" spellCheck={false} data-1p-ignore data-lpignore="true"
+                 onChange={(e) => setAdding({ ...adding, value: e.target.value, error: undefined })} />
+          <button type="submit" className="primary" disabled={!adding.value.trim()}>Add and run again</button>
+          <button type="button" onClick={() => setAdding(null)}>Cancel</button>
+          {adding.error && <em className="field-error">{adding.error}</em>}
+        </form>
       )}
 
       {!working && detail.report?.notes?.map((note) => (

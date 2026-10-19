@@ -24,6 +24,8 @@ A new document type should need no code change. If one leaks, the fix goes into 
 
 ## What gets redacted
 
+**Since 2026-10-19 the default is narrower:** only the values in Your details (in any format, including masked and last-4 forms) and anything SSN-shaped. The rest of this section, and the label, long-number, name-model and cross-document rules below, describe the opt-in `find_others` mode. On real documents those guesses caused cascading false failures (a caption or "Go to" taken for a name in one document then failed every other one), and the user only needs their own details removed.
+
 Redacted: SSN/ITIN/EIN, state tax IDs, account/routing/card numbers (including masked and last-4 forms), W-2 control numbers, names of people (taxpayer, spouse, dependents, employees, beneficiaries), street addresses, DOB, phone numbers, emails.
 
 Kept: dollar amounts, box numbers/labels, tax year, transaction dates, security names/CUSIPs, share counts, percentages, form names.
@@ -166,7 +168,8 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 - A value OCR can't read at all can't be detected. The verifier OCRs the output the same way, so it can't see it either. Low-quality scans should be reviewed by eye (the review UI is M6).
 - Pictures layered on top of other pictures in a text PDF are untested.
 - A page rebuilt as an image (text layer didn't match the page) loses its text layer, like a scan.
-- Values found in one document are checked for in every other document in the workspace (fail closed). A false positive in one document can therefore fail others until it is fixed or shown in the review UI.
+- With `find_others` on, values found in one document are checked for in every other document in the workspace (fail closed). A false positive in one document can therefore fail others until it is fixed or shown in the review UI. Off by default.
+- By default, anything you didn't list (a full account number, someone else's name) stays readable. Review is the check; "Add to my details" fixes it.
 - `/ActualText` is removed by matching strings after `/ActualText`, `/Alt` and `/E` in content streams, not by a full content-stream parser. The raw check catches any that survive.
 - No native app yet: `tools/native_window.py` is a spike. Bundling Tesseract and the name model, plus signing and notarization, is the remaining work ([`NATIVE.md`](NATIVE.md)).
 - A third party's name that is neither next to a label nor in prose (a name alone in a table cell, a heading that isn't a legal entity name) is not caught unless it also appears somewhere that is.

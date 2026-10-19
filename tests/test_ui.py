@@ -335,3 +335,36 @@ def test_export_several_at_once(page, site):
     for d in failed:  # a document that didn't pass can't be picked
         assert page.get_by_label(f"Pick {d['name']} for export").is_disabled()
     page.screenshot(path=str(ws.root / "export-selected.png"))
+
+
+def test_something_left_readable_is_added_to_your_details_and_redacted(fresh_page):
+    pg, ws = fresh_page
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}]}))
+    doc = pymupdf.open()
+    w2 = doc.new_page()
+    lines = ["Employee: Avery F Abernathy", "Spouse: Morgan Delacroix", "Wages 1,234.56"]
+    for i, line in enumerate(lines):
+        w2.insert_text((72, 90 + 20 * i), line, fontsize=10)
+    doc.save(ws.inbox / "w2.pdf")
+    pg.reload()
+    pg.get_by_role("button", name="Run all").click()
+    pg.get_by_role("button", name="w2.pdf").click()
+    wait_status(pg, "passed")
+    text = lambda: pg.request.get("/api/documents/w2/text", headers={"X-Taxonymous-Token": TOKEN}).text()  # noqa: E731
+    assert "Morgan Delacroix" in text()  # not in your details: left readable
+
+    pg.get_by_role("button", name="Add to my details").click()
+    form = pg.get_by_test_id("add-detail")
+    form.get_by_label("Kind of detail").select_option("name")
+    form.get_by_label("Value").fill("Morgan")  # one word: not a full name
+    form.get_by_role("button", name="Add and run again").click()
+    form.get_by_text("Enter a first and last name.").wait_for()
+    form.get_by_label("Value").fill("Morgan Delacroix")
+    form.get_by_role("button", name="Add and run again").click()
+    wait_banner(pg, "Added to your details")
+    pg.wait_for_function("!document.querySelector('[data-testid=add-detail]')")
+    wait_status(pg, "passed")
+    pg.wait_for_function("document.querySelectorAll('[data-testid=pane-redacted] .region').length >= 2",
+                         timeout=60_000)
+    assert "Morgan" not in text()
+    assert json.loads(ws.profile_path.read_text())["people"][-1]["name"] == "Morgan Delacroix"

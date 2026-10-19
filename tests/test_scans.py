@@ -263,7 +263,7 @@ def test_ids_touching_table_rules_get_boxes_their_own_size(tmp_path, dx, baselin
     blacked out rows, columns and amounts."""
     ws = Workspace(tmp_path)
     ws.init()
-    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}]}))
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}], "find_others": True}))
     _ruled_table(ws.inbox / "w2_scan.pdf", dx, baseline)
     [outcome] = run(ws)
     assert outcome.report.passed, outcome.report.issues

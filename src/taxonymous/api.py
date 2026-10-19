@@ -7,6 +7,8 @@ the same browser can't drive it). It makes no outbound connections.
 
   GET    /api/profile                           your identifiers (vault/profile.json), as a form edits them
   PUT    /api/profile                           save them (validated; 422 names the fields to fix)
+  POST   /api/profile/items                     {"kind": "name"|"address"|"account"|..., "value": ...}
+                                                add one detail seen in a document
   GET    /api/documents                         every document in inbox/, with its status
   POST   /api/documents                         upload a file into inbox/ (multipart "file")
   GET    /api/documents/{id}                    status, report, boxes, reviewer decisions, page sizes
@@ -55,7 +57,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .detect import ProfileMatcher
 from .pipeline import Workspace, export, process, reverify
-from .profile import Profile, clean
+from .profile import Profile, add_item, clean
 from .profile import save as save_profile
 from .progress import Progress
 from .redact import IMAGE_SUFFIXES, SUFFIXES, Overrides, load_image, manual_key, output_stem
@@ -237,6 +239,11 @@ class Boxes(BaseModel):
     boxes: list[Box]
 
 
+class Detail(BaseModel):
+    kind: str  # one of profile.ITEMS
+    value: str
+
+
 # ---------------------------------------------------------------- app
 
 def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None = UI_DIR) -> FastAPI:
@@ -280,6 +287,16 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         processed = [stem for stem in stems if ws.outputs(stem)["report"].exists()]
         return {"exists": True, "profile": profile, "errors": {}, "path": str(ws.profile_path),
                 "processed": processed}
+
+    @app.post("/api/profile/items")
+    def add_to_profile(body: Detail):
+        """One detail the reviewer saw left readable in a document, added to their details."""
+        need_profile()
+        profile, error = add_item(json.loads(ws.profile_path.read_text()), body.kind, body.value)
+        if error:
+            raise HTTPException(422, {"message": error, "fields": {}})
+        save_profile(profile, ws.profile_path)
+        return {"added": body.kind}
 
     @app.get("/api/documents")
     def documents():

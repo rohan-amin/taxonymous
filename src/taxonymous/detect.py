@@ -1,7 +1,8 @@
 """Find identifiers on a page. Document-agnostic: the same detectors run on
 every page of every document.
 
-Four detectors, highest priority first:
+By default only two run: the user's own details (profile), and anything shaped like
+an SSN. With the profile's `find_others` set, all four do, highest priority first:
   profile  - the user's own known values, matched with formatting tolerance
   pattern  - shapes that are identifiers wherever they appear (SSN, EIN, email, ...)
   label    - text next to a PII label ("Account number", "RECIPIENT'S name", ...)
@@ -177,6 +178,7 @@ class ProfileMatcher:
         self.by_digits: dict[str, tuple[str, str]] = {}
         self.by_last4: dict[str, tuple[str, str]] = {}
         self.by_name: dict[str, tuple[str, str]] = {}
+        self.find_others = profile.find_others
 
         def add(pattern: str | None, kind: str, key: str, flags: int = IC) -> None:
             if pattern:
@@ -187,6 +189,16 @@ class ProfileMatcher:
             if len(digits(value)) >= 4:
                 self.by_digits[digits(value)] = (kind, key)
                 self.by_last4.setdefault(digits(value)[-4:], (kind, key))
+            if len(digits(value)) < 4 or kind == "PHONE":
+                return
+            last4 = digits(value)[-4:]
+            # the masked forms statements print: "XXX-XX-4323", "****4323", "ending in 4323"
+            add(rf"(?<![\w*•#])(?:[*Xx•#]{{2,}}[\s-]?){{1,4}}{last4}(?!\d)", kind, key)
+            add(rf"\b(?:ending in|ends in|last (?:4|four)(?: digits)?(?: of)?)\W{{0,3}}(?:[*Xx•#]+[\s-]?)?"
+                rf"(?P<v>{last4})(?!\d)", kind, key)
+            if kind == "SSN":  # "SSN 4323", "TIN: 4323"
+                add(rf"\b(?:ssn|social security(?: number| no\.?)?|i?tin)\b\W{{0,4}}(?P<v>{last4})(?!\d)",
+                    kind, key)
 
         for i, p in enumerate(profile.people):
             key = f"person:{i}"
@@ -213,7 +225,9 @@ class ProfileMatcher:
             parts.append("(?:" + "|".join(alias) + r")\.?")
             add(r"\b" + r"\s+".join(parts) + r"(?!\w)", "ADDR", f"addr:{i}")
             if a.state and a.zip:
-                add(rf"\b{re.escape(a.state)}\s+{re.escape(a.zip)}(?:-\d{{4}})?\b", "ADDR", f"addr:{i}")
+                city = r"\s+".join(map(re.escape, a.city.split()))
+                town = rf"(?:{city},?\s+)?" if city else ""
+                add(rf"\b{town}{re.escape(a.state)}\s+{re.escape(a.zip)}(?:-\d{{4}})?\b", "ADDR", f"addr:{i}")
         for i, v in enumerate(profile.emails):
             add(re.escape(v), "EMAIL", f"email:{i}")
         for i, v in enumerate(profile.phones):
@@ -226,8 +240,12 @@ class ProfileMatcher:
                 add_number(v, kind, f"{kind.lower()}:{i}")
 
     def find(self, pt: PageText) -> list[Finding]:
-        return [Finding(pt.number, m.start(), m.end(), kind, key, "profile", m.group())
-                for rx, kind, key in self.rules for m in rx.finditer(pt.text)]
+        out = []
+        for rx, kind, key in self.rules:
+            for m in rx.finditer(pt.text):
+                start, end = m.span("v") if "v" in rx.groupindex else m.span()  # "ending in <v>"
+                out.append(Finding(pt.number, start, end, kind, key, "profile", pt.text[start:end]))
+        return out
 
     def canonical(self, kind: str, text: str) -> tuple[str, str]:
         """Map a pattern/label hit onto a profile identity when it is the same value."""
@@ -265,6 +283,7 @@ PATTERNS: list[tuple[re.Pattern, str]] = [
     (STREET_RE, "ADDR"),
     (CITY_LINE_RE, "ADDR"),
 ]
+SSN_PATTERNS = [(rx, kind) for rx, kind in PATTERNS if kind == "SSN"]
 
 
 # the same with capital letters among the digits ("30134994650F001", a state account
@@ -370,9 +389,10 @@ def after_omb(text: str, start: int) -> bool:
     return bool(OMB_RE.search(text[:start][-12:]))
 
 
-def pattern_hits(text: str):
-    """Yield (match, kind) for every identifier-shaped string in text."""
-    for rx, kind in PATTERNS:
+def pattern_hits(text: str, find_others: bool = True):
+    """Yield (match, kind) for every identifier-shaped string in text: only SSN shapes,
+    unless `find_others`."""
+    for rx, kind in PATTERNS if find_others else SSN_PATTERNS:
         for m in rx.finditer(text):
             value = m.group()
             if kind == "CARD" and not (13 <= len(digits(value)) <= 19 and luhn(digits(value))):
@@ -754,6 +774,10 @@ def continue_numbers(findings: list[Finding], pt: PageText) -> None:
 
 def detect(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
     """Findings on one page; `repeated` adds what the rest of the document found."""
+    if not pm.find_others:  # your details, and anything shaped like an SSN
+        ssns = [Finding(pt.number, m.start(), m.end(), *pm.canonical(kind, m.group()), "pattern", m.group())
+                for m, kind in pattern_hits(pt.text, find_others=False)]
+        return merge(pm.find(pt) + ssns, pt)
     found = pm.find(pt) + find_patterns(pt, pm) + find_labels(pt, pm) + find_orgs(pt, pm)
     found = merge(found + find_names(pt, pm), pt)
     continue_numbers(found, pt)

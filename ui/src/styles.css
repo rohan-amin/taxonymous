@@ -384,6 +384,21 @@ main {
   color: var(--info);
 }
 
+.add-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.add-detail input {
+  min-width: 220px;
+}
+
 .kept {
   padding: 6px 14px;
   font-size: 13px;

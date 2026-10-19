@@ -68,8 +68,9 @@ class Workspace:
         replaced by its kind: "30 - Fidelity Rohan Trust 1099" -> "30 - Fidelity NAME Trust 1099"."""
         if not self.profile_path.exists():
             return stem
-        spots = [(f.start, f.end, f.kind) for f in _matcher(self.profile_path).find(PageText(0, stem))]
-        spots += [(m.start(), m.end(), kind) for m, kind in pattern_hits(stem)]
+        matcher = _matcher(self.profile_path)
+        spots = [(f.start, f.end, f.kind) for f in matcher.find(PageText(0, stem))]
+        spots += [(m.start(), m.end(), kind) for m, kind in pattern_hits(stem, matcher.find_others)]
         merged: list[list] = []
         for start, stop, kind in sorted(spots):
             # overlapping, or one name in pieces with an initial between ("Avery F Abernathy")
@@ -179,15 +180,15 @@ def _text_layer_mismatch(report: Report, result: Result) -> frozenset[int]:
 def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, overrides: Overrides,
             known: list[Known], ocr: bool, result: Result | None, progress: Progress = NONE) -> Report:
     """Everything this document's redaction (`result`, None to check its last one) found, and
-    every value in the vault that some document's redaction uses (another document's only
-    when it is telling: see `strong`), except what the reviewer kept in the clear here: a
-    whole placeholder, or single boxes."""
+    the vault's values for the placeholders it uses, except what the reviewer kept in the
+    clear here: a whole placeholder, or single boxes. With `find_others`, also the values
+    other documents' redactions use, when they are telling (see `strong`)."""
     allowed = allowed_values(vault, overrides)
     used = in_use(ws, (stem, result) if result else None)
     here = {r.placeholder for r in result.regions} if result else placeholders_of(ws, stem)
     known = known + [Known(e["kind"], v) for ph in used & vault.entries.keys()
                      for e in [vault.entries[ph]] for v in e["values"]
-                     if ph in here or strong(e["kind"], v)]  # another document's: only the telling ones
+                     if ph in here or matcher.find_others and strong(e["kind"], v)]
     shown = [Shown(n, r, vault.entries.get(ph, {}).get("values", [])) for n, r, ph in overrides.show]
     out = ws.outputs(stem)
     return verify(out["pdf"], matcher, [k for k in known if k.value not in allowed], out["txt"], ocr=ocr,

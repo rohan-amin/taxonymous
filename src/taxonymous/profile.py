@@ -8,10 +8,13 @@ Schema (plain JSON, lives in the vault folder, never committed):
   "phones": [...], "emails": [...],
   "accounts":  [{"institution": "...", "number": "...", "name": "..."}],
   "eins":      [{"ein": "..", "description": "..."}],
-  "cards":     [{"number": "...", "description": "..."}]
+  "cards":     [{"number": "...", "description": "..."}],
+  "find_others": false
 }
 Only the numbers are redacted; institution, account name and description are the user's
-own labels. Older profiles listed plain strings for accounts, EINs and cards; both load.
+own labels. By default only these details (and anything shaped like an SSN) are redacted;
+`find_others` also redacts names and numbers the detectors find that aren't listed.
+Older profiles listed plain strings for accounts, EINs and cards; both load.
 """
 
 import json
@@ -53,6 +56,7 @@ class Profile:
     eins: list[str] = field(default_factory=list)
     accounts: list[str] = field(default_factory=list)
     cards: list[str] = field(default_factory=list)
+    find_others: bool = False  # also redact other people's names and numbers the detectors find
 
     @classmethod
     def load(cls, path: Path) -> "Profile":
@@ -68,6 +72,7 @@ class Profile:
             eins=[_number(e, "eins") for e in d.get("eins", [])],
             accounts=[_number(a, "accounts") for a in d.get("accounts", [])],
             cards=[_number(c, "cards") for c in d.get("cards", [])],
+            find_others=bool(d.get("find_others", False)),
         )
 
 
@@ -116,6 +121,7 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
     messages never repeat the value."""
     errors: dict[str, str] = {}  # paths use the row numbers as sent, empty rows included
     out: dict = {k: [] for k in ("people", "addresses", "phones", "emails", "eins", "accounts", "cards")}
+    out["find_others"] = bool(d.get("find_others"))
 
     def text(v) -> str:
         return " ".join(str(v or "").split())
@@ -213,6 +219,27 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                 r[main] = stored(r[main])
             out[key].append(r)
     return out, errors
+
+
+# what the review screen can add in one step, from a document: the field it becomes
+ITEMS = {"name": "people", "address": "addresses", "account": "accounts", "phone": "phones",
+         "email": "emails", "ein": "eins", "card": "cards"}
+
+
+def add_item(d: dict, kind: str, value: str) -> tuple[dict, str | None]:
+    """A profile with one more detail, seen in a document. Returns (profile, error); the
+    error message never repeats the value."""
+    d = {k: list(v) if isinstance(v, list) else v for k, v in d.items()}
+    key = ITEMS.get(kind)
+    if key is None:
+        return d, "Unknown kind of detail."
+    item = {"name": {"name": value, "role": "other"}, "address": {"street": value},
+            "account": {"number": value}, "ein": {"ein": value}, "card": {"number": value}}.get(kind, value)
+    d[key] = [*d.get(key, []), item]
+    out, errors = clean(d)
+    at = f"{key}.{len(d[key]) - 1}"
+    error = next((m for f, m in errors.items() if f == at or f.startswith(at + ".")), None)
+    return out, error
 
 
 def save(d: dict, path: Path) -> None:

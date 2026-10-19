@@ -122,7 +122,11 @@ export interface Profile {
   accounts: Account[];
   eins: Ein[];
   cards: Card[];
+  find_others?: boolean; // also redact names and numbers that aren't listed
 }
+
+// what can be added to your details from a document in one step (profile.ITEMS)
+export type DetailKind = "name" | "address" | "account" | "phone" | "email" | "ein" | "card";
 
 export interface ProfileState {
   exists: boolean;
@@ -162,6 +166,7 @@ const doc = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 export const api = {
   profile: () => call<ProfileState>("GET", "/api/profile"),
   saveProfile: (p: Profile) => call<ProfileState>("PUT", "/api/profile", p),
+  addDetail: (kind: DetailKind, value: string) => call("POST", "/api/profile/items", { kind, value }),
   documents: () => call<DocSummary[]>("GET", "/api/documents"),
   document: (id: string) => call<DocDetail>("GET", doc(id)),
   text: (id: string) => call<string>("GET", `${doc(id)}/text`),

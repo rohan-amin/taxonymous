@@ -28,7 +28,8 @@ def pdf(path, *lines):
 def ws(tmp_path):
     ws = Workspace(tmp_path)
     ws.init()
-    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy", "ssn": "987-65-4323"}]}))
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy", "ssn": "987-65-4323"}],
+                                           "find_others": True}))
     pdf(ws.inbox / "w2.pdf", "Employee: Avery F Abernathy", "Wages 1,234.56", FOOTER)
     return ws
 
@@ -80,7 +81,7 @@ def test_wages_whose_digits_match_an_id_elsewhere_stay_readable(tmp_path):
     amount with the same digits on another page, and verification agrees."""
     ws = Workspace(tmp_path)
     ws.init()
-    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}]}))
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}], "find_others": True}))
     doc = pymupdf.open()
     doc.new_page().insert_text((72, 90), "Employer's state ID number: 6123450", fontsize=10)
     page = doc.new_page()

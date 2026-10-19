@@ -24,7 +24,7 @@ def failed(tmp_path):
     ws = Workspace(tmp_path)
     ws.init()
     ws.profile_path.write_text(json.dumps({"people": [{"name": NAME, "ssn": SSN}], "addresses": [
-        {"street": STREET, "city": "Tacoma", "state": "WA", "zip": "98458"}]}))
+        {"street": STREET, "city": "Tacoma", "state": "WA", "zip": "98458"}], "find_others": True}))
     doc = pymupdf.open()
     page = doc.new_page()
     lines = [f"Employee: {NAME}  SSN {SSN}", f"Employer identification number (EIN): {EIN}", STREET,

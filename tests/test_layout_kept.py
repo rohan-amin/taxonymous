@@ -50,7 +50,8 @@ def test_a_form_keeps_the_fonts_it_borrows_from_the_page(tmp_path):
     for nested in (False, True):
         ws = Workspace(tmp_path / str(nested))
         ws.init()
-        ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}]}))
+        ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}],
+                                               "find_others": True}))
         borrowing_pdf(ws.inbox / "w2.pdf", nested)
         matcher = ProfileMatcher(Profile.load(ws.profile_path))
         outcome = process(ws.inbox / "w2.pdf", ws, matcher, Vault(ws.vault_dir / "p.json"), ocr=False,
@@ -67,7 +68,7 @@ def test_a_caption_printed_just_above_a_value_stays(tmp_path):
     value's, keeps all its letters."""
     ws = Workspace(tmp_path)
     ws.init()
-    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}]}))
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}], "find_others": True}))
     doc = pymupdf.open()
     page = doc.new_page()
     page.insert_text((72, 100), "b Employer's FED ID number", fontsize=10)

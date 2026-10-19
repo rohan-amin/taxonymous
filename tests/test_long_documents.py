@@ -148,7 +148,7 @@ def page(*items: tuple[float, float, str]) -> PageText:
 
 @pytest.fixture(scope="module")
 def matcher():
-    return ProfileMatcher(Profile.from_dict({"people": [{"name": "Avery F Abernathy"}]}))
+    return ProfileMatcher(Profile.from_dict({"people": [{"name": "Avery F Abernathy"}], "find_others": True}))
 
 
 def texts(pt, matcher):
@@ -198,7 +198,8 @@ def test_a_number_found_on_one_page_is_redacted_however_another_prints_it(tmp_pa
     doc.new_page().insert_text((72, 90), "Employer identification number (EIN): 00-4869455", fontsize=10)
     doc.new_page().insert_text((72, 90), f"State wage detail  {later}  Wages 1,234.56", fontsize=10)
     doc.save(tmp_path / "statement.pdf")
-    matcher = ProfileMatcher(Profile.from_dict({"people": [{"name": "Avery F Abernathy"}]}))
+    matcher = ProfileMatcher(Profile.from_dict({"people": [{"name": "Avery F Abernathy"}],
+                                                "find_others": True}))
     vault = Vault(tmp_path / "vault.json")
     result = redact_file(tmp_path / "statement.pdf", tmp_path / "out", matcher, vault)
     known = [Known(f.kind, f.text) for f in result.findings]
