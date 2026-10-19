@@ -147,3 +147,23 @@ def test_1099_captions_and_a_copy_heading_are_not_names():
         assert is_caption(caption), caption
     for name in ("Avery F Abernathy", "Johnny Cash", "Amy Long", "Quinn Bond"):
         assert not is_caption(name), name
+
+
+def test_explain_shows_which_object_a_raw_leak_is_in(ws):
+    """A value left in the file's objects but not on any page: explain names the object."""
+    from taxonymous.explain import explain, render
+    assert run(ws, "w2.pdf").report.passed
+    out = ws.outputs("w2")["pdf"]
+    doc = pymupdf.open(out)
+    left = doc.get_new_xref()
+    doc.update_object(left, "<</Type/XObject/Subtype/Form/BBox[0 0 10 10]>>")
+    doc.update_stream(left, b"BT /F1 9 Tf (Avery F Abernathy) Tj ET")
+    doc.save(out.with_suffix(".tmp"))
+    out.with_suffix(".tmp").replace(out)
+    matcher = ProfileMatcher(Profile.load(ws.profile_path))
+    report = reverify(ws, "w2", matcher, Vault(ws.vault_dir / "placeholders.json"), ocr=False)
+    assert ("raw", "NAME") in {(i.check, i.kind) for i in report.issues}
+    issues = json.loads(ws.outputs("w2")["report"].read_text())["issues"]
+    text = render(explain(ws.root, "w2", ocr=False), issues)
+    assert f"object {left} /XObject /Form, its stream: not used by any page" in text, text
+    assert "Abernathy" not in text

@@ -33,7 +33,7 @@ from .detect import (
 from .pagetext import PageText, extract
 from .profile import Profile
 from .vault import Vault
-from .verify import CONFUSABLE, OCR_DPI, PAGE_HEADER_RE, PLACEHOLDER_RE, _passes
+from .verify import BINARY_SUBTYPES, CONFUSABLE, OCR_DPI, PAGE_HEADER_RE, PLACEHOLDER_RE, _decode, _passes
 
 CONTEXT = 30  # characters either side, extended to whole words
 KEEP_WORDS = {w for w in FORM_WORDS if len(w) > 1} | {  # a lone letter can be an initial
@@ -82,6 +82,7 @@ class Hit:
     context: str  # masked
     checks: list[str]  # text | txt | ocr: where it was seen
     split: bool = False  # the redactor's reading of the original page doesn't have it in one piece
+    where: str = ""  # raw: the PDF object it is in, and whether a page draws it
 
 
 def _regex(v: Value, fuzzy: bool) -> re.Pattern:
@@ -183,7 +184,56 @@ def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
                 png = page.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY).tobytes("png")
                 for text in ocr_mod.run_all([(png, psm) for psm in _passes(page)]):
                     add("ocr", page.number + 1, text, True)
-    return list(hits.values())
+    out_hits = list(hits.values())
+    if ("raw", None) in pages_with:
+        out_hits += _raw_hits(doc, values, matcher)
+    return out_hits
+
+
+def _drawn(doc: pymupdf.Document) -> dict[int, str]:
+    """Objects some page uses, and how."""
+    out: dict[int, str] = {}
+    for page in doc:
+        n = page.number + 1
+        for x in page.get_contents():
+            out.setdefault(x, f"the content of page {n}")
+        for x, *_ in page.get_xobjects():
+            out.setdefault(x, f"a form drawn on page {n}")
+        for x, *_ in page.get_images(full=True):
+            out.setdefault(x, f"an image on page {n}")
+        for x, *_ in page.get_fonts(full=True):
+            out.setdefault(x, f"a font used on page {n}")
+        out.setdefault(page.xref, f"the dictionary of page {n}")
+    return out
+
+
+def _raw_hits(doc: pymupdf.Document, values: list[Value], matcher: ProfileMatcher) -> list[Hit]:
+    """What the raw check finds: a value in the file's objects (read as verification reads
+    them), with the object it is in. One no page draws is left over, not shown."""
+    drawn = _drawn(doc)
+    out: dict[tuple, Hit] = {}
+    for xref in range(1, doc.xref_length()):
+        try:
+            obj = doc.xref_object(xref, compressed=False)
+            parts = [("dictionary", obj.encode("latin-1", "replace"))]
+            if doc.xref_is_stream(xref):
+                keys = doc.xref_get_keys(xref)
+                if doc.xref_get_key(xref, "Subtype")[1] not in BINARY_SUBTYPES and "Length1" not in keys:
+                    parts.append(("stream", doc.xref_stream(xref) or b""))
+        except Exception:
+            continue
+        kind_of = " ".join(v for k in ("Type", "Subtype") if (v := doc.xref_get_key(xref, k)[1]) != "null")
+        place = drawn.get(xref, "not used by any page")
+        for part, raw in parts:
+            text = _decode(raw)
+            for kind, why, s, e in _hits(text, values, matcher, False):
+                if why == "it has the shape of one":
+                    continue  # the raw check looks for known values only
+                where = f"object {xref} {kind_of or '(no type)'}, its {part}: {place}"
+                key = (kind, mask(text[s:e]), where)
+                if key not in out:
+                    out[key] = Hit(None, kind, why, key[1], _around(text, s, e), ["raw"], where=where)
+    return list(out.values())
 
 
 def render(hits: list[Hit], issues: list[dict]) -> str:
@@ -193,13 +243,20 @@ def render(hits: list[Hit], issues: list[dict]) -> str:
     structure = sorted({i["kind"] for i in issues if i["check"] in ("structure", "raw", "error")})
     if structure:
         lines.append("Other problems: " + ", ".join(structure))
-    where = {"text": "text layer", "txt": "text file", "ocr": "OCR"}
+    where = {"text": "text layer", "txt": "text file", "ocr": "OCR", "raw": "the file's objects"}
     for h in hits:
         page = f"page {h.page} · " if h.page else ""
         lines.append(f"{page}{h.kind} {h.value} · {h.why} · seen in: {', '.join(where[c] for c in h.checks)}")
         lines.append(f"    {h.context}")
         if h.split:
             lines.append("    not in one piece in the redactor's reading of the original page")
+        if h.where:
+            lines.append(f"    in {h.where}")
+    found = {c for h in hits for c in h.checks}
+    stale = sorted({i["check"] for i in issues if i["check"] in where} - found)
+    if stale:
+        lines.append(f"Not found again ({', '.join(where[c] for c in stale)}): the last run used an older "
+                     "version or an older vault. Click Run again on this document.")
     return "\n".join(lines)
 
 
