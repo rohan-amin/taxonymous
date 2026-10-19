@@ -264,7 +264,8 @@ def test_another_documents_one_word_names_and_bare_numbers_fail_nothing_here(ws)
     every W-2 prints the words. Only telling values cross documents: a full name, a
     structured number. The document that redacted them is still checked for them."""
     from taxonymous.detect import strong
-    assert not strong("NAME", "Return") and not strong("ID", "1234567")
+    assert not strong("NAME", "Return") and not strong("ID", "1234567") and not strong("NAME", "Go to")
+    assert strong("NAME", "Ludwig van Beethoven") and not strong("NAME", "quinn delacroix")
     assert strong("NAME", "Quinn Delacroix-Marsh") and strong("ID", "30134994650F001")
     assert strong("SSN", "987654323") and strong("ID", "61-23450")
     pdf(ws.inbox / "letter.pdf", "Preparer's name: Quinn Delacroix-Marsh")

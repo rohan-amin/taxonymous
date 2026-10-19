@@ -324,6 +324,8 @@ def identifies(kind: str, value: str) -> bool:
 
 
 PROSE_KINDS = {"NAME", "ORG"}
+NAME_PARTICLES = {"de", "da", "del", "della", "der", "den", "di", "du", "la", "le", "van", "von", "bin", "al",
+                  "y"}
 # content stream operators that sit between the strings of a sentence: [(filing)-250(your)]TJ
 PDF_OPERATORS = {"tj", "td", "tf", "tm", "tz", "tc", "tw", "tl", "ts", "tr", "bt", "et", "re", "cm", "q", "w",
                  "f", "s", "b", "n", "do", "bdc", "emc", "g", "rg", "k", "l", "m", "c", "h"}
@@ -348,8 +350,10 @@ def strong(kind: str, value: str) -> bool:
     prints it. A one-word "name" ("Return", "Note") or a bare run of digits (a whole-dollar
     amount taken for an ID) is too often a detector's mistake, and one long document full of
     them failed every other one; those are only checked in the document that redacted them."""
-    if kind in PROSE_KINDS:
-        return len(re.findall(r"[A-Za-z]+", value)) >= 2
+    if kind in PROSE_KINDS:  # a full name: two capitalized words or more, and no "to" or "of"
+        words = re.findall(r"[A-Za-z]+", value)
+        lower = [w for w in words if w[0].islower() and w not in NAME_PARTICLES]
+        return sum(w[0].isupper() for w in words) >= 2 and not lower
     if kind == "ID":
         return not value.strip().isdigit()
     return True
