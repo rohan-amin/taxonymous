@@ -450,10 +450,28 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     return result
 
 
+STRIP = 1.0  # points: the height of the band text is removed from
+
+
+def _strip(rect: pymupdf.Rect, chars: list[pymupdf.Rect]) -> pymupdf.Rect:
+    """The band through the middle of a line of text, if it crosses every character
+    (rotated or slanted text: the whole box)."""
+    middle = (rect.y0 + rect.y1) / 2
+    if all(c.y0 < middle - STRIP / 2 and middle + STRIP / 2 < c.y1 for c in chars):
+        return pymupdf.Rect(rect.x0, middle - STRIP / 2, rect.x1, middle + STRIP / 2)
+    return rect
+
+
 def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], vault: Vault,
                       result: Result, images: _Ocr | None, stem: str, manual: list[pymupdf.Rect],
                       shown: list[pymupdf.Rect]) -> None:
     labels: list[tuple[pymupdf.Rect, str]] = []
+    # what goes black (and the image pixels under it), and where text is removed: a strip
+    # through the middle of each identifier's line. MuPDF removes every character whose box
+    # touches a redaction, and a caption printed just above a value ("Employer's FED ID
+    # number") touches the value's box, but not that strip.
+    boxes: list[pymupdf.Rect] = []
+    strips: list[pymupdf.Rect] = []
     for f in found:
         # trim to the middle of the line: char boxes are taller than glyphs and
         # overlap the lines above/below, which would otherwise be removed too
@@ -464,15 +482,17 @@ def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], va
         ph = vault.placeholder(f.kind, f.key, f.text)
         result.findings.append(f)
         result.placeholders[ph] = f.kind
+        chars = [b for b in pt.boxes[f.start:f.end] if b is not None and not b.is_empty]
         for i, rect in enumerate(rects):
-            page.add_redact_annot(rect, fill=(0, 0, 0))
+            boxes.append(rect)
+            strips.append(_strip(rect, [b for b in chars if b.intersects(rect)]))
             result.region(page.number, rect, ph, f.kind, f.source)
             if i == 0:
                 labels.append((rect, ph))
     if images is not None:
         # identifiers inside pictures on the page: only the image pixels go, text is handled above
         for rect, ph, f in _ocr_regions(images, vault, result, within=_image_rects(page), shown=shown):
-            page.add_redact_annot(rect, fill=(0, 0, 0))
+            boxes.append(rect)
             result.region(page.number, rect, ph, f.kind, f.source)
             _add_label(labels, rect, ph)
     for rect in manual:
@@ -483,10 +503,18 @@ def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], va
         if text:
             result.findings.append(Finding(page.number, 0, 0, "REDACTED", key, "manual", text))
         result.placeholders[ph] = "REDACTED"
-        page.add_redact_annot(rect, fill=(0, 0, 0))
+        boxes.append(rect)
+        strips.append(rect)  # a reviewer's box takes everything it touches
         result.region(page.number, rect, ph, "REDACTED", "manual")
         _add_label(labels, rect, ph)
+    for rect in boxes:
+        page.add_redact_annot(rect, fill=(0, 0, 0))
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,
+                          graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
+                          text=pymupdf.PDF_REDACT_TEXT_NONE)
+    for rect in strips:
+        page.add_redact_annot(rect, fill=False)
+    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
                           graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
                           text=pymupdf.PDF_REDACT_TEXT_REMOVE)
     # placeholders go in after the real text is gone

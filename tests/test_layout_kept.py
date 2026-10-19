@@ -1,4 +1,6 @@
-"""Old PDFs (some payroll W-2s) draw their captions in form XObjects that have no
+"""What redaction must leave alone around a value.
+
+Old PDFs (some payroll W-2s) draw their captions in form XObjects that have no
 /Resources of their own and borrow the page's fonts. Redaction rewrites the page's
 resources down to what its own content uses, which used to drop the borrowed font: MuPDF
 (and so the review UI) drew the captions in a stand-in font, macOS Preview left them out."""
@@ -57,3 +59,23 @@ def test_a_form_keeps_the_fonts_it_borrows_from_the_page(tmp_path):
         page = pymupdf.open(ws.outputs("w2")["pdf"])[0]
         assert "Abernathy" not in page.get_text()
         assert fonts_of(page, "Wages") == {"Helvetica"}, nested  # not "" (a font the file lost)
+
+
+def test_a_caption_printed_just_above_a_value_stays(tmp_path):
+    """MuPDF removes every character whose box touches a redaction. Text is removed only along
+    the middle of the value's line, so the caption above it, whose box reaches into the
+    value's, keeps all its letters."""
+    ws = Workspace(tmp_path)
+    ws.init()
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}]}))
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "b Employer's FED ID number", fontsize=10)
+    page.insert_text((90, 108), "00-3456789", fontsize=10)
+    doc.save(ws.inbox / "w2.pdf")
+    matcher = ProfileMatcher(Profile.load(ws.profile_path))
+    outcome = process(ws.inbox / "w2.pdf", ws, matcher, Vault(ws.vault_dir / "p.json"), ocr=False,
+                      release=False)
+    assert outcome.report.passed, outcome.report.issues
+    text = pymupdf.open(ws.outputs("w2")["pdf"])[0].get_text()
+    assert "Employer's FED ID number" in text and "3456789" not in text
