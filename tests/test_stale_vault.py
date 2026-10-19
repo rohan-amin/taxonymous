@@ -118,3 +118,20 @@ def test_explain_names_the_document_a_leaked_value_comes_from(ws):
     hits = [h for h in explain(ws.root, "w2", ocr=False) if h.kind == "NAME"]
     assert hits and all("letter.pdf" in h.why for h in hits)
     assert hits[0].value == mask("quinn delacroix-marsh")  # the leak itself, not text beside it
+
+
+def test_a_filing_status_is_not_a_name(ws):
+    """"Married Filing Jointly" read as a person once gave "Filing" as a name to look for,
+    which every W-2's instructions print ("...after the due date for filing your return")."""
+    from taxonymous.detect import is_caption
+    assert is_caption("Married Filing Jointly") and is_caption("Filing")
+    pdf(ws.inbox / "letter.pdf", "Preparer's name: Quinn Delacroix-Marsh")
+    assert run(ws, "letter.pdf").report.passed
+    vault = Vault(ws.vault_dir / "placeholders.json")
+    ph = vault.placeholder("NAME", "name:filing", "Filing")
+    vault.save()
+    regions = ws.outputs("letter")["regions"]
+    used = json.loads(regions.read_text())
+    regions.write_text(json.dumps(used + [{**used[0], "placeholder": ph}]))
+    pdf(ws.inbox / "w2.pdf", "Employee: Avery F Abernathy", "after the due date for filing your return")
+    assert run(ws, "w2.pdf").report.passed

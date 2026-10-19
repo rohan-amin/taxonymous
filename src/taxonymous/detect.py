@@ -68,7 +68,10 @@ FORM_WORDS = {"state", "city", "town", "country", "zip", "code", "postal", "prov
               "income", "tax", "taxes", "withheld", "wages", "tips", "compensation", "social", "security",
               "medicare", "allocated", "dependent", "benefits", "deferred", "nonqualified", "retirement",
               "statement", "control", "identification", "information", "treasury", "department",
-              "internal", "revenue", "service", "irs", "omb"}
+              "internal", "revenue", "service", "irs", "omb",
+              # filing status, which the name model reads as a person ("Married Filing Jointly")
+              "married", "filing", "jointly", "separately", "qualifying", "surviving", "spouse", "widow",
+              "widower"}
 STREET_SUFFIX = (r"st|street|ave|avenue|ln|lane|ct|court|rd|road|way|blvd|boulevard|dr|drive|pl|place|"
                  r"ter|terrace|cir|circle|pkwy|parkway|hwy|highway|trl|trail|sq|square|loop|row")
 STREET_RE = re.compile(
