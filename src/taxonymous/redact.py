@@ -37,6 +37,7 @@ from PIL import Image, ImageDraw, ImageOps
 from . import ocr
 from .detect import Finding, ProfileMatcher, detect, merge, relink, repeat_values, repeated
 from .pagetext import PageText, extract
+from .progress import NONE, Progress
 from .sanitize import allow_list, sanitize
 from .vault import Vault
 
@@ -186,21 +187,23 @@ def _render(page: pymupdf.Page) -> _Ocr:
     return _Ocr(page.number, img, page.rect.width / img.width, dpi)
 
 
-def _read_pages(doc: pymupdf.Document, numbers: list[int], matcher: ProfileMatcher) -> list[_Ocr]:
+def _read_pages(doc: pymupdf.Document, numbers: list[int], matcher: ProfileMatcher,
+                progress: Progress = NONE) -> list[_Ocr]:
     out = []
     for i in range(0, len(numbers), OCR_BATCH):
         batch = [_render(doc[n]) for n in numbers[i:i + OCR_BATCH]]
-        _read_all(batch, matcher)
+        _read_all(batch, matcher, progress)
         for p in batch:
             p.img = None  # rendered again if the page is rebuilt
         out += batch
     return out
 
 
-def _read_all(pages: list[_Ocr], matcher: ProfileMatcher) -> None:
+def _read_all(pages: list[_Ocr], matcher: ProfileMatcher, progress: Progress = NONE) -> None:
     views = [(p, ocr.variants(p.img)) for p in pages]
     jobs = [(ocr.png(img), psm) for _, vs in views for img, _ in vs for psm in ocr.PASSES]
-    tsvs = iter(ocr.run_all(jobs, tsv=True))
+    done = progress.per_page([len(vs) * len(ocr.PASSES) for _, vs in views])
+    tsvs = iter(ocr.run_all(jobs, tsv=True, done=done))
     for p, vs in views:
         reads = [(ocr.parse_tsv(next(tsvs)), m) for _, m in vs for _ in ocr.PASSES]
         if p.scale <= 0:  # a photo: no physical size, so size it from its text
@@ -337,7 +340,8 @@ def _image_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
 
 
 def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
-                overrides: Overrides | None = None, as_images: frozenset[int] = frozenset()) -> Result:
+                overrides: Overrides | None = None, as_images: frozenset[int] = frozenset(),
+                progress: Progress = NONE) -> Result:
     """`as_images`: 0-based pages to rebuild from OCR even though they have a text layer
     (one that doesn't match what the page shows)."""
     src, out_dir = Path(src), Path(out_dir)
@@ -359,7 +363,9 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     if src.suffix.lower() in IMAGE_SUFFIXES:
         doc = pymupdf.open()
         photo = _Ocr(0, load_image(src), 0.0)
-        _read_all([photo], matcher)
+        progress.start("reading", 1)
+        _read_all([photo], matcher, progress)
+        progress.start("redacting", 1)
         drop_kept(photo)
         _repeat_ocr(photo, repeat_values([f for _, f in photo.found]))
         drop_kept(photo)
@@ -367,6 +373,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         regions += _manual_ocr(photo, stem, manual.get(0, []), vault, result)
         texts[0] = _rebuild(doc, photo, regions, None, result)
         result.image_pages.append(1)
+        progress.step()
     else:
         doc = pymupdf.open(src)
         if doc.needs_pass:
@@ -376,6 +383,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         # pass 1: find everything, on every page
         text_pages: dict[int, tuple[PageText, list[Finding]]] = {}
         scan_numbers, mixed_numbers = [], []
+        progress.start("reading", doc.page_count)  # a page counts once its text (and OCR, if any) is read
         for page in doc:
             if page.number in as_images or not _visible_text(page):
                 scan_numbers.append(page.number)
@@ -384,7 +392,9 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
             text_pages[page.number] = (pt, detect(pt, matcher))
             if _image_rects(page):
                 mixed_numbers.append(page.number)
-        read = _read_pages(doc, scan_numbers + mixed_numbers, matcher)
+            else:
+                progress.step()
+        read = _read_pages(doc, scan_numbers + mixed_numbers, matcher, progress)
         scans, mixed = read[:len(scan_numbers)], {p.number: p for p in read[len(scan_numbers):]}
         everything = [f for _, fs in text_pages.values() for f in fs] + [f for p in read for _, f in p.found]
         relink(everything, repeat_values(everything))
@@ -396,6 +406,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         values = repeat_values(everything)
 
         # pass 2: add what the rest of the document found, and redact
+        progress.start("redacting", doc.page_count)
         for page in doc:
             if page.number not in text_pages:
                 continue
@@ -407,6 +418,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 drop_kept(ocr_page)
             _redact_text_page(page, pt, found, vault, result, ocr_page, stem, manual.get(page.number, []),
                               overrides.shown(page.number))
+            progress.step()
         for p in scans:
             _repeat_ocr(p, values)
             drop_kept(p)
@@ -414,6 +426,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
             regions += _manual_ocr(p, stem, manual.get(p.number, []), vault, result)
             texts[p.number] = _rebuild(doc, p, regions, p.number, result)
             result.image_pages.append(p.number + 1)
+            progress.step()
 
     doc.scrub(attached_files=True, clean_pages=True, embedded_files=True, hidden_text=True,
               javascript=True, metadata=True, redactions=False, remove_links=True, reset_fields=True,

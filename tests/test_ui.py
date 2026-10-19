@@ -285,3 +285,32 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
 
     pg.get_by_label("hide numbers on screen").check()
     assert "secret" in person.get_by_label("SSN or ITIN").get_attribute("class")
+
+
+def test_a_run_shows_how_far_it_has_got(page, site, monkeypatch, tmp_path):
+    """The bar follows what the engine reports: held part-way here, so it can be looked at."""
+    from taxonymous import api as api_mod
+    _, app, *_ = site
+    open_doc(page, app, "k1_statement.pdf")  # first in the list, so it runs first
+    go = threading.Event()
+
+    def slow(src, ws, matcher, vault, ocr=True, release=True, progress=None):
+        progress.start("checking", 4)
+        progress.step(3)
+        assert go.wait(30)
+
+    monkeypatch.setattr(api_mod, "process", slow)
+    try:
+        page.get_by_role("button", name="Run all").click()
+        page.wait_for_function("document.querySelector('[data-testid=banner] [data-testid=progress]')"
+                               "?.innerText.includes('page 3 of 4')", timeout=30_000)
+        text = page.inner_text("[data-testid=banner] [data-testid=progress]")
+        assert "Document" in text and "of 2" in text and "Checking the redacted pages" in text
+        assert page.locator("[data-testid=documents] [data-testid=progress]").count() == 1
+        bar = page.get_by_role("progressbar").first
+        assert bar.get_attribute("aria-valuenow") == "3" and bar.get_attribute("aria-valuemax") == "4"
+        page.screenshot(path=str(tmp_path / "progress.png"))
+    finally:
+        go.set()
+        app.state.worker.wait()
+    page.wait_for_function("!document.querySelector('[data-testid=progress]')", timeout=30_000)

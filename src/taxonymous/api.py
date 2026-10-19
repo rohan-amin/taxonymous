@@ -57,6 +57,7 @@ from .detect import ProfileMatcher
 from .pipeline import Workspace, export, process, reverify
 from .profile import Profile, clean
 from .profile import save as save_profile
+from .progress import Progress
 from .redact import IMAGE_SUFFIXES, SUFFIXES, Overrides, load_image, manual_key, output_stem
 from .vault import Vault
 
@@ -92,10 +93,15 @@ class Worker:
         self.queued: list[str] = []
         self.running: str | None = None
         self.errors: dict[str, str] = {}
+        self.progress = Progress()  # the running job's
+        self.batch = [0, 0]  # jobs done and submitted since the worker was last idle
         threading.Thread(target=self._loop, daemon=True, name="taxonymous-worker").start()
 
     def submit(self, job: Job) -> None:
         with self.lock:
+            if self.idle():
+                self.batch = [0, 0]
+            self.batch[1] += 1
             self.queued.append(job.stem)
         self.jobs.put(job)
 
@@ -106,6 +112,15 @@ class Worker:
     def status(self) -> dict:
         with self.lock:
             return {"running": self.running, "queued": list(self.queued), "idle": self.idle()}
+
+    def progress_of(self, stem: str) -> dict | None:
+        """The running job's stage and pages done, and its place in the batch ("2 of 5")."""
+        with self.lock:
+            if self.running != stem:
+                return None
+            done, total = self.batch
+        snap = self.progress.snapshot() or {"stage": None, "label": "Starting", "done": 0, "total": 0}
+        return {**snap, "job": done + 1, "jobs": total}
 
     def idle(self) -> bool:
         return self.running is None and not self.queued
@@ -124,6 +139,7 @@ class Worker:
             with self.lock:
                 self.queued.remove(job.stem)
                 self.running = job.stem
+                self.progress = Progress()
             try:
                 self._run(job)
                 self.errors.pop(job.stem, None)
@@ -132,6 +148,7 @@ class Worker:
             finally:
                 with self.lock:
                     self.running = None
+                    self.batch[0] += 1
                 self.jobs.task_done()
 
     def _run(self, job: Job) -> None:
@@ -144,9 +161,9 @@ class Worker:
         vault.save()
         src = _source(self.ws, job.stem)
         if job.action == "verify":
-            reverify(self.ws, job.stem, matcher, vault, ocr=self.ocr)
+            reverify(self.ws, job.stem, matcher, vault, ocr=self.ocr, progress=self.progress)
         else:
-            process(src, self.ws, matcher, vault, ocr=self.ocr, release=False)
+            process(src, self.ws, matcher, vault, ocr=self.ocr, release=False, progress=self.progress)
 
 
 # ---------------------------------------------------------------- helpers
@@ -203,6 +220,7 @@ def _summary(ws: Workspace, worker: Worker, src: Path) -> dict:
         "redactions": dict(Counter(r["kind"] for r in {r["placeholder"]: r for r in regions}.values())),
         "issues": report["issues"] if report else [],
         "error": worker.errors.get(stem),
+        "progress": worker.progress_of(stem),
     }
 
 

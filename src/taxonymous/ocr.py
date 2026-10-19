@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,11 +59,18 @@ def tesseract(png: bytes, psm: str, tsv: bool = False) -> str:
         return proc.stdout
 
 
-def run_all(jobs: list[tuple[bytes, str]], tsv: bool = False) -> list[str]:
-    """OCR many (png, psm) jobs in parallel."""
+def run_all(jobs: list[tuple[bytes, str]], tsv: bool = False,
+            done: Callable[[int], None] | None = None) -> list[str]:
+    """OCR many (png, psm) jobs in parallel; `done(i)` is called as job i finishes."""
     require()
+
+    def one(i: int) -> str:
+        out = tesseract(jobs[i][0], jobs[i][1], tsv)
+        if done is not None:
+            done(i)
+        return out
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
-        return list(pool.map(lambda j: tesseract(j[0], j[1], tsv), jobs))
+        return list(pool.map(one, range(len(jobs))))
 
 
 def parse_tsv(tsv: str) -> list[Word]:

@@ -3,7 +3,7 @@ import type { DragEvent } from "react";
 import { api, busy, token } from "./api";
 import type { DocSummary } from "./api";
 import { Details } from "./Details";
-import { Viewer } from "./Viewer";
+import { ProgressBar, Viewer } from "./Viewer";
 
 const ACCEPT = ".pdf,.jpg,.jpeg,.png,.tif,.tiff,.heic,.heif,.webp";
 
@@ -116,6 +116,7 @@ export function App() {
                   {d.exported && <span className="badge exported">exported</span>}
                   {d.version > 0 && <span className="muted">{counts(d)} redacted</span>}
                 </span>
+                {d.progress && <ProgressBar p={d.progress} compact />}
               </button>
             </li>
           ))}

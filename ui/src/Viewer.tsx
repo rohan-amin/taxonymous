@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { api, ApiError, busy, pageImage, SOURCE_LABEL } from "./api";
-import type { Box, DocDetail, DocSummary, Rect, Region } from "./api";
+import type { Box, DocDetail, DocSummary, Progress, Rect, Region } from "./api";
 
 const GAP = 16; // px between pages
 const PAD = 16; // px around the page column
@@ -390,9 +390,13 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
 
       {(message || working || detail.status === "failed" || detail.status === "error") && (
         <div className={`banner ${working ? "info" : message?.tone ?? "bad"}`} data-testid="banner">
-          {working ? (scrubbed ? "Final scrub running: removing the marked areas and re-verifying…"
-                               : `${detail.status === "queued" ? "Queued" : "Working"}: redacting and verifying…`)
-            : message?.text ?? `Verification ${detail.status === "error" ? "could not run" : "failed"}: ${issueText(detail)}. Export is blocked.`}
+          {working ? (
+            <>
+              {scrubbed ? "Final scrub: removing the marked areas and re-verifying. "
+                        : detail.status === "queued" ? "Queued: waiting for the documents ahead of it." : ""}
+              {detail.progress && <ProgressBar p={detail.progress} />}
+            </>
+          ) : message?.text ?? `Verification ${detail.status === "error" ? "could not run" : "failed"}: ${issueText(detail)}. Export is blocked.`}
         </div>
       )}
 
@@ -472,6 +476,20 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+export function ProgressBar({ p, compact }: { p: Progress; compact?: boolean }) {
+  const pages = p.total ? `page ${p.done} of ${p.total}` : "";
+  const of = p.jobs > 1 ? `Document ${p.job} of ${p.jobs} · ` : "";
+  return (
+    <div className={`progress${compact ? " compact" : ""}`} data-testid="progress">
+      {!compact && <span className="progress-text">{of}{p.label}{pages && `: ${pages}`}</span>}
+      <span className="progress-track" role="progressbar" aria-label={`${of}${p.label}`}
+            aria-valuemin={0} aria-valuemax={p.total} aria-valuenow={p.done}>
+        <span className="progress-fill" style={{ width: `${p.total ? (100 * p.done) / p.total : 0}%` }} />
+      </span>
     </div>
   );
 }

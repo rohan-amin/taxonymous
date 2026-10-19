@@ -10,6 +10,16 @@ export interface Issue {
   detail: string;
 }
 
+// what the running job has finished: pages of its current stage, and its place in a Run all
+export interface Progress {
+  stage: "reading" | "redacting" | "checking" | null;
+  label: string;
+  done: number;
+  total: number;
+  job: number;
+  jobs: number;
+}
+
 export interface DocSummary {
   id: string;
   name: string;
@@ -19,6 +29,7 @@ export interface DocSummary {
   redactions: Record<string, number>;
   issues: Issue[];
   error: string | null;
+  progress: Progress | null;
 }
 
 export interface Region {

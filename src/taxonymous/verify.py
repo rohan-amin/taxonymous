@@ -34,6 +34,7 @@ import pymupdf
 from . import ocr as ocr_mod
 from .detect import NUMBER_SEP, ProfileMatcher, digits, is_number_value, pattern_hits
 from .pagetext import PageText
+from .progress import NONE, Progress
 from .sanitize import CATALOG_KEYS, PAGE_KEYS, outside
 
 PLACEHOLDER_RE = re.compile(r"<[A-Z]+_[A-Z0-9]+>")
@@ -249,7 +250,8 @@ def _passes(page: pymupdf.Page) -> tuple[str, ...]:
 
 
 def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | None = None,
-           ocr: bool = True, allowed: Iterable[str] = (), shown: list[Shown] = ()) -> Report:
+           ocr: bool = True, allowed: Iterable[str] = (), shown: list[Shown] = (),
+           progress: Progress = NONE) -> Report:
     report = Report(pdf=str(pdf), ocr=ocr)
     allowed = list(allowed)
     scanner = Scanner(matcher, known, allowed)
@@ -263,8 +265,11 @@ def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | N
         report.issues += _raw(doc, Scanner(matcher, known, [*allowed, *excused]))
         if shown:
             doc = _without_shown(doc, list(shown))
+        progress.start("checking", doc.page_count)
         for page in doc:
             report.issues += [Issue("text", k, page.number + 1) for k in scanner.scan(page.get_text())]
+            if not ocr:
+                progress.step()
         if txt is not None:
             # text from scanned pages is OCR output, so it gets OCR tolerance too
             text = _txt_without_shown(Path(txt).read_text(), list(shown))
@@ -274,7 +279,7 @@ def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | N
             passes = [_passes(p) for p in doc]
             jobs = [(p.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY).tobytes("png"), psm)
                     for p, psms in zip(doc, passes, strict=True) for psm in psms]
-            texts = iter(ocr_mod.run_all(jobs))
+            texts = iter(ocr_mod.run_all(jobs, done=progress.per_page([len(p) for p in passes])))
             for n, psms in enumerate(passes, 1):
                 found = set()
                 for _ in psms:

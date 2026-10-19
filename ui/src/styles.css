@@ -305,6 +305,38 @@ main {
   color: var(--info);
 }
 
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.progress-text {
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+  display: block;
+  height: 6px;
+  max-width: 420px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--info) 22%, transparent);
+  overflow: hidden;
+}
+
+.progress.compact .progress-track {
+  height: 3px;
+  margin-top: 4px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
 .note {
   padding: 6px 14px;
   font-size: 13px;
