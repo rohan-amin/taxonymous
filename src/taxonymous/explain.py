@@ -253,7 +253,7 @@ def off_page(pdf: Path, issues: list[dict]) -> list[str]:
         visible = page.rect + (-EDGE, -EDGE, EDGE, EDGE)
         far: dict[str, list[float]] = {}
         for what, r in page.get_bboxlog():
-            r = pymupdf.Rect(r)
+            r = pymupdf.Rect(r) * page.rotation_matrix  # the log has the page unrotated
             if r.is_empty or r in visible:
                 continue
             past = max(visible.x0 - r.x0, visible.y0 - r.y0, r.x1 - visible.x1, r.y1 - visible.y1)

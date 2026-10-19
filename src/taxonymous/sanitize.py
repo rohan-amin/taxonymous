@@ -156,21 +156,23 @@ def _strip_replacement_text(doc: pymupdf.Document) -> None:
 
 
 def outside(page: pymupdf.Page) -> list[pymupdf.Rect]:
-    """Anything drawn (text, images, paths) that reaches past the visible page."""
+    """Anything drawn (text, images, paths) that reaches past the visible page, in page
+    coordinates. The draw log has the page unrotated, so a rotated page's rectangles are
+    turned with it first: without that, the bottom of a landscape page looked off the page."""
     visible = page.rect + (-EDGE, -EDGE, EDGE, EDGE)
-    return [pymupdf.Rect(r) for _, r in page.get_bboxlog()
-            if not pymupdf.Rect(r).is_empty and pymupdf.Rect(r) not in visible]
+    drawn = [pymupdf.Rect(r) * page.rotation_matrix for _, r in page.get_bboxlog()]
+    return [r for r in drawn if not r.is_empty and r not in visible]
 
 
 def clip_to_visible(page: pymupdf.Page) -> bool:
     """Remove everything outside the visible area (CropBox) and make that area the whole
     page. Page coordinates of what stays are unchanged. True if anything was removed."""
-    far = outside(page)
-    if not far:
+    if not outside(page):
         return False
     doc = page.parent
     rotation = page.rotation
     page.set_rotation(0)
+    far = outside(page)  # unrotated, like the boxes below
     to_pdf = ~page.transformation_matrix
     visible = page.rect * to_pdf
     big = pymupdf.Rect(visible)

@@ -137,3 +137,19 @@ def test_the_whole_corpus_passes_in_one_workspace(corpus, tmp_path):
         if not report.passed:
             failed[d["file"]] = [(i.check, i.kind, i.page) for i in report.issues]
     assert not failed
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_a_rotated_page_is_measured_turned(rotation, tmp_path):
+    """A landscape page stored portrait and rotated (a K-1 statement): what is drawn near
+    the bottom of the stored page is on the page, not past its edge."""
+    from taxonymous.sanitize import clip_to_visible, outside
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 760), "Partner's share of income 1,234.56", fontsize=10)
+    page.set_rotation(rotation)
+    assert outside(page) == [] and not clip_to_visible(page)
+    page.insert_text(page.rect.br + (50, 50), "past the edge", fontsize=10)  # page coordinates
+    assert outside(page) and clip_to_visible(page)
+    assert outside(doc[0]) == [] and doc[0].rotation == rotation
+    assert "Partner's share" in doc[0].get_text()
