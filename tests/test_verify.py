@@ -171,8 +171,7 @@ def test_workspace_releases_only_verified_files(corpus, tmp_path):
     assert not outcomes["locked.pdf"].report.passed
     assert outcomes["locked.pdf"].report.issues[0].check == "error"
     assert sorted(p.name for p in ws.ready.iterdir()) == [
-        "photo_of_card.redacted.pdf", "photo_of_card.redacted.txt", "receipt.redacted.pdf",
-        "receipt.redacted.txt", "w2.redacted.pdf", "w2.redacted.txt"]
+        "photo_of_card.redacted.pdf", "receipt.redacted.pdf", "w2.redacted.pdf"]
     reports = " ".join(p.read_text() for p in ws.work.glob("*.report.json"))
     assert profile["people"][0]["ssn"] not in reports  # reports never contain real values
     assert (ws.inbox / "w2.pdf").read_bytes() == (src / "w2.pdf").read_bytes()  # originals untouched

@@ -314,3 +314,24 @@ def test_a_run_shows_how_far_it_has_got(page, site, monkeypatch, tmp_path):
         go.set()
         app.state.worker.wait()
     page.wait_for_function("!document.querySelector('[data-testid=progress]')", timeout=30_000)
+
+
+def test_export_several_at_once(page, site):
+    """Pick documents in the sidebar (or All passed) and export them in one go: only the
+    redacted PDFs reach ready-to-upload/."""
+    _, app, ws, *_ = site
+    open_doc(page, app, "w2.pdf")
+    docs = page.request.get("/api/documents", headers={"X-Taxonymous-Token": TOKEN}).json()
+    passed = [d for d in docs if d["status"] == "passed"]
+    assert passed
+    for p in ws.ready.iterdir():
+        p.unlink()
+    page.get_by_label("All passed").check()
+    page.get_by_role("button", name=f"Export selected ({len(passed)})").click()
+    page.wait_for_selector(".side-ok", timeout=60_000)
+    assert sorted(p.name for p in ws.ready.iterdir()) == sorted(f"{d['id']}.redacted.pdf" for d in passed)
+    assert page.get_by_role("button", name="Export selected (0)").is_disabled()
+    failed = [d for d in docs if d["status"] != "passed"]
+    for d in failed:  # a document that didn't pass can't be picked
+        assert page.get_by_label(f"Pick {d['name']} for export").is_disabled()
+    page.screenshot(path=str(ws.root / "export-selected.png"))

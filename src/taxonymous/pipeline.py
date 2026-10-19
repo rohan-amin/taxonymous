@@ -53,7 +53,8 @@ class Workspace:
                 "report": self.work / f"{stem}.report.json", "regions": self.work / f"{stem}.regions.json"}
 
     def released(self, stem: str) -> list[Path]:
-        return [self.ready / f"{stem}.redacted.pdf", self.ready / f"{stem}.redacted.txt"]
+        """What export puts in ready-to-upload/: the redacted PDF only (the .txt stays in work/)."""
+        return [self.ready / f"{stem}.redacted.pdf"]
 
 
 def in_use(ws: Workspace, current: tuple[str, Result] | None = None) -> set[str]:
@@ -158,12 +159,13 @@ def reverify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, oc
 
 
 def export(ws: Workspace, stem: str) -> list[Path]:
-    """Copy a document's outputs to ready-to-upload/, only if its last verification passed."""
+    """Copy a document's redacted PDF to ready-to-upload/, only if its last verification passed."""
     out = ws.outputs(stem)
     if not out["report"].exists() or not json.loads(out["report"].read_text()).get("passed"):
         return []
+    (ws.ready / f"{stem}.redacted.txt").unlink(missing_ok=True)  # exports used to include it
     released = []
-    for built, dest in zip((out["pdf"], out["txt"]), ws.released(stem), strict=True):
+    for built, dest in zip((out["pdf"],), ws.released(stem), strict=True):
         shutil.copyfile(built, dest)
         released.append(dest)
     return released

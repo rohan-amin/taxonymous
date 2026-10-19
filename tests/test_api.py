@@ -295,7 +295,7 @@ def test_bad_reviewer_requests(server):
 def test_export_releases_only_a_passing_document(server):
     client, app, ws, src, _ = server
     r = client.post(f"{W2}/export")
-    assert r.status_code == 200 and sorted(r.json()["released"]) == ["w2.redacted.pdf", "w2.redacted.txt"]
+    assert r.status_code == 200 and sorted(r.json()["released"]) == ["w2.redacted.pdf"]
     assert (ws.ready / "w2.redacted.pdf").exists()
 
     # the output is swapped for the original behind the API's back: re-verify catches it

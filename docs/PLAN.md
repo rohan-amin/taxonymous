@@ -49,7 +49,7 @@ Each document goes through **ingest → locate → detect → redact → verify 
 ```
 <workspace>/
   inbox/              originals (never modified)
-  ready-to-upload/    verified outputs only (PDF + .txt)
+  ready-to-upload/    verified outputs only (the redacted PDF; its .txt stays in work/)
   vault/              profile + placeholder maps, never uploaded
   work/               intermediates, safe to delete
 ```

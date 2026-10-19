@@ -150,7 +150,46 @@ button.export:not(:disabled) {
   flex: 1;
 }
 
+.docs li {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.docs li .pick {
+  margin: 10px 0 0 4px;
+  flex: none;
+}
+
+.side-export {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 16px 12px;
+  font-size: 13px;
+}
+
+.side-export label,
+.side-export button {
+  white-space: nowrap;
+}
+
+.side-export label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.side-ok {
+  margin: 0 16px 12px;
+  color: var(--ok);
+  font-size: 12px;
+}
+
 .docs li button {
+  flex: 1;
+  min-width: 0;
   width: 100%;
   text-align: left;
   border: 1px solid transparent;

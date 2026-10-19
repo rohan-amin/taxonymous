@@ -168,7 +168,7 @@ def test_workspace_takes_photos(corpus, tmp_path):
     assert [o.source.name for o in outcomes] == ["receipt_photo.jpg"]
     assert outcomes[0].report.passed
     assert sorted(p.name for p in ws.ready.iterdir()) == [
-        "receipt_photo.jpg.redacted.pdf", "receipt_photo.jpg.redacted.txt"]
+        "receipt_photo.jpg.redacted.pdf"]
 
 
 # ---------------------------------------------------------------- units

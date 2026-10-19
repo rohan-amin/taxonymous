@@ -14,6 +14,10 @@ export function App() {
   const [dragging, setDragging] = useState(false);
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
   const [view, setView] = useState<"documents" | "details">("documents");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
+  const [exported, setExported] = useState<string | null>(null);
+  const [pendingMarks, setPendingMarks] = useState(0); // in the open document, not yet applied
 
   // until your details are saved there is nothing to redact against: start there
   useEffect(() => {
@@ -83,6 +87,37 @@ export function App() {
     }
     refresh();
   };
+  // only documents that passed can be exported: a pick that no longer has (a re-run) drops out
+  const exportable = (d: DocSummary) => d.status === "passed";
+  const passed = docs?.filter(exportable) ?? [];
+  const chosen = passed.filter((d) => picked.has(d.id));
+  const toggle = (id: string) => setPicked((p) => {
+    const next = new Set(p);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const exportChosen = async () => {
+    setExporting(true);
+    const done: string[] = [];
+    const failed: string[] = [];
+    for (const d of chosen) {
+      if (d.id === selected && view === "documents" && pendingMarks) {
+        failed.push(`${d.name}: apply your marks with Final scrub first`);
+        continue;
+      }
+      try {
+        await api.export(d.id);
+        done.push(d.name);
+      } catch (err) {
+        failed.push(`${d.name}: ${(err as Error).message}`);
+      }
+    }
+    setExporting(false);
+    setPicked(new Set(failed.length ? chosen.filter((d) => !done.includes(d.name)).map((d) => d.id) : []));
+    setExported(done.length ? `Exported ${done.length} to ready-to-upload/` : null);
+    setError(failed.length ? `Not exported: ${failed.join("; ")}` : null);
+    refresh();
+  };
   const counts = (d: DocSummary) => Object.values(d.redactions).reduce((a, b) => a + b, 0);
 
   return (
@@ -104,10 +139,29 @@ export function App() {
           <button type="button" onClick={runAll} disabled={!docs?.length || !hasProfile}
                   title={hasProfile ? "Redact and verify every document" : "Add your details first"}>Run all</button>
         </div>
+        {passed.length > 0 && (
+          <div className="side-export">
+            <label title="Pick every document that passed verification">
+              <input type="checkbox" checked={chosen.length === passed.length}
+                     ref={(el) => { if (el) el.indeterminate = chosen.length > 0 && chosen.length < passed.length; }}
+                     onChange={() => setPicked(new Set(chosen.length === passed.length ? [] : passed.map((d) => d.id)))} />
+              All passed
+            </label>
+            <button type="button" className="export" onClick={exportChosen} disabled={!chosen.length || exporting}
+                    title="Copy each picked document's redacted PDF to ready-to-upload/">
+              {exporting ? "Exporting…" : `Export selected (${chosen.length})`}
+            </button>
+          </div>
+        )}
+        {exported && <div className="side-ok">{exported}</div>}
         {error && <div className="side-error">{error}</div>}
         <ul className="docs" data-testid="documents">
           {docs?.map((d) => (
             <li key={d.id}>
+              <input type="checkbox" className="pick" aria-label={`Pick ${d.name} for export`}
+                     checked={exportable(d) && picked.has(d.id)} disabled={!exportable(d)}
+                     title={exportable(d) ? "Pick for Export selected" : "Only a document that passed can be exported"}
+                     onChange={() => toggle(d.id)} />
               <button type="button" className={d.id === selected && view === "documents" ? "active" : ""}
                       onClick={() => { setSelected(d.id); setView("documents"); }}>
                 <span className="name">{d.name}</span>
@@ -126,7 +180,7 @@ export function App() {
       </aside>
       <main>
         {view === "details" ? <Details onSaved={() => setHasProfile(true)} onRunAll={runAll} />
-          : current ? <Viewer key={current.id} summary={current} onChanged={refresh} />
+          : current ? <Viewer key={current.id} summary={current} onChanged={refresh} onMarks={setPendingMarks} />
           : <div className="viewer empty">{docs ? "No document selected" : "Loading…"}</div>}
       </main>
     </div>

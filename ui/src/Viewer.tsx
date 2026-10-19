@@ -28,13 +28,17 @@ function issueText(d: DocDetail): string {
   return [...counts].map(([key, n]) => `${key}${n > 1 ? ` ×${n}` : ""})`).join(", ");
 }
 
-export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged: () => void }) {
+export function Viewer({ summary, onChanged, onMarks }: {
+  summary: DocSummary; onChanged: () => void; onMarks?: (n: number) => void;
+}) {
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [fit, setFit] = useState(1);
   const [zoomStep, setZoomStep] = useState(ZOOMS.indexOf(1));
   const [page, setPage] = useState(0);
   const [marking, setMarking] = useState(false);
   const [marks, setMarks] = useState<Mark[]>([]);
+  // the sidebar's Export selected leaves out a document with marks not yet applied
+  useEffect(() => onMarks?.(marks.length), [marks.length, onMarks]);
   const [draft, setDraft] = useState<Mark | null>(null);
   const [scrubbed, setScrubbed] = useState<Rect[] | null>(null); // the last final scrub, for the preview
   const [selected, setSelected] = useState<Region | null>(null);
