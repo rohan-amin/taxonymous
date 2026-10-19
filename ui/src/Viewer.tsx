@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import { api, ApiError, busy, pageImage, SOURCE_LABEL } from "./api";
 import type { Box, DetailKind, DocDetail, DocSummary, Progress, Rect, Region } from "./api";
+import { blankRow, DETAIL_FORMS, Field, quiet } from "./fields";
+import type { Row } from "./fields";
 
 const GAP = 16; // px between pages
 const PAD = 16; // px around the page column
@@ -13,13 +15,6 @@ interface Mark extends Box {
 }
 
 type Side = "original" | "redacted";
-
-// what "Add to my details" can add, and an example of each
-const DETAIL_KINDS: [DetailKind, string, string][] = [
-  ["name", "Name", "First Last"], ["address", "Street address", "123 Main St"],
-  ["account", "Account or other number", "Full number, as printed"], ["phone", "Phone", "(555) 555-0100"],
-  ["email", "Email", "you@example.com"], ["ein", "EIN of yours", "00-1234567"], ["card", "Card number", "Full number"],
-];
 
 const same = (a: Rect, b: Rect) => a.every((v, i) => Math.abs(v - b[i]) < 0.6);
 
@@ -35,8 +30,8 @@ function issueText(d: DocDetail): string {
   return [...counts].map(([key, n]) => `${key}${n > 1 ? ` ×${n}` : ""})`).join(", ");
 }
 
-export function Viewer({ summary, onChanged, onMarks }: {
-  summary: DocSummary; onChanged: () => void; onMarks?: (n: number) => void;
+export function Viewer({ summary, onChanged, onMarks, onDetails }: {
+  summary: DocSummary; onChanged: () => void; onMarks?: (n: number) => void; onDetails?: () => void;
 }) {
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [fit, setFit] = useState(1);
@@ -52,7 +47,8 @@ export function Viewer({ summary, onChanged, onMarks }: {
   const [selectedShown, setSelectedShown] = useState<number | null>(null); // index into detail.shown
   const [showOnOriginal, setShowOnOriginal] = useState(true);
   const [message, setMessage] = useState<{ tone: "ok" | "bad" | "info"; text: string } | null>(null);
-  const [adding, setAdding] = useState<{ kind: DetailKind; value: string; error?: string } | null>(null);
+  const [adding, setAdding] = useState<{ kind: DetailKind; item: Row; errors: Record<string, string>;
+                                         error?: string } | null>(null);
   const [addedAt, setAddedAt] = useState<number | null>(null); // the version before the re-run it started
   const panes = { original: useRef<HTMLDivElement>(null), redacted: useRef<HTMLDivElement>(null) };
   const syncing = useRef<Side | null>(null);
@@ -271,16 +267,24 @@ export function Viewer({ summary, onChanged, onMarks }: {
     }
   };
 
+  const startAdding = (kind: DetailKind) =>
+    ({ kind, item: blankRow(DETAIL_FORMS.find((d) => d.kind === kind)!.fields), errors: {} });
+  const setField = (f: string, v: string) =>
+    adding && setAdding({ ...adding, item: { ...adding.item, [f]: v }, errors: { ...adding.errors, [f]: "" },
+                          error: undefined });
+
   const addDetail = async (e: FormEvent) => {
     e.preventDefault();
-    if (!adding?.value.trim()) return;
+    if (!adding) return;
     try {
-      await api.addDetail(adding.kind, adding.value);
+      await api.addDetail(adding.kind, adding.item);
     } catch (err) {
-      setAdding({ ...adding, error: (err as Error).message });
+      const e = err as ApiError;
+      setAdding({ ...adding, errors: e.fields ?? {}, error: Object.keys(e.fields ?? {}).length ? undefined : e.message });
       return;
     }
     setAdding(null);
+    onDetails?.();
     setAddedAt(detail?.version ?? 0);
     await act(() => api.run(id), "Added to your details; redacting this document again…");
   };
@@ -417,7 +421,7 @@ export function Viewer({ summary, onChanged, onMarks }: {
                 Run again
               </button>
               <button type="button" className={adding ? "on" : ""} disabled={working}
-                      onClick={() => setAdding(adding ? null : { kind: "name", value: "" })}
+                      onClick={() => setAdding(adding ? null : startAdding("person"))}
                       title="Something of yours is still readable: add it to your details and redact again">
                 Add to my details
               </button>
@@ -444,18 +448,35 @@ export function Viewer({ summary, onChanged, onMarks }: {
 
       {adding && (
         <form className="add-detail" onSubmit={addDetail} data-testid="add-detail">
-          <span>Add to your details, then redact this document again:</span>
-          <select value={adding.kind} aria-label="Kind of detail"
-                  onChange={(e) => setAdding({ ...adding, kind: e.target.value as DetailKind, error: undefined })}>
-            {DETAIL_KINDS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-          </select>
-          <input autoFocus value={adding.value} aria-label="Value"
-                 placeholder={DETAIL_KINDS.find(([k]) => k === adding.kind)?.[2]}
-                 autoComplete="off" spellCheck={false} data-1p-ignore data-lpignore="true"
-                 onChange={(e) => setAdding({ ...adding, value: e.target.value, error: undefined })} />
-          <button type="submit" className="primary" disabled={!adding.value.trim()}>Add and run again</button>
-          <button type="button" onClick={() => setAdding(null)}>Cancel</button>
-          {adding.error && <em className="field-error">{adding.error}</em>}
+          <div className="add-detail-head">
+            <strong>Add to your details</strong>
+            <span className="muted">then this document is redacted again</span>
+          </div>
+          <div className="row">
+            <Field label="Kind">
+              <select value={adding.kind} onChange={(e) => setAdding(startAdding(e.target.value as DetailKind))}>
+                {DETAIL_FORMS.map(({ kind, label }) => <option key={kind} value={kind}>{label}</option>)}
+              </select>
+            </Field>
+            {DETAIL_FORMS.find(({ kind }) => kind === adding.kind)?.fields.map(({ f, label, placeholder, wide, short,
+                                                                                 options }, i) => (
+              <Field key={`${adding.kind}.${f}`} label={label} error={adding.errors[f]} wide={wide}>
+                {options ? (
+                  <select value={adding.item[f]} onChange={(e) => setField(f, e.target.value)}>
+                    {options.map(([v, text]) => <option key={v} value={v}>{text}</option>)}
+                  </select>
+                ) : (
+                  <input className={short ? "short" : ""} value={adding.item[f]} placeholder={placeholder}
+                         autoFocus={i === 0} {...quiet} onChange={(e) => setField(f, e.target.value)} />
+                )}
+              </Field>
+            ))}
+          </div>
+          <div className="add-detail-foot">
+            <button type="submit" className="primary">Add and run again</button>
+            <button type="button" onClick={() => setAdding(null)}>Cancel</button>
+            {adding.error && <em className="field-error">{adding.error}</em>}
+          </div>
         </form>
       )}
 

@@ -443,18 +443,30 @@ def test_nothing_tried_to_reach_the_network(server, network_attempts):
 
 def test_a_detail_seen_in_a_document_is_added_to_your_details(fresh):
     client, ws = fresh
-    morgan = {"kind": "name", "value": "Morgan Delacroix"}
+
+    def add(kind, **item):
+        return client.post("/api/profile/items", json={"kind": kind, "item": item})
+
+    morgan = {"kind": "person", "item": {"name": "Morgan Delacroix"}}
     assert client.post("/api/profile/items", json=morgan).status_code == 409  # no details yet
     assert client.put("/api/profile", json=FORM).status_code == 200
-    r = client.post("/api/profile/items", json={"kind": "name", "value": " Morgan  Delacroix "})
+    person = {"name": " Morgan  Delacroix ", "ssn": "987654325", "dob": "", "role": "spouse"}
+    r = add("person", **person)
     assert r.status_code == 200 and "Morgan" not in r.text  # real values stay out of responses
-    assert client.post("/api/profile/items", json={"kind": "account", "value": "0047812"}).status_code == 200
+    account = {"institution": "Contoso Bank", "number": "0047812", "name": "Brokerage"}
+    assert add("account", **account).status_code == 200
+    assert add("phone", value="5555550199").status_code == 200
     saved = json.loads(ws.profile_path.read_text())
-    assert saved["people"][-1]["name"] == "Morgan Delacroix" and saved["people"][-1]["role"] == "other"
-    assert saved["accounts"][-1]["number"] == "0047812"
+    assert saved["people"][-1] == {"name": "Morgan Delacroix", "ssn": "987-65-4325", "dob": "",
+                                   "role": "spouse", "dod": "", "deceased": False}
+    assert saved["accounts"][-1] == account and saved["phones"][-1] == "(555) 555-0199"
     assert len(saved["people"]) == 2 and len(saved["accounts"]) == 2
 
-    r = client.post("/api/profile/items", json={"kind": "ein", "value": "12345"})
-    assert r.status_code == 422 and r.json()["detail"]["message"] == "An EIN has 9 digits."
-    assert client.post("/api/profile/items", json={"kind": "shoe size", "value": "9"}).status_code == 422
+    r = add("ein", ein="12345", description="Trust")
+    assert r.status_code == 422 and r.json()["detail"]["fields"] == {"ein": "An EIN has 9 digits."}
+    r = add("person", name="Morgan", ssn="")
+    assert r.json()["detail"]["fields"] == {"name": "Enter a first and last name."}
+    r = add("card", number="", description="")
+    assert r.status_code == 422 and r.json()["detail"]["message"] == "Fill in the details first."
+    assert add("shoe size", v="9").status_code == 422
     assert len(json.loads(ws.profile_path.read_text())["eins"]) == 1  # nothing saved

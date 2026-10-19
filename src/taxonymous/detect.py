@@ -336,8 +336,13 @@ def is_date(text: str) -> bool:
 def identifies(kind: str, value: str) -> bool:
     """Whether a value some detector redacted can identify anyone. Not a caption ("Part II",
     "Capital gain distributions"), an IRS form's OMB number, or a date other than a birth
-    date: a detector mistake, which must not fail every document that prints the same."""
+    date: a detector mistake, which must not fail every document that prints the same. Nor
+    a bare short number ("4323", an SSN's last four after "SSN"): on its own it turns up by
+    chance in amounts, font tables and page drawing code; the profile's rules still find it
+    where it has its context ("SSN 4323", "XXX-XX-4323")."""
     if is_caption(value) or IRS_OMB_RE.fullmatch(value.strip()):
+        return False
+    if kind != "DOB" and re.fullmatch(r"[\d\s./-]+", value.strip()) and len(digits(value)) < 7:
         return False
     return kind == "DOB" or not is_date(value)
 

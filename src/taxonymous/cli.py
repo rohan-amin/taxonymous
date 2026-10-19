@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "explain":
-        from .explain import explain, explain_placeholder, render
+        from .explain import explain, explain_placeholder, off_page, render
         ws = Workspace(args.workspace)
         stem = next((output_stem(p) for p in ws.pending() if args.document in (p.name, output_stem(p))), None)
         if stem is None or not ws.outputs(stem)["report"].exists():
@@ -89,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         issues = json.loads(ws.outputs(stem)["report"].read_text())["issues"]
         print(render(explain(ws.root, stem, ocr=not args.no_ocr), issues))
+        for line in off_page(ws.outputs(stem)["pdf"], issues):
+            print(line)
         return 0
 
     if args.command == "init":

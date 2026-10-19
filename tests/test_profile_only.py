@@ -93,3 +93,15 @@ def test_your_details_left_in_a_file_still_fail_it(tmp_path):
     kinds = {i.kind for i in report.issues if i.check == "text"}
     assert not report.passed and {"NAME", "SSN", "ADDR"} <= kinds
     assert "EIN" not in kinds and "ID" not in kinds
+
+
+def test_a_last_four_redacted_after_its_label_is_not_searched_for_alone(tmp_path):
+    """"SSN 4323" is redacted; the same four digits in a font's width table, the page's
+    drawing code or an amount are not a leak."""
+    ws = _workspace(tmp_path, DETAILS)
+    doc = _page([f"Employee {NAME}", "Partner SSN 4323", "Units 4323 of 10000", "Total 14,323.00"])
+    doc.save(ws.inbox / "k1.pdf")
+    [outcome] = run(ws, ocr=False)
+    assert outcome.report.passed, outcome.report.issues
+    text = pymupdf.open(ws.outputs("k1")["pdf"])[0].get_text()
+    assert "SSN 4323" not in text and "Units 4323" in text

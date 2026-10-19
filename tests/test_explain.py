@@ -9,7 +9,7 @@ import pytest
 
 from taxonymous.cli import main as cli
 from taxonymous.detect import ProfileMatcher
-from taxonymous.explain import explain, mask, render
+from taxonymous.explain import explain, mask, off_page, render
 from taxonymous.pipeline import Workspace, process, reverify
 from taxonymous.profile import Profile
 from taxonymous.vault import Vault
@@ -75,3 +75,14 @@ def test_explain_one_box_says_where_it_came_from(failed, capsys):
     printed = capsys.readouterr().out
     for secret in [*(w for w in NAME.split() if len(w) > 1), *re.findall(r"\d{2,}", SSN + EIN)]:
         assert secret not in printed, secret
+
+
+def test_explain_says_what_is_drawn_off_the_page_without_saying_what_it_is(tmp_path):
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 90), "Wages 1,234.56", fontsize=10)
+    page.insert_text((72, page.rect.height + 30), f"Employee: {NAME}", fontsize=10)  # below the bottom edge
+    doc.save(tmp_path / "off.pdf")
+    lines = off_page(tmp_path / "off.pdf", [{"check": "structure", "kind": "outside-the-page", "page": 1}])
+    assert lines[0].startswith("page 1 · drawn outside the page: ") and "text" in lines[0]
+    assert "MediaBox" in lines[1] and NAME.split()[-1] not in "\n".join(lines)

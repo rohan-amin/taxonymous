@@ -1,11 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DragEvent } from "react";
 import { api, busy, token } from "./api";
-import type { DocSummary } from "./api";
+import type { DocSummary, Profile } from "./api";
 import { Details } from "./Details";
 import { ProgressBar, Viewer } from "./Viewer";
 
 const ACCEPT = ".pdf,.jpg,.jpeg,.png,.tif,.tiff,.heic,.heif,.webp";
+
+// what Your details lists, for the sidebar card: "2 people · 1 address · 3 accounts"
+const COUNTED: [keyof Profile, string, string][] = [
+  ["people", "person", "people"], ["addresses", "address", "addresses"], ["accounts", "account", "accounts"],
+  ["eins", "EIN", "EINs"], ["cards", "card", "cards"], ["phones", "phone", "phones"], ["emails", "email", "emails"],
+];
+
+function listed(p: Profile): string[] {
+  return COUNTED.flatMap(([key, one, many]) => {
+    const n = (p[key] as unknown[] | undefined)?.length ?? 0;
+    return n ? [`${n} ${n === 1 ? one : many}`] : [];
+  });
+}
 
 export function App() {
   const [docs, setDocs] = useState<DocSummary[] | null>(null);
@@ -13,19 +26,25 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
+  const [summary, setSummary] = useState<string[]>([]);
   const [view, setView] = useState<"documents" | "details">("documents");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState<string | null>(null);
   const [pendingMarks, setPendingMarks] = useState(0); // in the open document, not yet applied
 
+  const loadProfile = useCallback(() => api.profile().then((p) => {
+    setHasProfile(p.exists);
+    setSummary(listed(p.profile));
+    return p;
+  }), []);
+
   // until your details are saved there is nothing to redact against: start there
   useEffect(() => {
-    api.profile().then((p) => {
-      setHasProfile(p.exists);
+    loadProfile().then((p) => {
       if (!p.exists) setView("details");
     }).catch((err) => setError((err as Error).message));
-  }, []);
+  }, [loadProfile]);
 
   const refresh = useCallback(async () => {
     try {
@@ -126,9 +145,17 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">Taxonymous</div>
         <button type="button" className={`side-details${view === "details" ? " active" : ""}`}
-                onClick={() => setView("details")}>
-          Your details
-          {hasProfile === false && <span className="badge needed">needed</span>}
+                onClick={() => setView("details")} data-testid="details-card"
+                title="What is removed from every document">
+          <span className="side-details-head">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5" r="3" /><path d="M2 15c0-3.3 2.7-5 6-5s6 1.7 6 5" /></svg>
+            <strong>Your details</strong>
+            {hasProfile === false ? <span className="badge needed">needed</span> : <span className="edit">Edit<span aria-hidden="true"> ›</span></span>}
+          </span>
+          <span className="side-details-sum">
+            {summary.length ? summary.map((s, i) => <span key={s}>{i ? " · " : ""}<span className="nowrap">{s}</span></span>)
+              : "Add yourself first: what you list is removed"}
+          </span>
         </button>
         <div className="side-actions">
           <label className="button">
@@ -179,8 +206,9 @@ export function App() {
         <div className="foot muted">Everything stays on this computer.</div>
       </aside>
       <main>
-        {view === "details" ? <Details onSaved={() => setHasProfile(true)} onRunAll={runAll} />
-          : current ? <Viewer key={current.id} summary={current} onChanged={refresh} onMarks={setPendingMarks} />
+        {view === "details" ? <Details onSaved={loadProfile} onRunAll={runAll} />
+          : current ? <Viewer key={current.id} summary={current} onChanged={refresh} onMarks={setPendingMarks}
+                              onDetails={loadProfile} />
           : <div className="viewer empty">{docs ? "No document selected" : "Loading…"}</div>}
       </main>
     </div>

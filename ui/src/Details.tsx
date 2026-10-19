@@ -1,61 +1,12 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
 import { api, ApiError } from "./api";
 import type { Address, Person, Profile } from "./api";
 
-type ListKey = "phones" | "emails";
-type RecordKey = "accounts" | "eins" | "cards";
-type Row = Record<string, string>;
+import { Field, LISTS, quiet, RECORDS, ROLES } from "./fields";
+import type { ListKey, RecordKey, Row } from "./fields";
 
-const ROLES: [string, string][] = [
-  ["taxpayer", "You"], ["spouse", "Spouse"], ["dependent", "Dependent"], ["other", "Other"],
-];
 const NEW_PERSON: Person = { name: "", ssn: "", dob: "", role: "taxpayer", deceased: false, dod: "" };
 const NEW_ADDRESS: Address = { street: "", city: "", state: "", zip: "" };
-const LISTS: { key: ListKey; title: string; label: string; add: string; placeholder: string }[] = [
-  { key: "phones", title: "Phone numbers", label: "Phone number", add: "Add a phone number",
-    placeholder: "e.g. (555) 555-0100" },
-  { key: "emails", title: "Email addresses", label: "Email address", add: "Add an email address",
-    placeholder: "e.g. you@example.com" },
-];
-
-// records with one identifier (redacted) and labels that are only for you
-const RECORDS: { key: RecordKey; title: string; noun: string; add: string; hint: string; blank: Row;
-                 fields: { f: string; label: string; placeholder: string; secret?: boolean; wide?: boolean }[] }[] = [
-  { key: "accounts", title: "Accounts", noun: "account", add: "Add an account", blank: { institution: "", number: "", name: "" },
-    hint: "Bank, brokerage, IRA, 529, HSA, loan and mortgage accounts. Only the number is removed from documents.",
-    fields: [
-      { f: "institution", label: "Institution", placeholder: "e.g. Contoso Bank", wide: true },
-      { f: "number", label: "Account number", placeholder: "Full number", secret: true },
-      { f: "name", label: "Account name", placeholder: "e.g. Joint checking", wide: true },
-    ] },
-  { key: "eins", title: "EINs", noun: "EIN", add: "Add an EIN", blank: { ein: "", description: "" },
-    hint: "Only ones that are yours, e.g. as a household employer, a business or a trust you manage.",
-    fields: [
-      { f: "ein", label: "EIN", placeholder: "e.g. 00-1234567", secret: true },
-      { f: "description", label: "Description", placeholder: "e.g. Household employer", wide: true },
-    ] },
-  { key: "cards", title: "Credit and debit cards", noun: "card", add: "Add a card", blank: { number: "", description: "" },
-    hint: "Cards that show up on receipts or statements. Only the number is removed.",
-    fields: [
-      { f: "number", label: "Card number", placeholder: "Full card number", secret: true },
-      { f: "description", label: "Description", placeholder: "e.g. Travel rewards card", wide: true },
-    ] },
-];
-
-// password managers and browsers shouldn't offer to fill or save any of this
-const quiet = { autoComplete: "off", spellCheck: false, "data-1p-ignore": true, "data-lpignore": "true" };
-
-function Field({ label, error, wide, children }: { label: string; error?: string; wide?: boolean;
-                                                  children: ReactNode }) {
-  return (
-    <label className={`field${wide ? " wide" : ""}${error ? " invalid" : ""}`}>
-      <span>{label}</span>
-      {children}
-      {error && <em className="field-error">{error}</em>}
-    </label>
-  );
-}
 
 export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: () => void }) {
   const [form, setForm] = useState<Profile | null>(null);

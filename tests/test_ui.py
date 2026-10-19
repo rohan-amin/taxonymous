@@ -355,11 +355,12 @@ def test_something_left_readable_is_added_to_your_details_and_redacted(fresh_pag
 
     pg.get_by_role("button", name="Add to my details").click()
     form = pg.get_by_test_id("add-detail")
-    form.get_by_label("Kind of detail").select_option("name")
-    form.get_by_label("Value").fill("Morgan")  # one word: not a full name
+    form.get_by_label("Kind").select_option("person")
+    form.get_by_label("Full name").fill("Morgan")  # one word: not a full name
+    form.get_by_label("Who").select_option("spouse")
     form.get_by_role("button", name="Add and run again").click()
     form.get_by_text("Enter a first and last name.").wait_for()
-    form.get_by_label("Value").fill("Morgan Delacroix")
+    form.get_by_label("Full name").fill("Morgan Delacroix")
     form.get_by_role("button", name="Add and run again").click()
     wait_banner(pg, "Added to your details")
     pg.wait_for_function("!document.querySelector('[data-testid=add-detail]')")
@@ -367,4 +368,10 @@ def test_something_left_readable_is_added_to_your_details_and_redacted(fresh_pag
     pg.wait_for_function("document.querySelectorAll('[data-testid=pane-redacted] .region').length >= 2",
                          timeout=60_000)
     assert "Morgan" not in text()
-    assert json.loads(ws.profile_path.read_text())["people"][-1]["name"] == "Morgan Delacroix"
+    pg.get_by_test_id("details-card").get_by_text("2 people").wait_for()  # the sidebar card is updated
+    added = json.loads(ws.profile_path.read_text())["people"][-1]
+    assert added["name"] == "Morgan Delacroix" and added["role"] == "spouse"
+
+    pg.get_by_role("button", name="Add to my details").click()  # the fields follow the kind
+    form.get_by_label("Kind").select_option("account")
+    assert form.get_by_label("Institution").count() == form.get_by_label("Account name").count() == 1

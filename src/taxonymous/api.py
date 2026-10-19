@@ -7,8 +7,8 @@ the same browser can't drive it). It makes no outbound connections.
 
   GET    /api/profile                           your identifiers (vault/profile.json), as a form edits them
   PUT    /api/profile                           save them (validated; 422 names the fields to fix)
-  POST   /api/profile/items                     {"kind": "name"|"address"|"account"|..., "value": ...}
-                                                add one detail seen in a document
+  POST   /api/profile/items                     {"kind": "person"|"address"|"account"|..., "item": {...}}
+                                                add one detail seen in a document (422 names the fields)
   GET    /api/documents                         every document in inbox/, with its status
   POST   /api/documents                         upload a file into inbox/ (multipart "file")
   GET    /api/documents/{id}                    status, report, boxes, reviewer decisions, page sizes
@@ -241,7 +241,7 @@ class Boxes(BaseModel):
 
 class Detail(BaseModel):
     kind: str  # one of profile.ITEMS
-    value: str
+    item: dict[str, str | bool]  # the fields of one row of that list, as Your details has them
 
 
 # ---------------------------------------------------------------- app
@@ -292,9 +292,10 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
     def add_to_profile(body: Detail):
         """One detail the reviewer saw left readable in a document, added to their details."""
         need_profile()
-        profile, error = add_item(json.loads(ws.profile_path.read_text()), body.kind, body.value)
-        if error:
-            raise HTTPException(422, {"message": error, "fields": {}})
+        profile, errors = add_item(json.loads(ws.profile_path.read_text()), body.kind, body.item)
+        if errors:
+            message = errors.pop("", "Some details need fixing.")
+            raise HTTPException(422, {"message": message, "fields": errors})
         save_profile(profile, ws.profile_path)
         return {"added": body.kind}
 

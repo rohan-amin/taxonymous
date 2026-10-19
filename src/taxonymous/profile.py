@@ -221,25 +221,29 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
     return out, errors
 
 
-# what the review screen can add in one step, from a document: the field it becomes
-ITEMS = {"name": "people", "address": "addresses", "account": "accounts", "phone": "phones",
+# what the review screen can add in one step, from a document: the profile list it goes in
+ITEMS = {"person": "people", "address": "addresses", "account": "accounts", "phone": "phones",
          "email": "emails", "ein": "eins", "card": "cards"}
 
 
-def add_item(d: dict, kind: str, value: str) -> tuple[dict, str | None]:
-    """A profile with one more detail, seen in a document. Returns (profile, error); the
-    error message never repeats the value."""
-    d = {k: list(v) if isinstance(v, list) else v for k, v in d.items()}
+def add_item(d: dict, kind: str, item: dict) -> tuple[dict, dict[str, str]]:
+    """A profile with one more detail, seen in a document: `item` has the same fields as a
+    row of that list in the form ({"value": ...} for a phone or email). Returns (profile,
+    errors by field name); error messages never repeat a value."""
     key = ITEMS.get(kind)
     if key is None:
-        return d, "Unknown kind of detail."
-    item = {"name": {"name": value, "role": "other"}, "address": {"street": value},
-            "account": {"number": value}, "ein": {"ein": value}, "card": {"number": value}}.get(kind, value)
-    d[key] = [*d.get(key, []), item]
+        return d, {"": "Unknown kind of detail."}
+    if not any(str(v or "").strip() for v in item.values()):
+        return d, {"": "Fill in the details first."}
+    if key in ("phones", "emails"):
+        item = item.get("value", "")
+    elif key == "people":
+        item = {"role": "other", **item}
+    d = {**d, key: [*d.get(key, []), item]}
     out, errors = clean(d)
     at = f"{key}.{len(d[key]) - 1}"
-    error = next((m for f, m in errors.items() if f == at or f.startswith(at + ".")), None)
-    return out, error
+    return out, {f.removeprefix(at).lstrip(".") or "value": m for f, m in errors.items()
+                 if f == at or f.startswith(at + ".")}
 
 
 def save(d: dict, path: Path) -> None:

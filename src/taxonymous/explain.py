@@ -242,6 +242,32 @@ def _raw_hits(doc: pymupdf.Document, values: list[Value], matcher: ProfileMatche
     return list(out.values())
 
 
+def off_page(pdf: Path, issues: list[dict]) -> list[str]:
+    """For each page that failed "outside-the-page": what is drawn past its edge (text,
+    image or line art), how much and how far, and the page's boxes. No content."""
+    from .sanitize import EDGE
+    lines = []
+    doc = pymupdf.open(pdf)
+    for n in sorted({i["page"] for i in issues if i["kind"] == "outside-the-page" and i["page"]}):
+        page = doc[n - 1]
+        visible = page.rect + (-EDGE, -EDGE, EDGE, EDGE)
+        far: dict[str, list[float]] = {}
+        for what, r in page.get_bboxlog():
+            r = pymupdf.Rect(r)
+            if r.is_empty or r in visible:
+                continue
+            past = max(visible.x0 - r.x0, visible.y0 - r.y0, r.x1 - visible.x1, r.y1 - visible.y1)
+            far.setdefault(what, []).append(past)
+        drawn = ", ".join(f"{len(v)} × {k} (up to {max(v):.0f} pt past the edge)"
+                          for k, v in sorted(far.items()))
+        boxes = ", ".join(f"{k} {doc.xref_get_key(page.xref, k)[1]}" for k in ("MediaBox", "CropBox")
+                          if doc.xref_get_key(page.xref, k)[0] != "null")
+        lines.append(f"page {n} · drawn outside the page: {drawn or 'nothing now (run it again)'}")
+        size = f"{page.rect.width:.0f} × {page.rect.height:.0f} pt"
+        lines.append(f"    page {size}, rotated {page.rotation}; {boxes}")
+    return lines
+
+
 def render(hits: list[Hit], issues: list[dict]) -> str:
     if not issues:
         return "Verification passed: nothing to explain."
