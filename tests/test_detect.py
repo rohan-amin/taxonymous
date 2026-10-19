@@ -214,3 +214,16 @@ def test_dotted_ids_are_still_copies():
 
     from taxonymous.detect import number_regex
     assert re.search(number_regex("123456"), "Ref 12.34.56 issued")
+
+
+@pytest.mark.parametrize("items, expected", [
+    ([(72, "VA"), (110, "30134994650F001"), (250, "9237.81")], "30134994650F001"),  # a state account no.
+    ([(72, "NJ"), (110, "00-0000000/000"), (250, "56402.10")], "00-0000000/000"),  # EIN and branch
+])
+def test_state_ids_in_other_shapes(items, expected):
+    assert expected in placed(*items)
+
+
+@pytest.mark.parametrize("line", ["CUSIP 46625H100", "ISIN US0378331005", "Form 1099-INT", "Rev. 2026"])
+def test_security_ids_and_form_names_are_not_ids(line):
+    assert texts(line) == []

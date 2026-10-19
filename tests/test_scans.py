@@ -233,3 +233,62 @@ def test_straightened_read_maps_back_onto_the_original():
     ys = [y for y in range(800) if straight.getpixel((600, y)) < 128]
     p = pymupdf.Point(600, sum(ys) / len(ys)) * back
     assert tilted.getpixel((round(p.x), round(p.y))) < 128
+
+
+def _ruled_table(path, dx: float, baseline: float) -> None:
+    """A scanned W-2 state table (box 15-17) whose text sits on or against the rules."""
+    page = pymupdf.open().new_page()
+    xs, ys = [40, 110, 250, 390, 520], [300, 316, 332, 348]
+    for y in ys:
+        page.draw_line((xs[0], y), (xs[-1], y), width=0.8)
+    for x in xs:
+        page.draw_line((x, ys[0]), (x, ys[-1]), width=0.8)
+    page.draw_line((40, 352), (560, 352), width=0.6, dashes="[2] 0")
+    rows = [("15 State", "Employer's state ID number", "16 State wages, tips etc.", "17 State income tax"),
+            ("DE", "0000123456", "72743.85", "2465.29"), ("MA", "000000000", "52102.13", "2605.11")]
+    for r, row in enumerate(rows):
+        for c, s in enumerate(row):
+            page.insert_text((xs[c] + dx, ys[r] + baseline), s, fontsize=10, fontname="tiro")
+    page.insert_text((40, 362), "This information is being furnished to the Internal Revenue Service.",
+                     fontsize=9, fontname="tiro")
+    out = pymupdf.open()
+    out.new_page(width=page.rect.width, height=page.rect.height).insert_image(
+        page.rect, pixmap=page.get_pixmap(dpi=200))
+    out.save(path)
+
+
+@pytest.mark.parametrize("dx, baseline", [(2, 12.5), (1, 14.5), (0.5, 15)])
+def test_ids_touching_table_rules_get_boxes_their_own_size(tmp_path, dx, baseline):
+    """A character touching a rule is read as one word with the line, and that word's box
+    blacked out rows, columns and amounts."""
+    ws = Workspace(tmp_path)
+    ws.init()
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}]}))
+    _ruled_table(ws.inbox / "w2_scan.pdf", dx, baseline)
+    [outcome] = run(ws)
+    assert outcome.report.passed, outcome.report.issues
+    ids = [r for r in outcome.result.regions if r.kind == "ID"]
+    assert len({r.placeholder for r in ids}) == 2
+    for r in ids:
+        x0, y0, x1, y1 = r.rect
+        assert y1 - y0 < 14 and x0 > 100 and x1 < 250, r  # one line of its own cell: not the wages next to it
+
+
+def test_a_word_box_that_took_in_the_table_shrinks_to_its_text():
+    """What OCR reported on a real W-2: one ID "word" whose box was the table's ruled
+    lines, three rows tall and three columns wide."""
+    img = Image.new("L", (1200, 400), 255)
+    draw = ImageDraw.Draw(img)
+    for y in (100, 160, 220, 280):
+        draw.line((50, y, 1150, y), fill=0, width=3)
+    for x in (50, 300, 700, 1150):
+        draw.line((x, 100, x, 280), fill=0, width=3)
+    draw.text((305, 175), "0000123456", fill=0, font_size=42)  # touches the rule on its left
+    left, top, right, bottom = draw.textbbox((305, 175), "0000123456", font_size=42)
+    normal = [ocr.Word(t, 95, (60 + 90 * i, 110, 140 + 90 * i, 150), (1, 1, 1)) for i, t in enumerate(
+        ["State", "wages", "tips", "income", "Employer"])]
+    huge = ocr.Word("0000123456", 90, (48, 98, 702, 282), (1, 1, 2))
+    [*same, tight] = ocr.tighten([*normal, huge], img)
+    assert same == normal  # ordinary words are left alone
+    x0, y0, x1, y1 = tight.rect
+    assert abs(y0 - top) <= 4 and abs(y1 - bottom) <= 4 and x0 >= 298 and abs(x1 - right) <= 4, tight.rect

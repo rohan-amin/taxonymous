@@ -35,7 +35,7 @@ import pymupdf
 from PIL import Image, ImageDraw, ImageOps
 
 from . import ocr
-from .detect import Finding, ProfileMatcher, detect, merge, relink, repeat_values, repeated
+from .detect import Finding, ProfileMatcher, continue_numbers, detect, merge, relink, repeat_values, repeated
 from .pagetext import PageText, extract
 from .progress import NONE, Progress
 from .sanitize import allow_list, sanitize
@@ -205,7 +205,7 @@ def _read_all(pages: list[_Ocr], matcher: ProfileMatcher, progress: Progress = N
     done = progress.per_page([len(vs) * len(ocr.PASSES) for _, vs in views])
     tsvs = iter(ocr.run_all(jobs, tsv=True, done=done))
     for p, vs in views:
-        reads = [(ocr.parse_tsv(next(tsvs)), m) for _, m in vs for _ in ocr.PASSES]
+        reads = [(ocr.tighten(ocr.parse_tsv(next(tsvs)), img), m) for img, m in vs for _ in ocr.PASSES]
         if p.scale <= 0:  # a photo: no physical size, so size it from its text
             h = next((h for h in (ocr.median_height(w) for w, _ in reads) if h), None)
             p.scale = PHOTO_TEXT_HEIGHT / h if h else 72 / 200
@@ -412,6 +412,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 continue
             pt, found = text_pages.pop(page.number)
             found = [f for f in merge(found + repeated(pt, found, values), pt) if wanted(f)]
+            continue_numbers(found, pt)  # copies found by the repeat step get their suffix too
             ocr_page = mixed.get(page.number)
             if ocr_page is not None:
                 _repeat_ocr(ocr_page, values)

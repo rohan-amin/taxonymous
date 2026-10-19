@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pymupdf
 from PIL import Image, ImageOps
 
@@ -174,6 +175,65 @@ def skew(img: Image.Image) -> float:
 
     angle = max((a / 2 for a in range(-20, 21)), key=score)
     return max((angle + d / 10 for d in range(-5, 6)), key=score)
+
+
+def _long_runs(dark: np.ndarray, length: int) -> np.ndarray:
+    """The pixels of each row that are in a run of at least `length` dark pixels."""
+    padded = np.zeros((dark.shape[0], dark.shape[1] + 2), dtype=np.int8)
+    padded[:, 1:-1] = dark
+    edges = np.diff(padded, axis=1)
+    out = np.zeros(dark.shape, dtype=bool)
+    for y, x in zip(*np.nonzero(edges == 1), strict=True):
+        end = x + np.argmax(edges[y, x:] == -1)
+        if end - x >= length:
+            out[y, x:end] = True
+    return out
+
+
+def _ink(dark: np.ndarray) -> tuple[int, int, int, int] | None:
+    """The box of the band of rows holding the most ink (text, rather than a dashed rule
+    or a scrap of the next row)."""
+    rows = dark.sum(axis=1)
+    bands, start = [], None
+    for y, n in enumerate([*rows, 0]):
+        if n and start is None:
+            start = y
+        elif not n and start is not None:
+            bands.append((rows[start:y].sum(), start, y))
+            start = None
+    if not bands:
+        return None
+    _, y0, y1 = max(bands)
+    cols = np.nonzero(dark[y0:y1].any(axis=0))[0]
+    return int(cols[0]), y0, int(cols[-1]) + 1, y1
+
+
+def tighten(words: list[Word], img: Image.Image) -> list[Word]:
+    """Shrink word boxes that took in a table rule. A character touching a ruled line is
+    read as one word with the line, and that word's box (what gets blacked out) can span
+    the table: rows, columns, the amounts in them. The text read stays as it was."""
+    h = median_height(words)
+    if not h:
+        return words
+    gray: np.ndarray | None = None
+    out = []
+    for w in words:
+        x0, y0, x1, y1 = w.rect
+        chars = max(1, len(w.text))
+        if y1 - y0 <= 1.5 * h and x1 - x0 <= 1.2 * h * chars + h:
+            out.append(w)
+            continue
+        if gray is None:
+            gray = np.asarray(img.convert("L"))
+        dark = gray[y0:y1, x0:x1] < 128
+        rules = _long_runs(dark, round(3 * h)) | _long_runs(dark.T, round(2 * h)).T
+        box = _ink(dark & ~rules)
+        if box is None:
+            out.append(w)
+            continue
+        bx0, by0, bx1, by1 = box
+        out.append(Word(w.text, w.conf, (x0 + bx0, y0 + by0, x0 + bx1, y0 + by1), w.line))
+    return out
 
 
 def variants(img: Image.Image) -> list[tuple[Image.Image, pymupdf.Matrix | None]]:

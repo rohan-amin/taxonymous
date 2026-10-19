@@ -12,6 +12,7 @@ requires-python = ">=3.13"
 dependencies = [
     "en-core-web-trf",
     "fastapi>=0.143.3",
+    "numpy>=2.5.4",
     "pillow>=13.0.0",
     "pillow-heif>=1.8.1",
     "pymupdf>=1.28.2",

@@ -1686,6 +1686,7 @@ source = { editable = "." }
 dependencies = [
     { name = "en-core-web-trf" },
     { name = "fastapi" },
+    { name = "numpy" },
     { name = "pillow" },
     { name = "pillow-heif" },
     { name = "pymupdf" },
@@ -1707,6 +1708,7 @@ dev = [
 requires-dist = [
     { name = "en-core-web-trf", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.8.0/en_core_web_trf-3.8.0-py3-none-any.whl" },
     { name = "fastapi", specifier = ">=0.143.3" },
+    { name = "numpy", specifier = ">=2.5.4" },
     { name = "pillow", specifier = ">=13.0.0" },
     { name = "pillow-heif", specifier = ">=1.8.1" },
     { name = "pymupdf", specifier = ">=1.28.2" },

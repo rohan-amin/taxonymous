@@ -246,6 +246,33 @@ PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
+# the same with capital letters among the digits ("30134994650F001", a state account
+# number); at least one letter, or it is a LONG_NUMBER
+ALNUM_ID_RE = re.compile(r"(?<![\w.,/$-])(?=[0-9-]*[A-Z])[0-9A-Z][0-9A-Z-]{5,}[0-9A-Z](?![\w.,/%-]|\.\d)")
+
+
+def _security_id(s: str) -> bool:
+    """A CUSIP or ISIN: a public security's identifier, not a person's."""
+    def check(body: str) -> int:
+        ds = "".join(str(int(c, 36)) for c in body)
+        total = sum(sum(divmod(int(d) * (2 if i % 2 == 0 else 1), 10)) for i, d in enumerate(reversed(ds)))
+        return (10 - total % 10) % 10
+
+    def cusip(body: str) -> int:
+        total = 0
+        for i, c in enumerate(body):
+            v = int(c, 36) if c.isalnum() else 0
+            v *= 2 if i % 2 else 1
+            total += v // 10 + v % 10
+        return (10 - total % 10) % 10
+
+    if len(s) == 9 and s.isalnum():
+        return cusip(s[:8]) == int(s[8]) if s[8].isdigit() else False
+    if len(s) == 12 and s[:2].isalpha() and s[2:].isalnum():
+        return s[11].isdigit() and check(s[:11]) == int(s[11])
+    return False
+
+
 # a bare number this long is an ID (parcel, tax account, member number) unless it is an
 # amount (decimals or thousands commas), a date, or a form's printed OMB control number
 LONG_NUMBER_RE = re.compile(r"(?<![\w.,/$-])\d[\d-]{5,}\d(?![\w.,/%-]|\.\d)")
@@ -273,6 +300,10 @@ def find_patterns(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
     # not in PATTERNS: verification would flag every OCR misread of an amount that lost its point
     for m in LONG_NUMBER_RE.finditer(pt.text):
         if len(digits(m.group())) >= LONG_NUMBER_DIGITS and not OMB_RE.search(pt.text[:m.start()][-12:]):
+            out.append(Finding(pt.number, m.start(), m.end(), *pm.canonical("ID", m.group()), "pattern",
+                               m.group()))
+    for m in ALNUM_ID_RE.finditer(pt.text):
+        if len(digits(m.group())) >= LONG_NUMBER_DIGITS and not _security_id(m.group()):
             out.append(Finding(pt.number, m.start(), m.end(), *pm.canonical("ID", m.group()), "pattern",
                                m.group()))
     return out
@@ -593,7 +624,7 @@ def merge(findings: list[Finding], pt: PageText) -> list[Finding]:
     return merged
 
 
-CHECK_DIGITS_RE = re.compile(r" (\d{1,3})(?=\s|$)")
+CHECK_DIGITS_RE = re.compile(r"[ /](\d{1,3})(?=\s|$)")  # "185-2732 5", NJ's "<EIN>/000"
 NUMBER_KINDS = {"SSN", "EIN", "TIN", "ACCT", "CARD", "ID"}
 
 
@@ -607,9 +638,9 @@ def _box_gap(pt: PageText, i: int, j: int) -> float | None:
 
 
 def continue_numbers(findings: list[Finding], pt: PageText) -> None:
-    """An identifier printed with a short trailing group after a word space ("185-2732 5",
-    a state employer ID's check digit) covers that group too, when the group ends the
-    cell: the line ends, or a column gap follows."""
+    """An identifier printed with a short trailing group after a word space or a slash
+    ("185-2732 5", a state employer ID's check digit; "00-1234567/000") covers that group
+    too, when the group ends the cell: the line ends, or a column gap follows."""
     for f in findings:
         if f.kind not in NUMBER_KINDS or f.end < 1:
             continue
