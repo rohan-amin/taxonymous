@@ -56,6 +56,20 @@ class Workspace:
         return [self.ready / f"{stem}.redacted.pdf", self.ready / f"{stem}.redacted.txt"]
 
 
+def in_use(ws: Workspace, current: tuple[str, Result] | None = None) -> set[str]:
+    """Placeholders that some document's latest redaction uses: from each document's regions
+    file, or for the one being redacted now, from this run. A value the vault remembers from
+    an earlier run that nothing redacts any more (a detector mistake since fixed) isn't one."""
+    used = set()
+    for src in ws.pending():
+        stem = output_stem(src)
+        if current and stem == current[0]:
+            used |= {r.placeholder for r in current[1].regions}
+        elif ws.outputs(stem)["regions"].exists():
+            used |= {r["placeholder"] for r in json.loads(ws.outputs(stem)["regions"].read_text())}
+    return used
+
+
 def allowed_values(vault: Vault, overrides: Overrides) -> set[str]:
     """The real values behind the placeholders a reviewer kept in the clear."""
     return {v for ph in overrides.keep for v in vault.entries.get(ph, {}).get("values", [])}
@@ -79,14 +93,14 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
         out["regions"].unlink(missing_ok=True)
     else:
         found = [Known(f.kind, f.text) for f in result.findings]
-        report = _verify(ws, stem, matcher, vault, overrides, found, ocr, progress)
+        report = _verify(ws, stem, matcher, vault, overrides, found, ocr, result, progress)
         retry = _text_layer_mismatch(report, result)
         if retry:
             # what OCR sees on these pages isn't what their text layer says (a broken font
             # encoding, text drawn as outlines): redact them from what they show instead
             result = redact_file(src, ws.work, matcher, vault, overrides, as_images=retry, progress=progress)
             found = [Known(f.kind, f.text) for f in result.findings]
-            report = _verify(ws, stem, matcher, vault, overrides, found, ocr, progress)
+            report = _verify(ws, stem, matcher, vault, overrides, found, ocr, result, progress)
             pages = ", ".join(str(n + 1) for n in sorted(retry))
             report.notes.append(f"Page(s) {pages}: the text layer didn't match what the page shows, "
                                 "so the page was rebuilt as an image from OCR.")
@@ -109,12 +123,14 @@ def _text_layer_mismatch(report: Report, result: Result) -> frozenset[int]:
 
 
 def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, overrides: Overrides,
-            known: list[Known], ocr: bool, progress: Progress = NONE) -> Report:
-    """Everything this document's redaction found, and every value in the vault (from any
-    document), except what the reviewer kept in the clear here: a whole placeholder, or
-    single boxes."""
+            known: list[Known], ocr: bool, result: Result | None, progress: Progress = NONE) -> Report:
+    """Everything this document's redaction (`result`, None to check its last one) found, and
+    every value in the vault that some document's redaction uses, except what the reviewer
+    kept in the clear here: a whole placeholder, or single boxes."""
     allowed = allowed_values(vault, overrides)
-    known = known + [Known(e["kind"], v) for e in vault.entries.values() for v in e["values"]]
+    used = in_use(ws, (stem, result) if result else None)
+    known = known + [Known(vault.entries[ph]["kind"], v) for ph in used & vault.entries.keys()
+                     for v in vault.entries[ph]["values"]]
     shown = [Shown(n, r, vault.entries.get(ph, {}).get("values", [])) for n, r, ph in overrides.show]
     out = ws.outputs(stem)
     return verify(out["pdf"], matcher, [k for k in known if k.value not in allowed], out["txt"], ocr=ocr,
@@ -126,7 +142,8 @@ def reverify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, oc
     """Verify a document's current output again, without redacting it again."""
     for old in ws.released(stem):
         old.unlink(missing_ok=True)
-    report = _verify(ws, stem, matcher, vault, Overrides.load(ws.overrides_path(stem)), [], ocr, progress)
+    overrides = Overrides.load(ws.overrides_path(stem))
+    report = _verify(ws, stem, matcher, vault, overrides, [], ocr, None, progress)
     ws.outputs(stem)["report"].write_text(json.dumps(report.to_json(), indent=2) + "\n")
     return report
 

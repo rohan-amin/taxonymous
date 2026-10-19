@@ -119,14 +119,14 @@ def _hits(text: str, values: list[Value], matcher: ProfileMatcher,
     return sorted(kept, key=lambda h: h[2])
 
 
-def _values(ws_vault: Vault, regions: list[dict]) -> list[Value]:
+def _values(ws_vault: Vault, regions: list[dict], used: set[str]) -> list[Value]:
     here = {r["placeholder"] for r in regions}
     return [Value(e["kind"], v, "this document" if ph in here else "another document")
-            for ph, e in ws_vault.entries.items() for v in e["values"] if len(v.strip()) >= 4]
+            for ph, e in ws_vault.entries.items() if ph in used for v in e["values"] if len(v.strip()) >= 4]
 
 
 def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
-    from .pipeline import Workspace, allowed_values
+    from .pipeline import Workspace, allowed_values, in_use
     from .redact import Overrides, output_stem
 
     ws = Workspace(Path(workspace))
@@ -136,7 +136,7 @@ def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
     vault = Vault(ws.vault_dir / "placeholders.json")
     allowed = allowed_values(vault, Overrides.load(ws.overrides_path(stem)))
     regions = json.loads(out["regions"].read_text()) if out["regions"].exists() else []
-    values = [v for v in _values(vault, regions) if v.text not in allowed]
+    values = [v for v in _values(vault, regions, in_use(ws)) if v.text not in allowed]
     source = next(p for p in ws.pending() if output_stem(p) == stem)
     original = pymupdf.open(source) if source.suffix.lower() == ".pdf" else None
     doc = pymupdf.open(out["pdf"])

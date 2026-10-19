@@ -27,8 +27,10 @@ class Vault:
         ph = self.by_key.get(key)
         if ph is None:
             n = sum(1 for p in self.entries if p.startswith(f"<{kind}_"))
-            suffix = _letters(n) if kind in LETTER_KINDS else str(n + 1)
-            ph = f"<{kind}_{suffix}>"
+            ph = _name(kind, n)
+            while ph in self.entries:  # a forgotten entry left a gap: never reuse a name still taken
+                n += 1
+                ph = _name(kind, n)
             self.by_key[key] = ph
             self.entries[ph] = {"kind": kind, "key": key, "values": []}
         values = self.entries[ph]["values"]
@@ -47,6 +49,10 @@ class Vault:
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps({"placeholders": self.entries}, indent=2) + "\n")
+
+
+def _name(kind: str, n: int) -> str:
+    return f"<{kind}_{_letters(n) if kind in LETTER_KINDS else n + 1}>"
 
 
 def _letters(n: int) -> str:
