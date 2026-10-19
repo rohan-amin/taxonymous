@@ -31,6 +31,7 @@ from .detect import (
     is_number_value,
     number_regex,
     pattern_hits,
+    strong,
 )
 from .pagetext import PageText, extract
 from .profile import Profile
@@ -137,7 +138,8 @@ def _values(ws_vault: Vault, regions: list[dict], used: dict[str, list[str]]) ->
         return f"another document ({', '.join(used[ph])}, as {ph[1:-1]})"
     return [Value(e["kind"], v, origin(ph))
             for ph, e in ws_vault.entries.items() if ph in used for v in e["values"]
-            if len(v.strip()) >= 4 and identifies(e["kind"], v)]  # what verification looks for
+            if len(v.strip()) >= 4 and identifies(e["kind"], v)  # what verification looks for
+            and (ph in here or strong(e["kind"], v))]
 
 
 def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:

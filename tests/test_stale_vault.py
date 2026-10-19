@@ -202,11 +202,11 @@ def test_a_dashed_date_is_not_a_long_number_id(ws):
 
 
 def test_an_id_whose_digits_are_a_printed_date_is_not_a_leak(ws):
-    """However the other document stored it ("12312025"), a copy printed as a date is a date."""
+    """However the other document stored it ("1231-2025"), a copy printed as a date is a date."""
     pdf(ws.inbox / "letter.pdf", "Preparer's name: Quinn Delacroix-Marsh")
     assert run(ws, "letter.pdf").report.passed
     vault = Vault(ws.vault_dir / "placeholders.json")
-    ph = vault.placeholder("ID", "id:12312025", "12312025")
+    ph = vault.placeholder("ID", "id:12312025", "1231-2025")
     vault.save()
     regions = ws.outputs("letter")["regions"]
     used = json.loads(regions.read_text())
@@ -220,8 +220,8 @@ def test_an_id_whose_digits_are_a_printed_date_is_not_a_leak(ws):
 
 
 def test_a_name_another_document_redacted_is_only_a_leak_where_it_is_a_name(ws):
-    """Names are capitalized. One document took "Harvest" for a name; another prints "the
-    harvest was early" in a sentence: a word, not that name. Capitalized, it is the name."""
+    """Names are capitalized. One document took "Harvest Moon" for a name; another prints "the
+    harvest moon was early" in a sentence: words, not that name. Capitalized, it is the name."""
     from taxonymous.detect import in_prose
     assert in_prose("the due date for filing your return", 17, 23)
     assert in_prose("BT (the due date for) Tj [(filing)-250(your)] TJ", 27, 33)  # raw content
@@ -229,15 +229,15 @@ def test_a_name_another_document_redacted_is_only_a_leak_where_it_is_a_name(ws):
     pdf(ws.inbox / "letter.pdf", "Preparer's name: Quinn Delacroix-Marsh")
     assert run(ws, "letter.pdf").report.passed
     vault = Vault(ws.vault_dir / "placeholders.json")
-    ph = vault.placeholder("NAME", "name:harvest", "Harvest")
+    ph = vault.placeholder("NAME", "name:harvest moon", "Harvest Moon")
     vault.save()
     regions = ws.outputs("letter")["regions"]
     used = json.loads(regions.read_text())
     regions.write_text(json.dumps(used + [{**used[0], "placeholder": ph}]))
-    pdf(ws.inbox / "w2.pdf", "Employee: Avery F Abernathy", "Note: the harvest was early this year.")
+    pdf(ws.inbox / "w2.pdf", "Employee: Avery F Abernathy", "Note: the harvest moon was early this year.")
     outcome = run(ws, "w2.pdf")
     assert outcome.report.passed, outcome.report.issues
-    pdf(ws.outputs("w2")["pdf"], "Employee: <NAME_A>", "Paid to Harvest for consulting")
+    pdf(ws.outputs("w2")["pdf"], "Employee: <NAME_A>", "Paid to Harvest Moon for consulting")
     matcher = ProfileMatcher(Profile.load(ws.profile_path))
     report = reverify(ws, "w2", matcher, Vault(ws.vault_dir / "placeholders.json"), ocr=False)
     assert ("text", "NAME") in {(i.check, i.kind) for i in report.issues}
@@ -257,3 +257,29 @@ def test_your_name_in_the_file_name_fails_nothing_and_isnt_exported(ws):
     released = export(ws, stem)
     assert [p.name for p in released] == ["30 - Fidelity NAME Trust 1099.redacted.pdf"]
     assert [p.name for p in ws.ready.iterdir()] == ["30 - Fidelity NAME Trust 1099.redacted.pdf"]
+
+
+def test_another_documents_one_word_names_and_bare_numbers_fail_nothing_here(ws):
+    """A tax return took "Return" and "Note" for names and a whole-dollar amount for an ID;
+    every W-2 prints the words. Only telling values cross documents: a full name, a
+    structured number. The document that redacted them is still checked for them."""
+    from taxonymous.detect import strong
+    assert not strong("NAME", "Return") and not strong("ID", "1234567")
+    assert strong("NAME", "Quinn Delacroix-Marsh") and strong("ID", "30134994650F001")
+    assert strong("SSN", "987654323") and strong("ID", "61-23450")
+    pdf(ws.inbox / "letter.pdf", "Preparer's name: Quinn Delacroix-Marsh")
+    assert run(ws, "letter.pdf").report.passed
+    vault = Vault(ws.vault_dir / "placeholders.json")
+    mistakes = [vault.placeholder("NAME", "name:return", "Return"),
+                vault.placeholder("ID", "id:1234567", "1234567")]
+    vault.save()
+    regions = ws.outputs("letter")["regions"]
+    used = json.loads(regions.read_text())
+    regions.write_text(json.dumps(used + [{**used[0], "placeholder": ph} for ph in mistakes]))
+    pdf(ws.inbox / "w2.pdf", "Employee: Avery F Abernathy",
+        "Copy B To Be Filed With Employee's FEDERAL Tax Return", "Wages 1234567")
+    assert run(ws, "w2.pdf").report.passed
+    matcher = ProfileMatcher(Profile.load(ws.profile_path))
+    pdf(ws.outputs("letter")["pdf"], "Preparer's name: <NAME_A>", "Tax Return")  # its own: still a leak
+    report = reverify(ws, "letter", matcher, Vault(ws.vault_dir / "placeholders.json"), ocr=False)
+    assert ("text", "NAME") in {(i.check, i.kind) for i in report.issues}

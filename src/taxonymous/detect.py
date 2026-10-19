@@ -343,6 +343,18 @@ def in_prose(text: str, start: int, end: int) -> bool:
     return any(w is not None and w.islower() and len(w) > 1 for w in (before, after))
 
 
+def strong(kind: str, value: str) -> bool:
+    """Whether a value one document redacted is evidence enough to fail another document that
+    prints it. A one-word "name" ("Return", "Note") or a bare run of digits (a whole-dollar
+    amount taken for an ID) is too often a detector's mistake, and one long document full of
+    them failed every other one; those are only checked in the document that redacted them."""
+    if kind in PROSE_KINDS:
+        return len(re.findall(r"[A-Za-z]+", value)) >= 2
+    if kind == "ID":
+        return not value.strip().isdigit()
+    return True
+
+
 def incidental(kind: str, text: str, m: re.Match) -> bool:
     """A copy of a known number's digits that is something else here: a form's OMB number, or
     a date (whatever form the number was stored in: "12312025" matches "12/31/2025")."""

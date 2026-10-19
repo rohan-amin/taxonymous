@@ -14,7 +14,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from .detect import ProfileMatcher, pattern_hits
+from .detect import ProfileMatcher, pattern_hits, strong
 from .pagetext import PageText
 from .profile import Profile
 from .progress import NONE, Progress
@@ -95,6 +95,12 @@ def _matcher(profile: Path) -> ProfileMatcher:
     return _matchers[key]
 
 
+def placeholders_of(ws: Workspace, stem: str) -> set[str]:
+    """The placeholders a document's last redaction uses."""
+    regions = ws.outputs(stem)["regions"]
+    return {r["placeholder"] for r in json.loads(regions.read_text())} if regions.exists() else set()
+
+
 def in_use(ws: Workspace, current: tuple[str, Result] | None = None) -> set[str]:
     """Placeholders that some document's latest redaction uses: from each document's regions
     file, or for the one being redacted now, from this run. A value the vault remembers from
@@ -173,12 +179,15 @@ def _text_layer_mismatch(report: Report, result: Result) -> frozenset[int]:
 def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, overrides: Overrides,
             known: list[Known], ocr: bool, result: Result | None, progress: Progress = NONE) -> Report:
     """Everything this document's redaction (`result`, None to check its last one) found, and
-    every value in the vault that some document's redaction uses, except what the reviewer
-    kept in the clear here: a whole placeholder, or single boxes."""
+    every value in the vault that some document's redaction uses (another document's only
+    when it is telling: see `strong`), except what the reviewer kept in the clear here: a
+    whole placeholder, or single boxes."""
     allowed = allowed_values(vault, overrides)
     used = in_use(ws, (stem, result) if result else None)
-    known = known + [Known(vault.entries[ph]["kind"], v) for ph in used & vault.entries.keys()
-                     for v in vault.entries[ph]["values"]]
+    here = {r.placeholder for r in result.regions} if result else placeholders_of(ws, stem)
+    known = known + [Known(e["kind"], v) for ph in used & vault.entries.keys()
+                     for e in [vault.entries[ph]] for v in e["values"]
+                     if ph in here or strong(e["kind"], v)]  # another document's: only the telling ones
     shown = [Shown(n, r, vault.entries.get(ph, {}).get("values", [])) for n, r, ph in overrides.show]
     out = ws.outputs(stem)
     return verify(out["pdf"], matcher, [k for k in known if k.value not in allowed], out["txt"], ocr=ocr,
