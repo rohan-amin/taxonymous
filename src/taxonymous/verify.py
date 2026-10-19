@@ -35,9 +35,11 @@ from . import ocr as ocr_mod
 from .detect import (
     NOT_AMOUNT,
     NUMBER_SEP,
+    PROSE_KINDS,
     ProfileMatcher,
     digits,
     identifies,
+    in_prose,
     incidental,
     is_number_value,
     pattern_hits,
@@ -110,7 +112,7 @@ class Scanner:
         self.matcher = matcher
         self.allowed = {_squash(a) for a in allowed}
         self.numbers: list[tuple[str, re.Pattern, re.Pattern]] = []
-        self.words: list[tuple[str, str, str]] = []
+        self.words: list[tuple[str, str, str, re.Pattern | None]] = []
         for k in known:
             if MASK_RE.search(k.value) or _squash(k.value) in self.allowed:
                 continue  # masked forms are caught by the pattern check
@@ -120,14 +122,14 @@ class Scanner:
             if is_number_value(k.value):
                 self.numbers.append((k.kind, _digit_regex(ds, False), _digit_regex(ds, True)))
             elif len(_squash(k.value).strip()) >= 4:
-                self.words.append((k.kind, _squash(k.value), _squash(k.value, True)))
+                self.words.append((k.kind, _squash(k.value), _squash(k.value, True), _prose_regex(k)))
 
     def known(self, text: str) -> list[str]:
         """Kinds of known values (not generic patterns) in raw file text: exact matches only."""
         text = PLACEHOLDER_RE.sub(" ", text)
         found = [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
         squashed = _squash(text)
-        found += [kind for kind, exact, _ in self.words if exact in squashed]
+        found += [kind for kind, exact, _, rx in self.words if _word_in(exact, squashed, rx, text)]
         found += [kind for kind, exact, _ in self.numbers if _number_in(kind, exact, text)]
         return found
 
@@ -137,10 +139,32 @@ class Scanner:
         found = [kind for m, kind in pattern_hits(text) if _squash(m.group()) not in self.allowed]
         found += [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
         squashed = _squash(text, fuzzy)
-        found += [kind for kind, exact, loose in self.words if (loose if fuzzy else exact) in squashed]
+        found += [kind for kind, exact, loose, rx in self.words
+                  if _word_in(loose if fuzzy else exact, squashed, rx, text)]
         found += [kind for kind, exact, loose in self.numbers
                   if _number_in(kind, loose if fuzzy else exact, text)]
         return found
+
+
+def _prose_regex(k: Known) -> re.Pattern | None:
+    """For a name: finds it in the text as printed, to tell a name from a word in a sentence."""
+    if k.kind not in PROSE_KINDS:
+        return None
+    words = re.findall(r"[A-Za-z0-9]+", k.value)
+    return re.compile(r"(?<![A-Za-z0-9])" + r"[^A-Za-z0-9]+".join(map(re.escape, words)) + r"(?![A-Za-z0-9])",
+                      re.I)
+
+
+def _word_in(value: str, squashed: str, rx: re.Pattern | None, text: str) -> bool:
+    """A known value in the text. A name only counts where it isn't a word in a sentence
+    ("filing" in "for filing your return" isn't the name "Filing"); one found only loosely
+    (an OCR misread) counts."""
+    if value not in squashed:
+        return False
+    if rx is None:
+        return True
+    spots = list(rx.finditer(text))
+    return not spots or any(not in_prose(text, m.start(), m.end()) for m in spots)
 
 
 def _number_in(kind: str, rx: re.Pattern, text: str) -> bool:

@@ -217,3 +217,27 @@ def test_an_id_whose_digits_are_a_printed_date_is_not_a_leak(ws):
     matcher = ProfileMatcher(Profile.load(ws.profile_path))
     report = reverify(ws, "w2", matcher, Vault(ws.vault_dir / "placeholders.json"), ocr=False)
     assert ("text", "ID") in {(i.check, i.kind) for i in report.issues}
+
+
+def test_a_name_another_document_redacted_is_only_a_leak_where_it_is_a_name(ws):
+    """Names are capitalized. One document took "Harvest" for a name; another prints "the
+    harvest was early" in a sentence: a word, not that name. Capitalized, it is the name."""
+    from taxonymous.detect import in_prose
+    assert in_prose("the due date for filing your return", 17, 23)
+    assert in_prose("BT (the due date for) Tj [(filing)-250(your)] TJ", 27, 33)  # raw content
+    assert not in_prose("Filing your return", 0, 6) and not in_prose("quinn delacroix-marsh", 0, 21)
+    pdf(ws.inbox / "letter.pdf", "Preparer's name: Quinn Delacroix-Marsh")
+    assert run(ws, "letter.pdf").report.passed
+    vault = Vault(ws.vault_dir / "placeholders.json")
+    ph = vault.placeholder("NAME", "name:harvest", "Harvest")
+    vault.save()
+    regions = ws.outputs("letter")["regions"]
+    used = json.loads(regions.read_text())
+    regions.write_text(json.dumps(used + [{**used[0], "placeholder": ph}]))
+    pdf(ws.inbox / "w2.pdf", "Employee: Avery F Abernathy", "Note: the harvest was early this year.")
+    outcome = run(ws, "w2.pdf")
+    assert outcome.report.passed, outcome.report.issues
+    pdf(ws.outputs("w2")["pdf"], "Employee: <NAME_A>", "Paid to Harvest for consulting")
+    matcher = ProfileMatcher(Profile.load(ws.profile_path))
+    report = reverify(ws, "w2", matcher, Vault(ws.vault_dir / "placeholders.json"), ocr=False)
+    assert ("text", "NAME") in {(i.check, i.kind) for i in report.issues}

@@ -323,6 +323,26 @@ def identifies(kind: str, value: str) -> bool:
     return kind == "DOB" or not is_date(value)
 
 
+PROSE_KINDS = {"NAME", "ORG"}
+# content stream operators that sit between the strings of a sentence: [(filing)-250(your)]TJ
+PDF_OPERATORS = {"tj", "td", "tf", "tm", "tz", "tc", "tw", "tl", "ts", "tr", "bt", "et", "re", "cm", "q", "w",
+                 "f", "s", "b", "n", "do", "bdc", "emc", "g", "rg", "k", "l", "m", "c", "h"}
+
+
+def in_prose(text: str, start: int, end: int) -> bool:
+    """A match all in lowercase with a lowercase word right before or after it: a word in a
+    sentence ("the due date for filing your return"), not a name, which is capitalized.
+    Read in a PDF's raw content too, where operators sit between a sentence's pieces."""
+    if re.search(r"[A-Z]", text[start:end]):
+        return False
+
+    def word(chunk: str, last: bool) -> str | None:
+        words = [w for w in re.findall(r"[A-Za-z]+", chunk) if w.lower() not in PDF_OPERATORS or w.isupper()]
+        return (words[-1] if last else words[0]) if words else None
+    before, after = word(text[max(0, start - 40):start], True), word(text[end:end + 40], False)
+    return any(w is not None and w.islower() and len(w) > 1 for w in (before, after))
+
+
 def incidental(kind: str, text: str, m: re.Match) -> bool:
     """A copy of a known number's digits that is something else here: a form's OMB number, or
     a date (whatever form the number was stored in: "12312025" matches "12/31/2025")."""
