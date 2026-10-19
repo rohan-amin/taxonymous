@@ -36,14 +36,14 @@ from .vault import Vault
 from .verify import CONFUSABLE, OCR_DPI, PAGE_HEADER_RE, PLACEHOLDER_RE, _passes
 
 CONTEXT = 30  # characters either side, extended to whole words
-KEEP_WORDS = FORM_WORDS | {
+KEEP_WORDS = {w for w in FORM_WORDS if len(w) > 1} | {  # a lone letter can be an initial
     "id", "ein", "ssn", "tin", "itin", "no", "nbr", "num", "account", "acct", "address", "street", "name",
     "wages", "tax", "taxes", "withheld", "control", "code", "social", "security", "income", "medicare",
     "tips", "statement", "employer", "employers", "identification", "deferred", "compensation", "dependent",
     "care", "benefits", "allocated", "nonqualified", "plans", "retirement", "plan", "third", "party", "sick",
     "pay", "gross", "net", "ytd", "current", "period", "summary", "detail", "information", "reference",
     "routing", "card", "member", "policy", "loan", "phone", "email", "fax", "tel", "birth", "dob", "apt",
-    "suite", "ste", "unit", "po", "st", "ave", "rd", "dr", "ln", "blvd", "w", "c", "b", "a", "d",
+    "suite", "ste", "unit", "po", "st", "ave", "rd", "dr", "ln", "blvd", "w", "c", "b", "a", "d", "s",
     "irs", "omb", "department", "treasury", "service", "internal", "revenue", "file", "with", "for", "to",
     "by", "on", "in", "at", "is", "this", "your", "you", "are", "not", "if", "from", "box", "boxes",
 }

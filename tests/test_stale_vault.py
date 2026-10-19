@@ -135,3 +135,15 @@ def test_a_filing_status_is_not_a_name(ws):
     regions.write_text(json.dumps(used + [{**used[0], "placeholder": ph}]))
     pdf(ws.inbox / "w2.pdf", "Employee: Avery F Abernathy", "after the due date for filing your return")
     assert run(ws, "w2.pdf").report.passed
+
+
+def test_1099_captions_and_a_copy_heading_are_not_names():
+    """Two real mistakes: "Capital gain distributions" read as a person, and "Reference" in a
+    W-2's "Employee Reference Copy" heading taken for the employee's name."""
+    from taxonymous.detect import is_caption
+    for caption in ("Capital", "gain", "Distributions", "Total capital gain distributions",
+                    "Unrecaptured Sec. 1250 gain", "Reference", "Qualified dividends",
+                    "Nondividend distributions", "Section 199A dividends"):
+        assert is_caption(caption), caption
+    for name in ("Avery F Abernathy", "Johnny Cash", "Amy Long", "Quinn Bond"):
+        assert not is_caption(name), name

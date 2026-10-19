@@ -71,7 +71,19 @@ FORM_WORDS = {"state", "city", "town", "country", "zip", "code", "postal", "prov
               "internal", "revenue", "service", "irs", "omb",
               # filing status, which the name model reads as a person ("Married Filing Jointly")
               "married", "filing", "jointly", "separately", "qualifying", "surviving", "spouse", "widow",
-              "widower"}
+              "widower",
+              # 1099 captions ("Total capital gain distributions", "Unrecaptured Sec. 1250 gain"),
+              # leaving out the ones that are also surnames (Cash, Long, Short, Bond, Gross...)
+              "reference", "ordinary", "qualified", "dividend", "dividends", "distribution", "distributions",
+              "capital", "gain", "gains", "loss", "losses", "unrecaptured", "section", "sec", "collectibles",
+              "nondividend", "exempt", "interest", "foreign", "investment", "expenses", "liquidation",
+              "noncash", "specified", "activity", "proceeds", "basis", "adjusted", "disallowed", "accrued",
+              "term", "covered", "noncovered", "reported", "net", "summary", "detail", "original", "issue",
+              "obligations", "savings", "taxable", "nontaxable", "royalties", "rents", "payments",
+              "substitute", "nonemployee", "contributions", "unrealized", "realized", "aggregate",
+              "securities", "description", "acquired", "sold", "quantity", "shares", "withholding",
+              "premium", "discount", "penalty", "account", "year", "end", "supplemental",
+              "a", "b", "c", "d", "e", "f", "g", "h"}  # box letters: "Section 199A", "2a", "12b"
 STREET_SUFFIX = (r"st|street|ave|avenue|ln|lane|ct|court|rd|road|way|blvd|boulevard|dr|drive|pl|place|"
                  r"ter|terrace|cir|circle|pkwy|parkway|hwy|highway|trl|trail|sq|square|loop|row")
 STREET_RE = re.compile(
