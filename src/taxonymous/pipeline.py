@@ -60,14 +60,23 @@ def in_use(ws: Workspace, current: tuple[str, Result] | None = None) -> set[str]
     """Placeholders that some document's latest redaction uses: from each document's regions
     file, or for the one being redacted now, from this run. A value the vault remembers from
     an earlier run that nothing redacts any more (a detector mistake since fixed) isn't one."""
-    used = set()
+    return set(users(ws, current))
+
+
+def users(ws: Workspace, current: tuple[str, Result] | None = None) -> dict[str, list[str]]:
+    """For each placeholder in use, the inbox file names of the documents that use it."""
+    out: dict[str, list[str]] = {}
     for src in ws.pending():
         stem = output_stem(src)
         if current and stem == current[0]:
-            used |= {r.placeholder for r in current[1].regions}
+            used = {r.placeholder for r in current[1].regions}
         elif ws.outputs(stem)["regions"].exists():
-            used |= {r["placeholder"] for r in json.loads(ws.outputs(stem)["regions"].read_text())}
-    return used
+            used = {r["placeholder"] for r in json.loads(ws.outputs(stem)["regions"].read_text())}
+        else:
+            continue
+        for ph in used:
+            out.setdefault(ph, []).append(src.name)
+    return out
 
 
 def allowed_values(vault: Vault, overrides: Overrides) -> set[str]:

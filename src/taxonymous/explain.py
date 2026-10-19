@@ -22,8 +22,10 @@ from .detect import (
     NOT_AMOUNT,
     NUMBER_SEP,
     ProfileMatcher,
+    after_omb,
     detect,
     digits,
+    is_caption,
     is_number_value,
     number_regex,
     pattern_hits,
@@ -68,7 +70,7 @@ def mask(text: str) -> str:
 class Value:
     kind: str
     text: str
-    origin: str  # "this document" | "another document" | "your details"
+    origin: str  # "this document" | "another document (its file, as its placeholder)" | "your details"
 
 
 @dataclass
@@ -112,7 +114,8 @@ def _hits(text: str, values: list[Value], matcher: ProfileMatcher,
     out += [(f.kind, "it is in your details", f.start, f.end) for f in matcher.find(PageText(0, text))]
     for v in values:
         out += [(v.kind, f"a value redacted in {v.origin}", m.start(), m.end())
-                for m in _regex(v, fuzzy).finditer(text)]
+                for m in _regex(v, fuzzy).finditer(text)
+                if not (is_number_value(v.text) and after_omb(text, m.start()))]
     out.sort(key=lambda h: h[2] - h[3])  # longest first
     kept: list[tuple[str, str, int, int]] = []
     for h in out:
@@ -121,14 +124,20 @@ def _hits(text: str, values: list[Value], matcher: ProfileMatcher,
     return sorted(kept, key=lambda h: h[2])
 
 
-def _values(ws_vault: Vault, regions: list[dict], used: set[str]) -> list[Value]:
+def _values(ws_vault: Vault, regions: list[dict], used: dict[str, list[str]]) -> list[Value]:
     here = {r["placeholder"] for r in regions}
-    return [Value(e["kind"], v, "this document" if ph in here else "another document")
-            for ph, e in ws_vault.entries.items() if ph in used for v in e["values"] if len(v.strip()) >= 4]
+
+    def origin(ph):
+        if ph in here:
+            return "this document"
+        return f"another document ({', '.join(used[ph])}, as {ph[1:-1]})"
+    return [Value(e["kind"], v, origin(ph))
+            for ph, e in ws_vault.entries.items() if ph in used for v in e["values"]
+            if len(v.strip()) >= 4 and not is_caption(v)]  # what verification looks for
 
 
 def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
-    from .pipeline import Workspace, allowed_values, in_use
+    from .pipeline import Workspace, allowed_values, users
     from .redact import Overrides, output_stem
 
     ws = Workspace(Path(workspace))
@@ -138,7 +147,7 @@ def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
     vault = Vault(ws.vault_dir / "placeholders.json")
     allowed = allowed_values(vault, Overrides.load(ws.overrides_path(stem)))
     regions = json.loads(out["regions"].read_text()) if out["regions"].exists() else []
-    values = [v for v in _values(vault, regions, in_use(ws)) if v.text not in allowed]
+    values = [v for v in _values(vault, regions, users(ws)) if v.text not in allowed]
     source = next(p for p in ws.pending() if output_stem(p) == stem)
     original = pymupdf.open(source) if source.suffix.lower() == ".pdf" else None
     doc = pymupdf.open(out["pdf"])
@@ -147,7 +156,7 @@ def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
     def add(check, page, text, fuzzy):
         nth: dict[tuple, int] = {}
         for kind, why, s, e in _hits(text, values, matcher, fuzzy):
-            value = PLACEHOLDER_RE.sub(" ", text)[s:e]
+            value = PLACEHOLDER_RE.sub(lambda m: " " * len(m.group()), text)[s:e]  # as _hits read it
             shape = (page, kind, mask(value))
             nth[shape] = nth.get(shape, 0) + 1
             key = (*shape, nth[shape])  # the first, second... spot that looks like this

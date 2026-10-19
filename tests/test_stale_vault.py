@@ -91,3 +91,30 @@ def test_wages_whose_digits_match_an_id_elsewhere_stay_readable(tmp_path):
     assert outcome.report.passed, outcome.report.issues
     text = pymupdf.open(ws.outputs("w2")["pdf"])[1].get_text()
     assert "61234.50" in text and "612-3450" not in text
+
+
+def test_captions_and_the_omb_number_another_document_redacted_are_not_leaks(ws):
+    """A detector mistake in another document (a W-2 caption taken for a name, the OMB number
+    for an ID) must not fail every W-2 that prints them: neither identifies anyone."""
+    pdf(ws.inbox / "letter.pdf", "Preparer's name: Quinn Delacroix-Marsh")
+    assert run(ws, "letter.pdf").report.passed
+    vault = Vault(ws.vault_dir / "placeholders.json")
+    mistakes = [vault.placeholder("NAME", "name:fitw", "Federal income tax withheld"),
+                vault.placeholder("ID", "id:15450008", "1545-0008")]
+    vault.save()
+    regions = ws.outputs("letter")["regions"]
+    used = json.loads(regions.read_text())
+    regions.write_text(json.dumps(used + [{**used[0], "placeholder": ph} for ph in mistakes]))
+    pdf(ws.inbox / "w2.pdf", "Employee: Avery F Abernathy", "2 Federal income tax withheld 1,234.56",
+        "Wage and Tax Statement 2025  OMB No. 1545-0008")
+    outcome = run(ws, "w2.pdf")
+    assert outcome.report.passed, outcome.report.issues
+    assert "OMB No. 1545-0008" in pymupdf.open(ws.outputs("w2")["pdf"])[0].get_text()
+
+
+def test_explain_names_the_document_a_leaked_value_comes_from(ws):
+    from taxonymous.explain import explain, mask
+    test_a_value_another_document_redacts_is_still_a_leak(ws)
+    hits = [h for h in explain(ws.root, "w2", ocr=False) if h.kind == "NAME"]
+    assert hits and all("letter.pdf" in h.why for h in hits)
+    assert hits[0].value == mask("quinn delacroix-marsh")  # the leak itself, not text beside it

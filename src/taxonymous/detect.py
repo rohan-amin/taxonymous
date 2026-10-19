@@ -63,7 +63,12 @@ FORM_WORDS = {"state", "city", "town", "country", "zip", "code", "postal", "prov
               # the parties a form's captions talk about ("Employer's state", "Payer's TIN")
               "s", "employer", "employee", "payer", "recipient", "partner", "partnership", "shareholder",
               "beneficiary", "filer", "borrower", "lender", "student", "transferor", "owner", "holder",
-              "trustee", "corporation", "estate", "trust", "id", "tin", "ein", "ssn"}
+              "trustee", "corporation", "estate", "trust", "id", "tin", "ein", "ssn",
+              # what the boxes hold ("Federal income tax withheld", "Medicare wages and tips")
+              "income", "tax", "taxes", "withheld", "wages", "tips", "compensation", "social", "security",
+              "medicare", "allocated", "dependent", "benefits", "deferred", "nonqualified", "retirement",
+              "statement", "control", "identification", "information", "treasury", "department",
+              "internal", "revenue", "service", "irs", "omb"}
 STREET_SUFFIX = (r"st|street|ave|avenue|ln|lane|ct|court|rd|road|way|blvd|boulevard|dr|drive|pl|place|"
                  r"ter|terrace|cir|circle|pkwy|parkway|hwy|highway|trl|trail|sq|square|loop|row")
 STREET_RE = re.compile(
@@ -280,6 +285,17 @@ LONG_NUMBER_DIGITS = 7
 OMB_RE = re.compile(r"\bOMB\s*No\W{0,3}$", IC)  # tolerant: OCR reads "OMB No." as "OMBNo," too
 
 
+def is_caption(text: str) -> bool:
+    """Only words printed on forms: a caption, never anyone's name."""
+    words = set(re.findall(r"[a-z]+", text.lower()))
+    return bool(words) and words <= FORM_WORDS
+
+
+def after_omb(text: str, start: int) -> bool:
+    """The number at `start` is the form's printed OMB control number."""
+    return bool(OMB_RE.search(text[:start][-12:]))
+
+
 def pattern_hits(text: str):
     """Yield (match, kind) for every identifier-shaped string in text."""
     for rx, kind in PATTERNS:
@@ -299,7 +315,7 @@ def find_patterns(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
         out.append(Finding(pt.number, m.start(), m.end(), k, key, "pattern", m.group()))
     # not in PATTERNS: verification would flag every OCR misread of an amount that lost its point
     for m in LONG_NUMBER_RE.finditer(pt.text):
-        if len(digits(m.group())) >= LONG_NUMBER_DIGITS and not OMB_RE.search(pt.text[:m.start()][-12:]):
+        if len(digits(m.group())) >= LONG_NUMBER_DIGITS and not after_omb(pt.text, m.start()):
             out.append(Finding(pt.number, m.start(), m.end(), *pm.canonical("ID", m.group()), "pattern",
                                m.group()))
     for m in ALNUM_ID_RE.finditer(pt.text):
@@ -368,7 +384,7 @@ def _value_in(text: str, vtype: str, inline: bool = False) -> tuple[int, int] | 
             return None
         if s[0].isdigit() and not (STREET_RE.search(s) or CITY_LINE_RE.search(s)):
             return None  # a box caption like "15 State", not a name or address
-        if set(re.findall(r"[a-z]+", s.lower())) <= FORM_WORDS:
+        if is_caption(s):
             return None
         if SENTENCE_WORDS & set(re.findall(r"\b[a-z]+\b", s)):
             return None  # a sentence ("This information is being furnished..."), not a name or address

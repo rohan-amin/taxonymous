@@ -32,7 +32,16 @@ from pathlib import Path
 import pymupdf
 
 from . import ocr as ocr_mod
-from .detect import NOT_AMOUNT, NUMBER_SEP, ProfileMatcher, digits, is_number_value, pattern_hits
+from .detect import (
+    NOT_AMOUNT,
+    NUMBER_SEP,
+    ProfileMatcher,
+    after_omb,
+    digits,
+    is_caption,
+    is_number_value,
+    pattern_hits,
+)
 from .pagetext import PageText
 from .progress import NONE, Progress
 from .sanitize import CATALOG_KEYS, PAGE_KEYS, outside
@@ -105,6 +114,8 @@ class Scanner:
         for k in known:
             if MASK_RE.search(k.value) or _squash(k.value) in self.allowed:
                 continue  # masked forms are caught by the pattern check
+            if is_caption(k.value):
+                continue  # a detector once took a caption for a name: it identifies no one
             ds = digits(k.value)
             if is_number_value(k.value):
                 self.numbers.append((k.kind, _digit_regex(ds, False), _digit_regex(ds, True)))
@@ -117,7 +128,7 @@ class Scanner:
         found = [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
         squashed = _squash(text)
         found += [kind for kind, exact, _ in self.words if exact in squashed]
-        found += [kind for kind, exact, _ in self.numbers if exact.search(text)]
+        found += [kind for kind, exact, _ in self.numbers if _number_in(exact, text)]
         return found
 
     def scan(self, text: str, fuzzy: bool = False) -> list[str]:
@@ -127,8 +138,13 @@ class Scanner:
         found += [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
         squashed = _squash(text, fuzzy)
         found += [kind for kind, exact, loose in self.words if (loose if fuzzy else exact) in squashed]
-        found += [kind for kind, exact, loose in self.numbers if (loose if fuzzy else exact).search(text)]
+        found += [kind for kind, exact, loose in self.numbers if _number_in(loose if fuzzy else exact, text)]
         return found
+
+
+def _number_in(rx: re.Pattern, text: str) -> bool:
+    """A copy of a known number, other than as a form's OMB number (which no detector redacts)."""
+    return any(not after_omb(text, m.start()) for m in rx.finditer(text))
 
 
 def _keys(doc: pymupdf.Document, xref: int) -> list[str]:
