@@ -375,6 +375,10 @@ export function Viewer({ summary, onChanged }: { summary: DocSummary; onChanged:
               <button type="button" onClick={() => act(() => api.verify(id), "Verifying…")} disabled={working}>
                 Re-verify
               </button>
+              <button type="button" onClick={() => act(() => api.run(id), "Redacting and verifying…")} disabled={working}
+                      title="Redact this document again from the original, keeping your marks and shown boxes">
+                Run again
+              </button>
             </>
           )}
           <button type="button" className="export" onClick={doExport} disabled={!!exportBlock}

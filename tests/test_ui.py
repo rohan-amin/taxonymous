@@ -166,8 +166,8 @@ def test_a_failed_verification_blocks_export(page, site):
     assert page.get_by_role("button", name="Export", exact=True).is_disabled()
     assert "failed" in page.inner_text("[data-testid=banner]").lower()
     assert not (ws.ready / "w2.redacted.pdf").exists()
-    # running it again repairs it
-    page.request.post("/api/documents/w2/run", headers={"X-Taxonymous-Token": TOKEN})
+    # running it again from the review screen repairs it
+    page.get_by_role("button", name="Run again").click()
     app.state.worker.wait()
     wait_status(page, "passed")
     assert page.get_by_role("button", name="Export", exact=True).is_enabled()
