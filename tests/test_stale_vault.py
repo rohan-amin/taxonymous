@@ -167,3 +167,35 @@ def test_explain_shows_which_object_a_raw_leak_is_in(ws):
     text = render(explain(ws.root, "w2", ocr=False), issues)
     assert f"object {left} /XObject /Form, its stream: not used by any page" in text, text
     assert "Abernathy" not in text
+
+
+def test_dates_part_headings_and_omb_numbers_another_document_redacted_are_not_leaks(ws):
+    """A K-1 took "12-31-2025" for an ID and "Part II" for a name; a 1099 stored its OMB
+    number as an ID. A brokerage statement prints all three, the OMB number in pieces
+    ("(OMB) (NO.) (1545-0715)") where "OMB No." isn't right before it in the file."""
+    from taxonymous.detect import identifies
+    assert not identifies("ID", "12-31-2025") and not identifies("NAME", "Part II")
+    assert not identifies("ID", "1545-0715") and identifies("DOB", "04/12/1981")
+    assert identifies("ID", "6123450") and identifies("NAME", "Avery F Abernathy")
+    pdf(ws.inbox / "letter.pdf", "Preparer's name: Quinn Delacroix-Marsh")
+    assert run(ws, "letter.pdf").report.passed
+    vault = Vault(ws.vault_dir / "placeholders.json")
+    mistakes = [vault.placeholder("ID", "id:12312025", "12-31-2025"),
+                vault.placeholder("NAME", "name:part ii", "Part II"),
+                vault.placeholder("ID", "id:15450715", "1545-0715")]
+    vault.save()
+    regions = ws.outputs("letter")["regions"]
+    used = json.loads(regions.read_text())
+    regions.write_text(json.dumps(used + [{**used[0], "placeholder": ph} for ph in mistakes]))
+    pdf(ws.inbox / "w2.pdf", "Employee: Avery F Abernathy", "Statement date 12/31/2025",
+        "Gain or loss on Form 8949, PART II", "Form 1099-B (OMB", "Number 1545-0715)")
+    outcome = run(ws, "w2.pdf")
+    assert outcome.report.passed, outcome.report.issues
+    text = pymupdf.open(ws.outputs("w2")["pdf"])[0].get_text()
+    assert "12/31/2025" in text and "PART II" in text and "1545-0715" in text
+
+
+def test_a_dashed_date_is_not_a_long_number_id(ws):
+    pdf(ws.inbox / "k1.pdf", "Employee: Avery F Abernathy", "Tax year ending 12-31-2025")
+    assert run(ws, "k1.pdf").report.passed
+    assert "12-31-2025" in pymupdf.open(ws.outputs("k1")["pdf"])[0].get_text()

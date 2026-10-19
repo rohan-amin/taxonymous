@@ -83,7 +83,8 @@ FORM_WORDS = {"state", "city", "town", "country", "zip", "code", "postal", "prov
               "substitute", "nonemployee", "contributions", "unrealized", "realized", "aggregate",
               "securities", "description", "acquired", "sold", "quantity", "shares", "withholding",
               "premium", "discount", "penalty", "account", "year", "end", "supplemental",
-              "a", "b", "c", "d", "e", "f", "g", "h"}  # box letters: "Section 199A", "2a", "12b"
+              "a", "b", "c", "d", "e", "f", "g", "h",  # box letters: "Section 199A", "2a", "12b"
+              "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"}  # "Part II" of a K-1
 STREET_SUFFIX = (r"st|street|ave|avenue|ln|lane|ct|court|rd|road|way|blvd|boulevard|dr|drive|pl|place|"
                  r"ter|terrace|cir|circle|pkwy|parkway|hwy|highway|trl|trail|sq|square|loop|row")
 STREET_RE = re.compile(
@@ -306,6 +307,22 @@ def is_caption(text: str) -> bool:
     return bool(words) and words <= FORM_WORDS
 
 
+IRS_OMB_RE = re.compile(r"1545-\d{4}")  # every IRS form's control number; printed far from "OMB No." too
+
+
+def is_date(text: str) -> bool:
+    return bool(DATE_RE.fullmatch(text.strip()) or MONTH_YEAR_RE.fullmatch(text.strip()))
+
+
+def identifies(kind: str, value: str) -> bool:
+    """Whether a value some detector redacted can identify anyone. Not a caption ("Part II",
+    "Capital gain distributions"), an IRS form's OMB number, or a date other than a birth
+    date: a detector mistake, which must not fail every document that prints the same."""
+    if is_caption(value) or IRS_OMB_RE.fullmatch(value.strip()):
+        return False
+    return kind == "DOB" or not is_date(value)
+
+
 def after_omb(text: str, start: int) -> bool:
     """The number at `start` is the form's printed OMB control number."""
     return bool(OMB_RE.search(text[:start][-12:]))
@@ -330,7 +347,8 @@ def find_patterns(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
         out.append(Finding(pt.number, m.start(), m.end(), k, key, "pattern", m.group()))
     # not in PATTERNS: verification would flag every OCR misread of an amount that lost its point
     for m in LONG_NUMBER_RE.finditer(pt.text):
-        if len(digits(m.group())) >= LONG_NUMBER_DIGITS and not after_omb(pt.text, m.start()):
+        if (len(digits(m.group())) >= LONG_NUMBER_DIGITS and not after_omb(pt.text, m.start())
+                and identifies("ID", m.group())):
             out.append(Finding(pt.number, m.start(), m.end(), *pm.canonical("ID", m.group()), "pattern",
                                m.group()))
     for m in ALNUM_ID_RE.finditer(pt.text):

@@ -25,7 +25,7 @@ from .detect import (
     after_omb,
     detect,
     digits,
-    is_caption,
+    identifies,
     is_number_value,
     number_regex,
     pattern_hits,
@@ -134,7 +134,7 @@ def _values(ws_vault: Vault, regions: list[dict], used: dict[str, list[str]]) ->
         return f"another document ({', '.join(used[ph])}, as {ph[1:-1]})"
     return [Value(e["kind"], v, origin(ph))
             for ph, e in ws_vault.entries.items() if ph in used for v in e["values"]
-            if len(v.strip()) >= 4 and not is_caption(v)]  # what verification looks for
+            if len(v.strip()) >= 4 and identifies(e["kind"], v)]  # what verification looks for
 
 
 def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:

@@ -38,7 +38,7 @@ from .detect import (
     ProfileMatcher,
     after_omb,
     digits,
-    is_caption,
+    identifies,
     is_number_value,
     pattern_hits,
 )
@@ -114,8 +114,8 @@ class Scanner:
         for k in known:
             if MASK_RE.search(k.value) or _squash(k.value) in self.allowed:
                 continue  # masked forms are caught by the pattern check
-            if is_caption(k.value):
-                continue  # a detector once took a caption for a name: it identifies no one
+            if not identifies(k.kind, k.value):
+                continue  # a detector once took a caption for a name, a date for an ID...
             ds = digits(k.value)
             if is_number_value(k.value):
                 self.numbers.append((k.kind, _digit_regex(ds, False), _digit_regex(ds, True)))
