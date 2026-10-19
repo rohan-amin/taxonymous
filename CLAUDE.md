@@ -24,6 +24,7 @@ Open-source tool that scrubs sensitive information from tax documents (1099s, W-
 - `uv run python -m tools.fixtures.generate` builds the fake corpus into `tests/fixtures/generated/` (gitignored); `manifest.json` there is the ground truth (`redact` / `keep` per document).
 - `uv run taxonymous init|run --workspace DIR` (inbox → work → verify → ready-to-upload); `redact` and `verify` for single files. Takes PDFs (text, scanned, mixed) and photos.
 - `uv run taxonymous explain --workspace DIR DOC [PLACEHOLDER]` prints why a document failed, or (with e.g. `ID_10`) why one box is there, with every value masked (letters a/A, digits #, form words kept); the user can paste its output without sharing their data
+- `uv run python -m tools.viewer_diff ORIGINAL.pdf REDACTED.pdf [PAGE]` shows, per font, which text macOS (Preview) leaves out that MuPDF (the review UI) draws; prints font names and counts only
 - `uv run taxonymous serve --workspace DIR` runs the review UI + local API (127.0.0.1 only, token required); endpoints are listed in `src/taxonymous/api.py`.
 - UI: `cd ui && npm install && npm run build` (React/TS/Vite, output `ui/dist`). `tests/test_ui.py` (Playwright, system Chrome) needs the build and is skipped without it. If `~/.npm` is not writable, pass `--cache` to npm.
 - Pre-commit PII guard: `git config core.hooksPath .githooks` (runs `tools/check_pii.py`).

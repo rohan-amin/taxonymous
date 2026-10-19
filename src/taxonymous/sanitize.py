@@ -25,6 +25,7 @@ EDGE = 1.0  # points: content this far past the edge still counts as on the page
 def sanitize(doc: pymupdf.Document) -> None:
     """Call after flattening annotations and form fields (their values are page text by then)."""
     allow_list(doc)
+    own_resources(doc)
     _strip_replacement_text(doc)
     for page in doc:
         clip_to_visible(page)
@@ -44,6 +45,57 @@ def allow_list(doc: pymupdf.Document) -> None:
         for key in doc.xref_get_keys(xref):
             if key not in allowed:
                 doc.xref_set_key(xref, key, "null")
+
+
+XOBJECT_RE = re.compile(r"/[^\s/<>\[\]()]+\s+(\d+)\s+0\s+R")
+
+
+def _resources(doc: pymupdf.Document, xref: int) -> str | None:
+    """A page's or form's /Resources as an object to point at, from its parents if it has none."""
+    while xref:
+        kind, value = doc.xref_get_key(xref, "Resources")
+        if kind == "xref":
+            return value
+        if kind == "dict":  # inline: make it an object of its own so forms can share it
+            res = doc.get_new_xref()
+            doc.update_object(res, value)
+            doc.xref_set_key(xref, "Resources", f"{res} 0 R")
+            return f"{res} 0 R"
+        kind, parent = doc.xref_get_key(xref, "Parent")
+        xref = int(parent.split()[0]) if kind == "xref" else 0
+    return None
+
+
+def own_resources(doc: pymupdf.Document) -> None:
+    """Give every form XObject without /Resources the ones it borrows from the page (or
+    form) that draws it. Redaction rewrites a page's resources down to what its own content
+    uses, so a borrowed font disappears: MuPDF draws that text in a stand-in font, macOS
+    doesn't draw it at all."""
+    seen: set[int] = set()
+
+    def visit(res: str) -> None:
+        kind, xobjects = doc.xref_get_key(int(res.split()[0]), "XObject")
+        if kind == "xref":
+            xobjects = doc.xref_object(int(xobjects.split()[0]))
+        elif kind != "dict":
+            return
+        for m in XOBJECT_RE.finditer(xobjects):
+            form = int(m.group(1))
+            if form in seen or doc.xref_get_key(form, "Subtype")[1] != "/Form":
+                continue
+            seen.add(form)
+            if doc.xref_get_key(form, "Resources")[0] == "null":
+                copy = doc.get_new_xref()  # its own: redacting the page rewrites the page's
+                doc.update_object(copy, doc.xref_object(int(res.split()[0])))
+                doc.xref_set_key(form, "Resources", f"{copy} 0 R")
+            own = _resources(doc, form)
+            if own:
+                visit(own)
+
+    for page in doc:
+        res = _resources(doc, page.xref)
+        if res:
+            visit(res)
 
 
 def _string_end(data: bytes, i: int) -> int | None:
