@@ -22,10 +22,10 @@ from .detect import (
     NOT_AMOUNT,
     NUMBER_SEP,
     ProfileMatcher,
-    after_omb,
     detect,
     digits,
     identifies,
+    incidental,
     is_number_value,
     number_regex,
     pattern_hits,
@@ -116,7 +116,7 @@ def _hits(text: str, values: list[Value], matcher: ProfileMatcher,
     for v in values:
         out += [(v.kind, f"a value redacted in {v.origin}", m.start(), m.end())
                 for m in _regex(v, fuzzy).finditer(text)
-                if not (is_number_value(v.text) and after_omb(text, m.start()))]
+                if not (is_number_value(v.text) and incidental(v.kind, text, m))]
     out.sort(key=lambda h: h[2] - h[3])  # longest first
     kept: list[tuple[str, str, int, int]] = []
     for h in out:

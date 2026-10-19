@@ -199,3 +199,21 @@ def test_a_dashed_date_is_not_a_long_number_id(ws):
     pdf(ws.inbox / "k1.pdf", "Employee: Avery F Abernathy", "Tax year ending 12-31-2025")
     assert run(ws, "k1.pdf").report.passed
     assert "12-31-2025" in pymupdf.open(ws.outputs("k1")["pdf"])[0].get_text()
+
+
+def test_an_id_whose_digits_are_a_printed_date_is_not_a_leak(ws):
+    """However the other document stored it ("12312025"), a copy printed as a date is a date."""
+    pdf(ws.inbox / "letter.pdf", "Preparer's name: Quinn Delacroix-Marsh")
+    assert run(ws, "letter.pdf").report.passed
+    vault = Vault(ws.vault_dir / "placeholders.json")
+    ph = vault.placeholder("ID", "id:12312025", "12312025")
+    vault.save()
+    regions = ws.outputs("letter")["regions"]
+    used = json.loads(regions.read_text())
+    regions.write_text(json.dumps(used + [{**used[0], "placeholder": ph}]))
+    pdf(ws.inbox / "w2.pdf", "Employee: Avery F Abernathy", "Statement date 12/31/2025")
+    assert run(ws, "w2.pdf").report.passed
+    pdf(ws.outputs("w2")["pdf"], "Employee: <NAME_A>", "Account 1231 2025")  # not a date: a leak
+    matcher = ProfileMatcher(Profile.load(ws.profile_path))
+    report = reverify(ws, "w2", matcher, Vault(ws.vault_dir / "placeholders.json"), ocr=False)
+    assert ("text", "ID") in {(i.check, i.kind) for i in report.issues}

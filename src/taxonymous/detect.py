@@ -323,6 +323,12 @@ def identifies(kind: str, value: str) -> bool:
     return kind == "DOB" or not is_date(value)
 
 
+def incidental(kind: str, text: str, m: re.Match) -> bool:
+    """A copy of a known number's digits that is something else here: a form's OMB number, or
+    a date (whatever form the number was stored in: "12312025" matches "12/31/2025")."""
+    return after_omb(text, m.start()) or (kind != "DOB" and is_date(m.group()))
+
+
 def after_omb(text: str, start: int) -> bool:
     """The number at `start` is the form's printed OMB control number."""
     return bool(OMB_RE.search(text[:start][-12:]))

@@ -36,9 +36,9 @@ from .detect import (
     NOT_AMOUNT,
     NUMBER_SEP,
     ProfileMatcher,
-    after_omb,
     digits,
     identifies,
+    incidental,
     is_number_value,
     pattern_hits,
 )
@@ -128,7 +128,7 @@ class Scanner:
         found = [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
         squashed = _squash(text)
         found += [kind for kind, exact, _ in self.words if exact in squashed]
-        found += [kind for kind, exact, _ in self.numbers if _number_in(exact, text)]
+        found += [kind for kind, exact, _ in self.numbers if _number_in(kind, exact, text)]
         return found
 
     def scan(self, text: str, fuzzy: bool = False) -> list[str]:
@@ -138,13 +138,14 @@ class Scanner:
         found += [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
         squashed = _squash(text, fuzzy)
         found += [kind for kind, exact, loose in self.words if (loose if fuzzy else exact) in squashed]
-        found += [kind for kind, exact, loose in self.numbers if _number_in(loose if fuzzy else exact, text)]
+        found += [kind for kind, exact, loose in self.numbers
+                  if _number_in(kind, loose if fuzzy else exact, text)]
         return found
 
 
-def _number_in(rx: re.Pattern, text: str) -> bool:
-    """A copy of a known number, other than as a form's OMB number (which no detector redacts)."""
-    return any(not after_omb(text, m.start()) for m in rx.finditer(text))
+def _number_in(kind: str, rx: re.Pattern, text: str) -> bool:
+    """A copy of a known number, other than as a form's OMB number or a date."""
+    return any(not incidental(kind, text, m) for m in rx.finditer(text))
 
 
 def _keys(doc: pymupdf.Document, xref: int) -> list[str]:
