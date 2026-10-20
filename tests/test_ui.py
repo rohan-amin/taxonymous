@@ -255,6 +255,7 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     person.get_by_label("SSN or ITIN").fill("987-65-432")  # a digit short
     person.get_by_label("Date of birth").fill("04/07/1984")
     person.get_by_label("Occupation").fill("Software engineer")
+    person.get_by_label("Employer").fill("Contoso Widgets LLC")
     pg.get_by_role("button", name="Add a person").click()
     spouse = pg.get_by_test_id("person").nth(1)
     spouse.get_by_label("Full name").fill("Quinn L Abernathy")
@@ -291,6 +292,13 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     assert [p["role"] for p in saved["people"]] == ["taxpayer", "spouse"]
     assert saved["people"][0]["ssn"] == "987-65-4323"
     assert saved["people"][0]["occupation"] == "Software engineer"
+    assert saved["people"][0]["employer"] == "Contoso Widgets LLC"
+    for width in (1500, 1280, 900):  # the form fits the window: no scrolling sideways
+        pg.set_viewport_size({"width": width, "height": 950})
+        pg.screenshot(path=str(ws.root / f"details-{width}.png"))
+        assert pg.evaluate("[...document.querySelectorAll('.details, .details *')]"
+                           ".every(e => e.scrollWidth <= e.clientWidth + 1)"), width
+    pg.set_viewport_size({"width": 1500, "height": 950})
     assert saved["accounts"] == [{"institution": "Contoso Bank", "number": "8320968305",
                                   "routing": "021000021", "name": "Joint checking"}]
     assert saved["numbers"] == [{"number": "54321", "description": ""}]

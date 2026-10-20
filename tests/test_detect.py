@@ -213,3 +213,8 @@ def test_a_school_district_is_found_as_the_state_return_prints_it():
                                                 "zip": "98458", "school_district": "Tacoma Union Free"}]})
     lines = ["School district name TACOMA UNION FREE", "Union Free"]
     assert texts_of(lines, profile) == ["TACOMA UNION FREE"]
+
+
+def test_an_employer_is_found_however_it_is_printed():
+    profile = Profile.from_dict({"people": [{"name": "Avery Abernathy", "employer": "Contoso Widgets, LLC"}]})
+    assert texts_of(["Employer's name CONTOSO WIDGETS LLC", "Contoso"], profile) == ["CONTOSO WIDGETS LLC"]

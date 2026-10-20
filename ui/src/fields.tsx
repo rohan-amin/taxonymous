@@ -67,10 +67,10 @@ export const RECORDS: { key: RecordKey; title: string; noun: string; add: string
 // password managers and browsers shouldn't offer to fill or save any of this
 export const quiet = { autoComplete: "off", spellCheck: false, "data-1p-ignore": true, "data-lpignore": "true" };
 
-export function Field({ label, error, wide, children }: { label: string; error?: string; wide?: boolean;
-                                                  children: ReactNode }) {
+export function Field({ label, error, wide, className, children }: { label: string; error?: string; wide?: boolean;
+                                                             className?: string; children: ReactNode }) {
   return (
-    <label className={`field${wide ? " wide" : ""}${error ? " invalid" : ""}`}>
+    <label className={`field${wide ? " wide" : ""}${error ? " invalid" : ""}${className ? ` ${className}` : ""}`}>
       <span>{label}</span>
       {children}
       {error && <em className="field-error">{error}</em>}
@@ -95,6 +95,7 @@ export const DETAIL_FORMS: { kind: DetailKind; label: string; fields: FieldDef[]
     { f: "ssn", label: "SSN or ITIN", placeholder: "e.g. 987-65-4320", secret: true },
     { f: "dob", label: "Date of birth", placeholder: "MM/DD/YYYY" },
     { f: "occupation", label: "Occupation", placeholder: "As on the return" },
+    { f: "employer", label: "Employer", placeholder: "As on the W-2", wide: true },
     { f: "role", label: "Who", options: ROLES },
   ] },
   { kind: "address", label: "Address", fields: [

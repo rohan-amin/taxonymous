@@ -5,7 +5,8 @@ import type { Address, Person, Profile } from "./api";
 import { Field, LISTS, quiet, RECORDS, ROLES } from "./fields";
 import type { ListKey, RecordKey, Row } from "./fields";
 
-const NEW_PERSON: Person = { name: "", ssn: "", dob: "", role: "taxpayer", deceased: false, dod: "", occupation: "" };
+const NEW_PERSON: Person = { name: "", ssn: "", dob: "", role: "taxpayer", deceased: false, dod: "", occupation: "",
+                               employer: "" };
 const NEW_ADDRESS: Address = { street: "", city: "", state: "", zip: "", school_district: "" };
 
 export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: () => void }) {
@@ -101,10 +102,6 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
               <input value={p.dob} placeholder="MM/DD/YYYY" {...quiet}
                      onChange={(e) => setPerson(i, { dob: e.target.value })} />
             </Field>
-            <Field label="Occupation" error={errors[`people.${i}.occupation`]}>
-              <input value={p.occupation ?? ""} placeholder="As on the return" {...quiet}
-                     onChange={(e) => setPerson(i, { occupation: e.target.value })} />
-            </Field>
             <Field label="Who">
               <select value={p.role} onChange={(e) => setPerson(i, { role: e.target.value })}>
                 {ROLES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
@@ -123,6 +120,14 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
             ) : <div />}
             <button type="button" className="remove" title="Remove this person" aria-label="Remove this person"
                     onClick={() => remove("people", i)}>×</button>
+            <Field label="Occupation" error={errors[`people.${i}.occupation`]} className="occupation">
+              <input value={p.occupation ?? ""} placeholder="As on the return" {...quiet}
+                     onChange={(e) => setPerson(i, { occupation: e.target.value })} />
+            </Field>
+            <Field label="Employer" error={errors[`people.${i}.employer`]} className="employer">
+              <input value={p.employer ?? ""} placeholder="As on the W-2" {...quiet}
+                     onChange={(e) => setPerson(i, { employer: e.target.value })} />
+            </Field>
           </div>
         ))}
         <button type="button" onClick={() => change({ ...form, people: [...form.people,
@@ -150,7 +155,7 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
                      onChange={(e) => setAddress(i, { zip: e.target.value })} />
             </Field>
             <Field label="School district" error={errors[`addresses.${i}.school_district`]}>
-              <input value={a.school_district ?? ""} placeholder="Optional, as on a state return" {...quiet}
+              <input value={a.school_district ?? ""} placeholder="Optional" {...quiet}
                      onChange={(e) => setAddress(i, { school_district: e.target.value })} />
             </Field>
             <button type="button" className="remove" title="Remove this address" aria-label="Remove this address"

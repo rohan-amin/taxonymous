@@ -237,6 +237,8 @@ class ProfileMatcher:
                     add(pat, "DOB", f"dob:{i}")
             if p.occupation:  # "Software Engineer", "SOFTWARE ENGINEER"
                 add(phrase(p.occupation), "OCCUPATION", f"occupation:{i}")
+            if p.employer:  # "Contoso Widgets, LLC", "CONTOSO WIDGETS LLC"
+                add(phrase(p.employer), "ORG", f"employer:{i}")
         for i, a in enumerate(profile.addresses):
             add_address(a, f"addr:{i}")
         for i, v in enumerate(profile.emails):

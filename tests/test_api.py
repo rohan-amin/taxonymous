@@ -379,7 +379,7 @@ def test_details_are_cleaned_saved_and_private(fresh):
     saved = json.loads(ws.profile_path.read_text())
     assert saved["people"] == [{"name": "Avery F Abernathy", "ssn": "987-65-4323", "dob": "04/07/1984",
                                 "role": "taxpayer", "dod": "", "occupation": "Software engineer",
-                                "deceased": False}]
+                                "employer": "", "deceased": False}]
     assert saved["addresses"][0]["state"] == "WA"
     assert saved["eins"] == [{"ein": "00-4869454", "description": "Household employer"}]
     assert saved["accounts"] == [{"institution": "Contoso Bank", "number": "8320968305", "routing": "",
@@ -473,7 +473,8 @@ def test_a_detail_seen_in_a_document_is_added_to_your_details(fresh):
     assert add("phone", value="5555550199").status_code == 200
     saved = json.loads(ws.profile_path.read_text())
     assert saved["people"][-1] == {"name": "Morgan Delacroix", "ssn": "987-65-4325", "dob": "",
-                                   "role": "spouse", "dod": "", "deceased": False, "occupation": ""}
+                                   "role": "spouse", "dod": "", "deceased": False, "occupation": "",
+                                   "employer": ""}
     assert saved["accounts"][-1] == account and saved["phones"][-1] == "(555) 555-0199"
     assert len(saved["people"]) == 2 and len(saved["accounts"]) == 2
 

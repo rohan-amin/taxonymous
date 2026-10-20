@@ -3,7 +3,8 @@
 Schema (plain JSON, lives in the vault folder, never committed):
 {
   "people":    [{"name": "First M Last", "ssn": "...", "dob": "MM/DD/YYYY", "role": "taxpayer",
-                 "deceased": false, "dod": "MM/DD/YYYY", "occupation": "..."}],
+                 "deceased": false, "dod": "MM/DD/YYYY", "occupation": "...",
+                 "employer": "..."}],
   "addresses": [{"street": "...", "city": "...", "state": "XX", "zip": ".....", "school_district": "..."}],
   "phones": [...], "emails": [...],
   "accounts":  [{"institution": "...", "number": "...", "routing": "...", "name": "..."}],
@@ -36,6 +37,7 @@ class Person:
     deceased: bool = False
     dod: str = ""  # date of death: for the record, and left readable in documents (it matters for taxes)
     occupation: str = ""  # as the return prints it, under the signature
+    employer: str = ""  # its name, as a W-2 prints it
 
     @property
     def parts(self) -> tuple[str, list[str], str]:
@@ -164,9 +166,9 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
             return None
 
     for i, raw in enumerate(d.get("people") or []):
-        p = {k: text(raw.get(k)) for k in ("name", "ssn", "dob", "role", "dod", "occupation")}
+        p = {k: text(raw.get(k)) for k in ("name", "ssn", "dob", "role", "dod", "occupation", "employer")}
         p["deceased"] = bool(raw.get("deceased"))
-        if not any(p[k] for k in ("name", "ssn", "dob", "dod", "occupation")):
+        if not any(p[k] for k in ("name", "ssn", "dob", "dod", "occupation", "employer")):
             continue
         at = f"people.{i}"
         if len(p["name"].split()) < 2:
