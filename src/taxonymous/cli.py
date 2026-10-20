@@ -87,7 +87,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.placeholder:
             print(explain_placeholder(ws.root, stem, args.placeholder))
             return 0
-        issues = json.loads(ws.outputs(stem)["report"].read_text())["issues"]
+        report = json.loads(ws.outputs(stem)["report"].read_text())
+        issues = report["issues"]
+        for note in report.get("notes", []):  # what the run did differently (pages rebuilt from OCR)
+            print(f"Note: {note}")
         print(render(explain(ws.root, stem, ocr=not args.no_ocr), issues))
         for line in off_page(ws.outputs(stem)["pdf"], issues):
             print(line)
