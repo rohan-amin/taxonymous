@@ -11,7 +11,7 @@ is left is the layout around the leak, not what it says.
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pymupdf
@@ -52,13 +52,15 @@ KEEP_WORDS = {w for w in FORM_WORDS if len(w) > 1} | {  # a lone letter can be a
 }
 
 
-def mask(text: str) -> str:
-    """Letters to a/A and digits to #, except form words and placeholders."""
+def mask(text: str, keep_x: bool = False) -> str:
+    """Letters to a/A and digits to #, except form words and placeholders (and with
+    `keep_x`, a run of X's: a document's own masking, as in "XXXXX####")."""
     out, pos = [], 0
     for m in re.finditer(r"<[A-Z]+_[A-Z0-9]+>|[A-Za-z]+|\d", text):
         out.append(text[pos:m.start()])
         token = m.group()
-        if token.startswith("<") or token.lower() in KEEP_WORDS:
+        if (token.startswith("<") or token.lower() in KEEP_WORDS
+                or keep_x and re.fullmatch(r"[Xx]{2,}", token)):
             out.append(token)
         elif token.isdigit():
             out.append("#")
@@ -86,6 +88,7 @@ class Hit:
     checks: list[str]  # text | txt | ocr: where it was seen
     split: bool = False  # the redactor's reading of the original page doesn't have it in one piece
     where: str = ""  # raw: the PDF object it is in, and whether a page draws it
+    reads: list[str] = field(default_factory=list)  # split: how the redactor's OCR read that spot
 
 
 def _regex(v: Value, fuzzy: bool) -> re.Pattern:
@@ -175,6 +178,8 @@ def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
             if page and original is not None and page <= original.page_count:
                 reading = extract(original[page - 1]).text
                 hit.split = not _regex(Value(kind, value, ""), fuzzy=False).search(reading)
+                if hit.split and ocr:
+                    hit.reads = ocr_reads(original[page - 1], matcher, value)
 
     pages_with = {(i["check"], i["page"]) for i in report["issues"]}
     for page in doc:
@@ -194,6 +199,30 @@ def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
     if ("raw", None) in pages_with:
         out_hits += _raw_hits(doc, values, matcher)
     return out_hits
+
+
+def ocr_reads(page: pymupdf.Page, matcher: ProfileMatcher, value: str) -> list[str]:
+    """How the redactor's OCR reads of the original page saw `value`: each read's lines
+    with its last digits in them, masked, and what redaction found there."""
+    from .redact import _read_all, _render
+
+    p = _render(page)
+    _read_all([p], matcher)
+    tail = digits(value)[-4:]
+    out = []
+    for i, (pt, _) in enumerate(p.reads):
+        passes = len(ocr_mod.PASSES)
+        name = (f"read {i + 1} ({p.dpi:.0f} dpi, psm {ocr_mod.PASSES[i % passes]}"
+                + (", straightened)" if i >= passes else ")"))
+        lines = [m for m in re.finditer(r"[^\n]+", pt.text) if tail and tail in digits(m.group())]
+        for m in lines:
+            found = sorted({f.kind for t, f in p.found
+                            if t is pt and f.start < m.end() and m.start() < f.end})
+            out.append(f"{name}: {mask(m.group(), keep_x=True)} · "
+                       + (f"found: {', '.join(found)}" if found else "nothing found"))
+        if not lines:
+            out.append(f"{name}: no line with those digits")
+    return out
 
 
 def _drawn(doc: pymupdf.Document) -> dict[int, str]:
@@ -282,6 +311,7 @@ def render(hits: list[Hit], issues: list[dict]) -> str:
         lines.append(f"    {h.context}")
         if h.split:
             lines.append("    not in one piece in the redactor's reading of the original page")
+            lines += [f"      {r}" for r in h.reads]
         if h.where:
             lines.append(f"    in {h.where}")
     found = {c for h in hits for c in h.checks}

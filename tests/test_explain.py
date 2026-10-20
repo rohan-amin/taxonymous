@@ -9,7 +9,7 @@ import pytest
 
 from taxonymous.cli import main as cli
 from taxonymous.detect import ProfileMatcher
-from taxonymous.explain import explain, mask, off_page, render
+from taxonymous.explain import explain, mask, ocr_reads, off_page, render
 from taxonymous.pipeline import Workspace, process, reverify
 from taxonymous.profile import Profile
 from taxonymous.vault import Vault
@@ -86,3 +86,15 @@ def test_explain_says_what_is_drawn_off_the_page_without_saying_what_it_is(tmp_p
     lines = off_page(tmp_path / "off.pdf", [{"check": "structure", "kind": "outside-the-page", "page": 1}])
     assert lines[0].startswith("page 1 · drawn outside the page: ") and "text" in lines[0]
     assert "MediaBox" in lines[1] and NAME.split()[-1] not in "\n".join(lines)
+
+
+def test_ocr_reads_show_how_the_redactor_read_a_scanned_spot():
+    page = pymupdf.open()
+    p = page.new_page()
+    p.insert_text((72, 100), "Recipient's Identifying Number", fontsize=8)
+    p.insert_text((72, 130), "XXXXX4323", fontsize=20)
+    scan = pymupdf.open()
+    scan.new_page().insert_image(scan[0].rect, stream=p.get_pixmap(dpi=150).tobytes("png"))
+    reads = ocr_reads(scan[0], ProfileMatcher(Profile.from_dict({"people": [{"name": "A B", "ssn": SSN}]})),
+                      "XXXXX4323")
+    assert reads and all("XXXXX####" in r and "found: SSN" in r for r in reads)
