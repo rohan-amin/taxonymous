@@ -52,7 +52,8 @@ class Workspace:
 
     def outputs(self, stem: str) -> dict[str, Path]:
         return {"pdf": self.work / f"{stem}.redacted.pdf", "txt": self.work / f"{stem}.redacted.txt",
-                "report": self.work / f"{stem}.report.json", "regions": self.work / f"{stem}.regions.json"}
+                "report": self.work / f"{stem}.report.json", "regions": self.work / f"{stem}.regions.json",
+                "shown": self.work / f"{stem}.shown.json"}
 
     def released(self, stem: str) -> list[Path]:
         """What export puts in ready-to-upload/: the redacted PDF only (the .txt stays in work/),
@@ -123,6 +124,7 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
         result = None
         report = Report(pdf=str(src), issues=[Issue("error", type(e).__name__, detail=str(e)[:300])])
         out["regions"].unlink(missing_ok=True)
+        out["shown"].unlink(missing_ok=True)
     else:
         found = [Known(f.kind, f.text) for f in result.findings]
         report = _verify(ws, stem, matcher, vault, overrides, found, ocr, result, progress)
@@ -142,6 +144,7 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
                                 "draws text in a way the PDF library rewrites wrongly), so the page was "
                                 "rebuilt as an image from OCR.")
         out["regions"].write_text(json.dumps(result.regions_json(), indent=2) + "\n")
+        out["shown"].write_text(json.dumps(result.shown_json(), indent=2) + "\n")
     out["report"].write_text(json.dumps(report.to_json(), indent=2) + "\n")
     outcome = Outcome(Path(src), report, [], result)
     if release:
@@ -169,12 +172,23 @@ def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, ove
     here = {r.placeholder for r in result.regions} if result else placeholders_of(ws, stem)
     known = known + [Known(vault.entries[ph]["kind"], v) for ph in here & vault.entries.keys()
                      for v in vault.entries[ph]["values"]]
-    shown = [Shown(n, r, e.get("values", []), e.get("key", ""))
+    # a shown box, and the rest of the value it is part of (a name wrapped onto the next line)
+    parts = result.shown_json() if result else _read(ws.outputs(stem)["shown"])
+    shown = [Shown(n, r, e.get("values", []), e.get("key", ""),
+                   [tuple(s["rect"]) for s in parts if s["page"] == n and _same(s["of"], r)])
              for n, r, ph in overrides.show for e in [vault.entries.get(ph, {})]]
     keys = [vault.entries[ph]["key"] for ph in overrides.keep if ph in vault.entries]
     out = ws.outputs(stem)
     return verify(out["pdf"], matcher, [k for k in known if k.value not in allowed], out["txt"], ocr=ocr,
                   allowed=allowed, shown=shown, progress=progress, allowed_keys=keys)
+
+
+def _read(path: Path) -> list:
+    return json.loads(path.read_text()) if path.exists() else []
+
+
+def _same(a, b) -> bool:
+    return all(abs(x - y) < 0.6 for x, y in zip(a, b, strict=True))
 
 
 def reverify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, ocr: bool = True,

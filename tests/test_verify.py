@@ -10,9 +10,11 @@ from taxonymous import verify as verify_mod
 from taxonymous.cli import main as cli
 from taxonymous.detect import ProfileMatcher, detect
 from taxonymous.pagetext import extract
-from taxonymous.pipeline import Workspace, run
+from taxonymous.pipeline import Workspace, process, reverify, run
 from taxonymous.profile import Profile
+from taxonymous.redact import Overrides
 from taxonymous.sanitize import allow_list
+from taxonymous.vault import Vault
 from taxonymous.verify import Known, verify
 
 
@@ -185,3 +187,31 @@ def test_cli_run_exit_code_reflects_failures(corpus, tmp_path, capsys):
     locked_pdf(ws.inbox / "bad.pdf")
     assert cli(["run", "--workspace", str(ws.root)]) == 1
     assert "FAIL" in capsys.readouterr().out
+
+
+def test_showing_half_of_a_wrapped_name_excuses_all_of_it(tmp_path):
+    """A name wrapped onto two lines is two boxes. Showing one leaves the whole name
+    readable, so verification must excuse both halves, and still nothing else."""
+    ws = Workspace(tmp_path)
+    ws.init()
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery Abernathy"}]}))
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((400, 100), "Paid to: Avery", fontsize=11)
+    page.insert_text((72, 114), "Abernathy for services", fontsize=11)
+    page.insert_text((72, 300), "Recipient Avery Abernathy", fontsize=11)
+    doc.save(ws.inbox / "letter.pdf")
+    matcher = ProfileMatcher(Profile.load(ws.profile_path))
+    vault = Vault(ws.vault_dir / "placeholders.json")
+    out = process(ws.inbox / "letter.pdf", ws, matcher, vault, release=False)
+    assert out.report.passed, out.report.issues
+    wrapped = sorted((r for r in out.result.regions if r.rect[1] < 200), key=lambda r: r.rect[1])
+    assert len(wrapped) == 2
+    o = Overrides()
+    o.show.append((0, wrapped[0].rect, wrapped[0].placeholder))
+    o.save(ws.overrides_path("letter"))
+    out = process(ws.inbox / "letter.pdf", ws, matcher, vault, release=False)
+    text = pymupdf.open(ws.outputs("letter")["pdf"])[0].get_text()
+    assert "Avery" in text and "Abernathy for" in text and "Recipient Avery" not in text
+    assert out.report.passed, out.report.issues
+    assert reverify(ws, "letter", matcher, vault).passed

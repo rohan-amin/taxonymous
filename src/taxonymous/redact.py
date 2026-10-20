@@ -91,8 +91,9 @@ def overlaps(a: pymupdf.Rect, b: pymupdf.Rect) -> bool:
     return not both.is_empty and both.get_area() > 0.3 * min(a.get_area(), b.get_area())
 
 
-def _is_shown(rects, shown: list[pymupdf.Rect]) -> bool:
-    return any(overlaps(pymupdf.Rect(r), s) for r in rects for s in shown)
+def _is_shown(rects, shown: list[pymupdf.Rect]) -> list[pymupdf.Rect]:
+    """The shown boxes this finding's boxes are: one is enough to leave all of it readable."""
+    return [s for s in shown if any(overlaps(pymupdf.Rect(r), s) for r in rects)]
 
 
 def manual_key(stem: str, page: int, rect) -> str:
@@ -109,6 +110,9 @@ class Result:
     image_pages: list[int] = field(default_factory=list)  # 1-based pages rebuilt from OCR
     moved: list[int] = field(default_factory=list)  # 1-based: redacting their text moved what stays
     regions: list[Region] = field(default_factory=list)
+    # every box of a finding left readable because the reviewer showed one of them (a name
+    # wrapped onto two lines is two boxes): (page, box, the shown box it is part of)
+    shown: list[tuple[int, tuple, tuple]] = field(default_factory=list)
 
     def counts(self) -> Counter:
         return Counter(f.kind for f in self.findings)
@@ -122,6 +126,17 @@ class Result:
 
     def regions_json(self) -> list[dict]:
         return [asdict(r) for r in self.regions]
+
+    def left_shown(self, page: int, rects, shown: list[pymupdf.Rect]) -> bool:
+        """Whether the reviewer left this finding in the clear, recording all of its boxes."""
+        hits = _is_shown(rects, shown)
+        for s in hits:
+            for r in rects:
+                self.shown.append((page, tuple(round(v, 2) for v in pymupdf.Rect(r)), tuple(s)))
+        return bool(hits)
+
+    def shown_json(self) -> list[dict]:
+        return [{"page": n, "rect": list(r), "of": list(s)} for n, r, s in self.shown]
 
 
 @dataclass
@@ -247,7 +262,7 @@ def _ocr_regions(p: _Ocr, vault: Vault, result: Result, within: list[pymupdf.Rec
         for r in rects:
             pad = 0.25 * r.height
             padded.append(pymupdf.Rect(r.x0 - pad, r.y0 - 0.6 * pad, r.x1 + pad, r.y1 + 0.6 * pad))
-        if _is_shown(padded, shown):
+        if result.left_shown(p.number, padded, shown):
             continue
         ph = vault.placeholder(f.kind, f.key, f.text)
         if (f.key, f.text) not in counted:  # the same value seen by several reads counts once
@@ -264,7 +279,7 @@ def _text_regions(pt: PageText, found: list[Finding], vault: Vault, result: Resu
     out = []
     for f in found:
         rects = [r + (-1, -1, 1, 1) for r in pt.rects(f.start, f.end)]
-        if _is_shown(rects, shown):
+        if result.left_shown(pt.number, rects, shown):
             continue
         ph = vault.placeholder(f.kind, f.key, f.text)
         if not any(g.page == f.page and g.key == f.key and g.text == f.text for g in result.findings):
@@ -544,7 +559,7 @@ def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], va
         # overlap the lines above/below, which would otherwise be removed too
         rects = [pymupdf.Rect(r.x0, r.y0 + 0.2 * r.height, r.x1, r.y1 - 0.2 * r.height)
                  for r in pt.rects(f.start, f.end)]
-        if _is_shown(rects, shown):  # the reviewer left this one in the clear
+        if result.left_shown(page.number, rects, shown):  # the reviewer left this one in the clear
             continue
         ph = vault.placeholder(f.kind, f.key, f.text)
         result.findings.append(f)

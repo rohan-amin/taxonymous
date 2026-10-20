@@ -94,6 +94,8 @@ class Shown:
     rect: tuple[float, float, float, float]
     values: list[str]
     key: str = ""  # the identity it is a box of
+    # the rest of the value it is part of, left readable with it (a name wrapped onto the next line)
+    more: list[tuple[float, float, float, float]] = field(default_factory=list)
 
 
 def _squash(s: str, fuzzy: bool = False) -> str:
@@ -266,8 +268,8 @@ def _without_shown(doc: pymupdf.Document, shown: list[Shown]) -> pymupdf.Documen
         if 0 <= n < copy.page_count:
             page = copy[n]
             for s in shown:
-                if s.page == n:
-                    page.add_redact_annot(pymupdf.Rect(s.rect), fill=(1, 1, 1))
+                for r in [s.rect, *s.more] if s.page == n else []:
+                    page.add_redact_annot(pymupdf.Rect(r), fill=(1, 1, 1))
             page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,
                                   graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
                                   text=pymupdf.PDF_REDACT_TEXT_REMOVE)
