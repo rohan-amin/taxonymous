@@ -200,3 +200,16 @@ def test_an_occupation_is_found_however_it_is_printed():
     profile = Profile.from_dict({"people": [{"name": "Avery Abernathy", "occupation": "Software Engineer"}]})
     assert texts_of(["Your occupation SOFTWARE ENGINEER", "Spouse's occupation software-engineer",
                      "Engineer", "Software"], profile) == ["SOFTWARE ENGINEER", "software-engineer"]
+
+
+def test_a_last_four_that_could_be_a_year_is_found_after_a_mark():
+    profile = Profile.from_dict({"accounts": ["Z28-401909"]})
+    assert texts_of(["NATIONAL FINANCIAL SERVICES LLC #1909", "Acct x1909", "Ending ...1909",
+                     "Founded 1909", "Tax year 1909"], profile) == ["1909", "1909", "1909"]
+
+
+def test_a_school_district_is_found_as_the_state_return_prints_it():
+    profile = Profile.from_dict({"addresses": [{"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "WA",
+                                                "zip": "98458", "school_district": "Tacoma Union Free"}]})
+    lines = ["School district name TACOMA UNION FREE", "Union Free"]
+    assert texts_of(lines, profile) == ["TACOMA UNION FREE"]

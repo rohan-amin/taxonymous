@@ -4,7 +4,7 @@ Schema (plain JSON, lives in the vault folder, never committed):
 {
   "people":    [{"name": "First M Last", "ssn": "...", "dob": "MM/DD/YYYY", "role": "taxpayer",
                  "deceased": false, "dod": "MM/DD/YYYY", "occupation": "..."}],
-  "addresses": [{"street": "...", "city": "...", "state": "XX", "zip": "....."}],
+  "addresses": [{"street": "...", "city": "...", "state": "XX", "zip": ".....", "school_district": "..."}],
   "phones": [...], "emails": [...],
   "accounts":  [{"institution": "...", "number": "...", "routing": "...", "name": "..."}],
   "eins":      [{"ein": "..", "description": "..."}],
@@ -49,6 +49,7 @@ class Address:
     city: str = ""
     state: str = ""
     zip: str = ""
+    school_district: str = ""  # a state return asks for it (NY)
 
 
 @dataclass
@@ -193,7 +194,7 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
         out["people"].append(p)
 
     for i, a in enumerate(d.get("addresses") or []):
-        a = {k: text(a.get(k)) for k in ("street", "city", "state", "zip")}
+        a = {k: text(a.get(k)) for k in ("street", "city", "state", "zip", "school_district")}
         if not any(a.values()):
             continue
         at = f"addresses.{i}"

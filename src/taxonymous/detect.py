@@ -158,11 +158,13 @@ class ProfileMatcher:
             if kind == "SSN":  # "SSN 4323", "TIN: 4323"
                 add(rf"\b(?:ssn|social security(?: number| no\.?)?|i?tin)\b\W{{0,4}}(?P<v>{last4})(?!\d)",
                     kind, key)
-            if kind in ("ACCT", "CARD") and not YEAR_RE.fullmatch(last4):
+            if kind in ("ACCT", "CARD"):
                 # an account's last four on their own, as statements print them ("Acct 4323",
-                # "...4323", "x4323"); not in an amount (4323.00), a date or a longer number
+                # "...4323", "x4323", "#4323"); not in an amount (4323.00), a date or a longer
+                # number, and one that could be a year (1909) only after a mark like "#"
                 end = r"(?![\w/-]|[.,]\d)"
-                add(rf"(?<![\w.,$/-]){last4}{end}", kind, key, raw=False)
+                if not YEAR_RE.fullmatch(last4):
+                    add(rf"(?<![\w.,$/-]){last4}{end}", kind, key, raw=False)
                 add(rf"(?:(?<!\w)[x#*•]|\.{{2,}}|…)\s?(?P<v>{last4}){end}", kind, key, raw=False)
 
         def add_address(a: Address, key: str) -> None:
@@ -186,6 +188,8 @@ class ProfileMatcher:
                 city = r"\s+".join(map(re.escape, a.city.split()))
                 town = rf"(?:{city},?\s+)?" if city else ""
                 add(rf"\b{town}{re.escape(a.state)}\s+{re.escape(a.zip)}(?:-\d{{4}})?\b", "ADDR", key)
+            if a.school_district:  # "Scarsdale Union Free", "SCARSDALE UNION FREE"
+                add(phrase(a.school_district), "ADDR", key)
 
         def add_phone(v: str, key: str) -> None:
             ds = digits(v)

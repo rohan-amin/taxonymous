@@ -6,7 +6,7 @@ import { Field, LISTS, quiet, RECORDS, ROLES } from "./fields";
 import type { ListKey, RecordKey, Row } from "./fields";
 
 const NEW_PERSON: Person = { name: "", ssn: "", dob: "", role: "taxpayer", deceased: false, dod: "", occupation: "" };
-const NEW_ADDRESS: Address = { street: "", city: "", state: "", zip: "" };
+const NEW_ADDRESS: Address = { street: "", city: "", state: "", zip: "", school_district: "" };
 
 export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: () => void }) {
   const [form, setForm] = useState<Profile | null>(null);
@@ -148,6 +148,10 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
             <Field label="ZIP" error={errors[`addresses.${i}.zip`]}>
               <input className="short" value={a.zip} placeholder="e.g. 98101" {...quiet}
                      onChange={(e) => setAddress(i, { zip: e.target.value })} />
+            </Field>
+            <Field label="School district" error={errors[`addresses.${i}.school_district`]}>
+              <input value={a.school_district ?? ""} placeholder="Optional, as on a state return" {...quiet}
+                     onChange={(e) => setAddress(i, { school_district: e.target.value })} />
             </Field>
             <button type="button" className="remove" title="Remove this address" aria-label="Remove this address"
                     onClick={() => remove("addresses", i)}>×</button>

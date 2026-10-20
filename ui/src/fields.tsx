@@ -102,6 +102,7 @@ export const DETAIL_FORMS: { kind: DetailKind; label: string; fields: FieldDef[]
     { f: "city", label: "City" },
     { f: "state", label: "State", placeholder: "e.g. WA", short: true },
     { f: "zip", label: "ZIP", placeholder: "e.g. 98101", short: true },
+    { f: "school_district", label: "School district", placeholder: "Optional" },
   ] },
   ...RECORDS.map(({ key, noun, fields }) => ({
     kind: ({ accounts: "account", eins: "ein", cards: "card", numbers: "number", preparers: "preparer" } as const)[key],

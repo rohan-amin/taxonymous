@@ -97,6 +97,7 @@ export interface Address {
   city: string;
   state: string;
   zip: string;
+  school_district: string;
 }
 
 export interface Account {
