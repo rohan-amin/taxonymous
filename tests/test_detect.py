@@ -194,3 +194,9 @@ def test_a_street_named_like_a_unit_is_still_a_street():
 
 def texts_of(lines, profile):
     return [f.text for f in findings(*lines, profile=profile)]
+
+
+def test_an_occupation_is_found_however_it_is_printed():
+    profile = Profile.from_dict({"people": [{"name": "Avery Abernathy", "occupation": "Software Engineer"}]})
+    assert texts_of(["Your occupation SOFTWARE ENGINEER", "Spouse's occupation software-engineer",
+                     "Engineer", "Software"], profile) == ["SOFTWARE ENGINEER", "software-engineer"]

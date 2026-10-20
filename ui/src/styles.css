@@ -745,7 +745,7 @@ input.secret {
 
 .row.person {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 140px 120px 110px auto 120px auto;
+  grid-template-columns: minmax(180px, 1fr) 140px 120px 150px 110px auto 120px auto;
 }
 
 .row.person .field {

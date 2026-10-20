@@ -193,6 +193,12 @@ class ProfileMatcher:
                 ds = ds[1:]
             add_number(ds, "PHONE", key)
 
+        def phrase(v: str) -> str | None:
+            """Words in order, whatever the case and punctuation between them."""
+            words = re.findall(r"[A-Za-z0-9&']+", v)
+            joined = r"[^A-Za-z0-9&]*".join(map(re.escape, words))
+            return rf"(?<![A-Za-z0-9]){joined}(?![A-Za-z0-9])" if words else None
+
         def name_rules(name: str) -> tuple[str, str, str, str]:
             """A full name's parts as patterns: first, middles (initials allowed), last."""
             words = name.split()
@@ -225,6 +231,8 @@ class ProfileMatcher:
             if p.dob:
                 for pat in date_patterns(p.dob):
                     add(pat, "DOB", f"dob:{i}")
+            if p.occupation:  # "Software Engineer", "SOFTWARE ENGINEER"
+                add(phrase(p.occupation), "OCCUPATION", f"occupation:{i}")
         for i, a in enumerate(profile.addresses):
             add_address(a, f"addr:{i}")
         for i, v in enumerate(profile.emails):
@@ -249,10 +257,7 @@ class ProfileMatcher:
                 add(rf"\b{f}{mid}\s*(?<=[\s.,]){last_}\b", "NAME", f"{key}:name")
                 add(rf"\b{last_}(?:,\s*|\s+){f}{mid}", "NAME", f"{key}:name")
             for v in (pr.firm, pr.name if len(pr.name.split()) == 1 else ""):
-                words = re.findall(r"[A-Za-z0-9&']+", v)
-                if words:  # "Doe & Co., CPAs" as "DOE & CO CPAS" too
-                    phrase = r"[^A-Za-z0-9&]*".join(map(re.escape, words))
-                    add(rf"(?<![A-Za-z0-9]){phrase}(?![A-Za-z0-9])", "ORG", f"{key}:firm")
+                add(phrase(v), "ORG", f"{key}:firm")  # "Doe & Co., CPAs" as "DOE & CO CPAS" too
             add_address(Address(pr.street, pr.city, pr.state, pr.zip), f"{key}:addr")
             if pr.phone:
                 add_phone(pr.phone, f"{key}:phone")

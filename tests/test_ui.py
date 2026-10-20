@@ -254,6 +254,7 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     person.get_by_label("Full name").fill("Avery F Abernathy")
     person.get_by_label("SSN or ITIN").fill("987-65-432")  # a digit short
     person.get_by_label("Date of birth").fill("04/07/1984")
+    person.get_by_label("Occupation").fill("Software engineer")
     pg.get_by_role("button", name="Add a person").click()
     spouse = pg.get_by_test_id("person").nth(1)
     spouse.get_by_label("Full name").fill("Quinn L Abernathy")
@@ -289,6 +290,7 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     saved = json.loads(ws.profile_path.read_text())
     assert [p["role"] for p in saved["people"]] == ["taxpayer", "spouse"]
     assert saved["people"][0]["ssn"] == "987-65-4323"
+    assert saved["people"][0]["occupation"] == "Software engineer"
     assert saved["accounts"] == [{"institution": "Contoso Bank", "number": "8320968305",
                                   "routing": "021000021", "name": "Joint checking"}]
     assert saved["numbers"] == [{"number": "54321", "description": ""}]

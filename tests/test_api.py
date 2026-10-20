@@ -348,7 +348,8 @@ def fresh(network_attempts, tmp_path):
 
 
 FORM = {
-    "people": [{"name": " Avery  F Abernathy ", "ssn": "987654323", "dob": "4/7/1984", "role": "taxpayer"},
+    "people": [{"name": " Avery  F Abernathy ", "ssn": "987654323", "dob": "4/7/1984", "role": "taxpayer",
+                "occupation": " Software  engineer "},
                {"name": "", "ssn": "", "dob": "", "role": "spouse"}],  # an empty row
     "addresses": [{"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "wa", "zip": "98458"}],
     "phones": ["(555) 555-0188", ""],
@@ -377,7 +378,8 @@ def test_details_are_cleaned_saved_and_private(fresh):
     assert r.status_code == 200
     saved = json.loads(ws.profile_path.read_text())
     assert saved["people"] == [{"name": "Avery F Abernathy", "ssn": "987-65-4323", "dob": "04/07/1984",
-                                "role": "taxpayer", "dod": "", "deceased": False}]
+                                "role": "taxpayer", "dod": "", "occupation": "Software engineer",
+                                "deceased": False}]
     assert saved["addresses"][0]["state"] == "WA"
     assert saved["eins"] == [{"ein": "00-4869454", "description": "Household employer"}]
     assert saved["accounts"] == [{"institution": "Contoso Bank", "number": "8320968305", "routing": "",
@@ -471,7 +473,7 @@ def test_a_detail_seen_in_a_document_is_added_to_your_details(fresh):
     assert add("phone", value="5555550199").status_code == 200
     saved = json.loads(ws.profile_path.read_text())
     assert saved["people"][-1] == {"name": "Morgan Delacroix", "ssn": "987-65-4325", "dob": "",
-                                   "role": "spouse", "dod": "", "deceased": False}
+                                   "role": "spouse", "dod": "", "deceased": False, "occupation": ""}
     assert saved["accounts"][-1] == account and saved["phones"][-1] == "(555) 555-0199"
     assert len(saved["people"]) == 2 and len(saved["accounts"]) == 2
 

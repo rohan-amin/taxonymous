@@ -94,6 +94,7 @@ export const DETAIL_FORMS: { kind: DetailKind; label: string; fields: FieldDef[]
     { f: "name", label: "Full name", placeholder: "e.g. First Middle Last", wide: true },
     { f: "ssn", label: "SSN or ITIN", placeholder: "e.g. 987-65-4320", secret: true },
     { f: "dob", label: "Date of birth", placeholder: "MM/DD/YYYY" },
+    { f: "occupation", label: "Occupation", placeholder: "As on the return" },
     { f: "role", label: "Who", options: ROLES },
   ] },
   { kind: "address", label: "Address", fields: [

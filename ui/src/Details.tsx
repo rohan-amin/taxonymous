@@ -5,7 +5,7 @@ import type { Address, Person, Profile } from "./api";
 import { Field, LISTS, quiet, RECORDS, ROLES } from "./fields";
 import type { ListKey, RecordKey, Row } from "./fields";
 
-const NEW_PERSON: Person = { name: "", ssn: "", dob: "", role: "taxpayer", deceased: false, dod: "" };
+const NEW_PERSON: Person = { name: "", ssn: "", dob: "", role: "taxpayer", deceased: false, dod: "", occupation: "" };
 const NEW_ADDRESS: Address = { street: "", city: "", state: "", zip: "" };
 
 export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: () => void }) {
@@ -100,6 +100,10 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
             <Field label="Date of birth" error={errors[`people.${i}.dob`]}>
               <input value={p.dob} placeholder="MM/DD/YYYY" {...quiet}
                      onChange={(e) => setPerson(i, { dob: e.target.value })} />
+            </Field>
+            <Field label="Occupation" error={errors[`people.${i}.occupation`]}>
+              <input value={p.occupation ?? ""} placeholder="As on the return" {...quiet}
+                     onChange={(e) => setPerson(i, { occupation: e.target.value })} />
             </Field>
             <Field label="Who">
               <select value={p.role} onChange={(e) => setPerson(i, { role: e.target.value })}>

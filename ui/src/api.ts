@@ -89,6 +89,7 @@ export interface Person {
   role: string;
   deceased: boolean;
   dod: string; // date of death: kept readable in documents
+  occupation: string;
 }
 
 export interface Address {
