@@ -159,6 +159,11 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
             pages = ", ".join(str(n + 1) for n in sorted(retry))
             report.notes.append(f"Page(s) {pages}: the text layer didn't match what the page shows, "
                                 "so the page was rebuilt as an image from OCR.")
+        if result.moved:
+            pages = ", ".join(map(str, result.moved))
+            report.notes.append(f"Page(s) {pages}: removing text moved the text around it (this file "
+                                "draws text in a way the PDF library rewrites wrongly), so the page was "
+                                "rebuilt as an image from OCR.")
         out["regions"].write_text(json.dumps(result.regions_json(), indent=2) + "\n")
     out["report"].write_text(json.dumps(report.to_json(), indent=2) + "\n")
     outcome = Outcome(Path(src), report, [], result)

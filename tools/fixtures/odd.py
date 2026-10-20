@@ -101,10 +101,11 @@ def outside_cropbox(h: Household, out: Path) -> list[str]:
 
 # ---------------------------------------------------------------- fonts and drawing
 
-def _type3(doc: pymupdf.Document, shift: int) -> int:
+def _type3(doc: pymupdf.Document, shift: int, flip: bool = False) -> int:
     """A Type3 font whose glyphs draw Helvetica characters. With `shift`, code c draws
     character c - shift and the glyph names mean nothing, so the text layer extracts
-    as garbage while the page reads normally (a broken font encoding)."""
+    as garbage while the page reads normally (a broken font encoding). With `flip`, its
+    glyphs are drawn upside down, for a page whose coordinates run downwards."""
     helv = doc.get_new_xref()
     doc.update_object(helv, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica"
                             " /Encoding /WinAnsiEncoding >>")
@@ -125,7 +126,8 @@ def _type3(doc: pymupdf.Document, shift: int) -> int:
     doc.update_object(charprocs, "<< " + " ".join(procs) + " >>")
     font = doc.get_new_xref()
     doc.update_object(font, (
-        f"<< /Type /Font /Subtype /Type3 /FontBBox [0 -250 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0]"
+        f"<< /Type /Font /Subtype /Type3 /FontBBox [0 -250 1000 1000]"
+        f" /FontMatrix [0.001 0 0 {-0.001 if flip else 0.001} 0 0]"
         f" /CharProcs {charprocs} 0 R"
         f" /Encoding << /Type /Encoding /Differences [{first} {' '.join(diffs)}] >>"
         f" /FirstChar {first} /LastChar {last} /Widths [{' '.join(widths)}]"
@@ -157,6 +159,26 @@ def type3(h: Household, out: Path) -> list[str]:
 def type3_broken_encoding(h: Household, out: Path) -> list[str]:
     """The text layer says one thing, the page shows another."""
     return _type3_page(h, out, 1)
+
+
+def flipped_coordinates(h: Household, out: Path) -> list[str]:
+    """Coordinates that run down the page, set in one content stream and used in a later
+    one, with a font drawn upside down to match, and lines shown with ' (next line, then
+    show), as a payroll service's W-2 has them. MuPDF's redaction puts the text it keeps
+    in the wrong place on such a page, and misses what it should remove."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    font = _type3(doc, 0, flip=True)
+    doc.xref_set_key(page.xref, "Resources", f"<< /Font << /T3 {font} 0 R >> >>")
+    _append_stream(doc, page, b"q")
+    _append_stream(doc, page, f"1 0 0 -1 0 {page.rect.height:g} cm q 1 0 0 1 10 10 cm Q".encode())
+    ops = ["BT", f"/T3 {SIZE} Tf", "18 TL"]
+    for i, line in enumerate(_lines(h)):
+        esc = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        ops.append(f"1 0 0 1 72 {72 + i * 18} Tm ({esc}) '")
+    _append_stream(doc, page, "\n".join([*ops, "ET", "Q"]).encode("latin-1"))
+    doc.save(out)
+    return _values(h)
 
 
 def vector_text(h: Household, out: Path) -> list[str]:
@@ -381,6 +403,7 @@ BUILDERS: dict[str, Callable[[Household, Path], list[str]]] = {
     "outside_cropbox.pdf": outside_cropbox,
     "type3.pdf": type3,
     "type3_broken_encoding.pdf": type3_broken_encoding,
+    "flipped_coordinates.pdf": flipped_coordinates,
     "vector_text.pdf": vector_text,
     "letter_spaced.pdf": letter_spaced,
     "hidden_layer.pdf": hidden_layer,

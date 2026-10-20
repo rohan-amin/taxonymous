@@ -107,6 +107,7 @@ class Result:
     findings: list[Finding] = field(default_factory=list)
     placeholders: dict[str, str] = field(default_factory=dict)  # placeholder -> kind
     image_pages: list[int] = field(default_factory=list)  # 1-based pages rebuilt from OCR
+    moved: list[int] = field(default_factory=list)  # 1-based: redacting their text moved what stays
     regions: list[Region] = field(default_factory=list)
 
     def counts(self) -> Counter:
@@ -429,6 +430,13 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
             result.image_pages.append(p.number + 1)
             progress.step()
 
+    if result.moved:
+        # rebuild those pages from what they show, as a scan's are; the original draws them right
+        doc.close()
+        retry = redact_file(src, out_dir, matcher, vault, overrides,
+                            as_images=as_images | {n - 1 for n in result.moved}, progress=progress)
+        retry.moved = sorted(set(retry.moved) | set(result.moved))
+        return retry
     doc.scrub(attached_files=True, clean_pages=True, embedded_files=True, hidden_text=True,
               javascript=True, metadata=True, redactions=False, remove_links=True, reset_fields=True,
               reset_responses=True, thumbnails=True, xml_metadata=True)
@@ -461,6 +469,21 @@ def _strip(rect: pymupdf.Rect, chars: list[pymupdf.Rect]) -> pymupdf.Rect:
     if all(c.y0 < middle - STRIP / 2 and middle + STRIP / 2 < c.y1 for c in chars):
         return pymupdf.Rect(rect.x0, middle - STRIP / 2, rect.x1, middle + STRIP / 2)
     return rect
+
+
+def _glyphs(page: pymupdf.Page) -> set[tuple[str, int, int]]:
+    """Every character the page draws, where it starts, to the nearest point."""
+    return {(chr(c[0]), round(c[2][0]), round(c[2][1]))
+            for span in page.get_texttrace() for c in span["chars"]}
+
+
+def _moved(before: set[tuple[str, int, int]], after: set[tuple[str, int, int]]) -> bool:
+    """Is any character drawn somewhere it wasn't before? MuPDF's redaction rewrites the
+    page's drawing code, and gets the place of text wrong when the page flips its
+    coordinates but the text doesn't: the text it keeps lands elsewhere, and what it should
+    have removed stays (it looked for it in the wrong place)."""
+    near = {(c, x + dx, y + dy) for c, x, y in before for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+    return not after <= near
 
 
 def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], vault: Vault,
@@ -508,6 +531,7 @@ def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], va
         strips.append(rect)  # a reviewer's box takes everything it touches
         result.region(page.number, rect, ph, "REDACTED", "manual")
         _add_label(labels, rect, ph)
+    before = _glyphs(page)
     for rect in boxes:
         page.add_redact_annot(rect, fill=(0, 0, 0))
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,
@@ -518,6 +542,8 @@ def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], va
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
                           graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
                           text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+    if _moved(before, _glyphs(page)):
+        result.moved.append(page.number + 1)
     # placeholders go in after the real text is gone
     for rect, ph in labels:
         _label(page, rect, ph)
