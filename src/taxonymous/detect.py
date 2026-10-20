@@ -161,8 +161,11 @@ def date_patterns(value: str) -> list[str]:
     mo, d, y = int(m[1]), int(m[2]), m[3]
     months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
     return [
-        rf"(?<!\d)0?{mo}[/.-]0?{d}[/.-](?:{y}|{y[2:]})(?!\d)",
+        rf"(?<!\d)0?{mo} ?[/.-] ?0?{d} ?[/.-] ?(?:{y}|{y[2:]})(?!\d)",
         rf"(?<!\d){y}-{mo:02d}-{d:02d}(?!\d)",
+        # a form's boxes, one per digit or part ("03 07 1981"), and e-file data ("03071981")
+        rf"(?<!\d){mo:02d}\s+{d:02d}\s+{y}(?!\d)",
+        rf"(?<!\d)(?:{mo:02d}{d:02d}{y}|{y}{mo:02d}{d:02d})(?!\d)",
         rf"\b{months[mo - 1]}[a-z]*\.?\s+0?{d},?\s+{y}\b",
     ]
 

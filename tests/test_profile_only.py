@@ -105,3 +105,9 @@ def test_a_last_four_redacted_after_its_label_is_not_searched_for_alone(tmp_path
     assert outcome.report.passed, outcome.report.issues
     text = pymupdf.open(ws.outputs("k1")["pdf"])[0].get_text()
     assert "SSN 4323" not in text and "Units 4323" in text
+
+
+def test_a_birth_date_is_found_however_a_form_prints_it():
+    texts = found("Born 03/07/1981", "DOB 03071981", "Birth date 03 07 1981", "19810307", "03 / 07 / 1981",
+                  "Mar 7, 1981", "Total 3071981.00", "Ref 1030719812")
+    assert texts == ["03/07/1981", "03071981", "03 07 1981", "19810307", "03 / 07 / 1981", "Mar 7, 1981"]
