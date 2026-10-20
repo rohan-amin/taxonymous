@@ -121,6 +121,8 @@ def date_patterns(value: str) -> list[str]:
 IDENTIFIER_KINDS = ("SSN", "EIN", "TIN", "ACCT", "CARD", "ROUTING", "ID", "PHONE")
 
 
+UNIT_WORDS = r"apartment|apt|unit|suite|ste|floor|fl|room|rm|building|bldg|lot|space|spc"
+UNIT_RE = re.compile(rf"(?:{UNIT_WORDS})\.?", IC)
 SHORT = 7  # digits: a shorter number on its own also turns up by chance in a file's drawing code
 YEAR_RE = re.compile(r"(?:19|20)\d\d")
 
@@ -165,6 +167,15 @@ class ProfileMatcher:
 
         def add_address(a: Address, key: str) -> None:
             words = a.street.split()
+            # the unit ("Apt 1007", "Apartment APT 1007", "#4B") is printed on a line of its own
+            # as often as after the street: each is found on its own
+            # with a street before it ("100 Unit Road" has none)
+            at = next((i for i, w in enumerate(words)
+                       if i > 1 and (UNIT_RE.fullmatch(w) or w.startswith("#"))), None)
+            if at is not None and not UNIT_RE.fullmatch(words[-1]):
+                words, unit = words[:at], words[at:][-1].lstrip("#")
+                if unit:
+                    add(rf"(?<!\w)(?:(?:{UNIT_WORDS})\.?\s*#?|#)\s*{re.escape(unit)}(?!\w)", "ADDR", key)
             if words:
                 parts = [re.escape(w) for w in words[:-1]]
                 suffix = words[-1].rstrip(".").lower()

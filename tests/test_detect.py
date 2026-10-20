@@ -173,3 +173,24 @@ def test_a_short_number_alone_is_not_looked_for_in_raw_file_content():
     m = ProfileMatcher(MORE)
     assert m.find(PageText(0, "7808 0 R 54321 0 R"), raw=True) == []
     assert [f.text for f in m.find(PageText(0, "XXXX7808 P00012345"), raw=True)] == ["XXXX7808", "P00012345"]
+
+
+@pytest.mark.parametrize("street", ["5842 Fenwick Ave Apartment APT 1007", "5842 Fenwick Ave Apt. 1007",
+                                    "5842 Fenwick Ave #1007"])
+def test_an_address_s_unit_is_found_apart_from_its_street(street):
+    """Forms print the unit on the street's line or the next one, with any designator."""
+    profile = Profile.from_dict({"addresses": [{"street": street, "city": "Tacoma", "state": "WA",
+                                                "zip": "98458"}]})
+    assert texts_of(["5842 FENWICK AVENUE", "APT 1007, TACOMA, WA 98458"], profile) == [
+        "5842 FENWICK AVENUE", "APT 1007", "TACOMA, WA 98458"]
+    assert texts_of(["5842 Fenwick Ave., Unit #1007"], profile) == ["5842 Fenwick Ave.", "Unit #1007"]
+    assert texts_of(["Total 1007", "Room for 1007"], profile) == []
+
+
+def test_a_street_named_like_a_unit_is_still_a_street():
+    profile = Profile.from_dict({"addresses": [{"street": "100 Unit Road"}]})
+    assert texts_of(["100 Unit Rd", "Unit 100"], profile) == ["100 Unit Rd"]
+
+
+def texts_of(lines, profile):
+    return [f.text for f in findings(*lines, profile=profile)]
