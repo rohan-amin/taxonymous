@@ -469,11 +469,12 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     if result.moved:
         # rebuild those pages from what they show, as a scan's are; the original draws them right
         doc.close()
-        moved = {n - 1 for n in result.moved}
-        retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | moved,
-                            progress=progress, text_too=text_too | moved)
+        rebuild = {n - 1 for n in result.moved}
+        retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | rebuild,
+                            progress=progress, text_too=text_too | rebuild)
         retry.moved = sorted(set(retry.moved) | set(result.moved))
         return retry
+    drawn = [glyphs(page) for page in doc]  # to check the saved file against
     doc.scrub(attached_files=True, clean_pages=True, embedded_files=True, hidden_text=True,
               javascript=True, metadata=True, redactions=False, remove_links=True, reset_fields=True,
               reset_responses=True, thumbnails=True, xml_metadata=True)
@@ -488,6 +489,15 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     doc.close()
 
     out = pymupdf.open(result.pdf)
+    # cleaning and saving rewrite every page's drawing code too, and can move its text
+    # (on a page that flips its coordinates) where no redaction did
+    shifted = {page.number for page in out if moved(drawn[page.number], glyphs(page))}
+    if shifted - {n - 1 for n in result.image_pages}:
+        out.close()
+        retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | shifted,
+                            progress=progress, text_too=text_too | shifted)
+        retry.moved = sorted(set(retry.moved) | set(result.moved) | {n + 1 for n in shifted})
+        return retry
     pages = [f"=== Page {p.number + 1} ===\n"
              f"{texts[p.number] if p.number in texts else p.get_text(sort=True).rstrip()}\n" for p in out]
     # no file name: one like "Fidelity Rohan Trust 1099.pdf" carries the very name redacted inside

@@ -35,7 +35,8 @@ def sanitize(doc: pymupdf.Document, skip: frozenset[int] = frozenset()) -> set[i
         if page.number in skip:
             continue
         before = glyphs(page)
-        if clip_to_visible(page) and moved(before, glyphs(page)):
+        # what moved, or what should have been cut away and wasn't (it was looked for elsewhere)
+        if clip_to_visible(page) and (moved(before, glyphs(page)) or outside(page)):
             broken.add(page.number)
     return broken
 
