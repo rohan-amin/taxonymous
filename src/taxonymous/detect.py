@@ -207,9 +207,13 @@ class ProfileMatcher:
             key = f"person:{i}"
             first, middles, last = p.parts
             f, last_ = re.escape(first), re.escape(last)
-            mid = "".join(rf"(?:\s+{re.escape(m[0])}(?:{re.escape(m[1:])})?\.?)?" for m in middles)
-            add(rf"\b{f}{mid}\s+{last_}\b", "NAME", key)
-            add(rf"\b{last_},\s*{f}{mid}\b", "NAME", key)
+            # up to two middle names or initials, any (a document can have the initial wrong, OCR
+            # can read its dot as a comma), with or without a space after the dot: "Avery F.
+            # Abernathy", "Avery F.Abernathy", "Abernathy, Avery F.", "ABERNATHY AVERY F"
+            initial = "|".join([*(re.escape(m) for m in middles if len(m) > 1), "[a-z]"])
+            mid = rf"(?:\s+(?:{initial})\b(?:\.|,(?=\s))?){{0,2}}"
+            add(rf"\b{f}{mid}\s*(?<=[\s.,]){last_}\b", "NAME", key)
+            add(rf"\b{last_}(?:,\s*|\s+){f}{mid}", "NAME", key)
             if len(first) > 2:
                 add(rf"\b(?:{f}|{re.escape(first.upper())})\b", "NAME", key, 0)
             if len(last) > 2:

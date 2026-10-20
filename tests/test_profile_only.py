@@ -3,6 +3,7 @@
 import json
 
 import pymupdf
+import pytest
 
 from taxonymous.detect import ProfileMatcher, detect
 from taxonymous.pagetext import extract
@@ -111,3 +112,10 @@ def test_a_birth_date_is_found_however_a_form_prints_it():
     texts = found("Born 03/07/1981", "DOB 03071981", "Birth date 03 07 1981", "19810307", "03 / 07 / 1981",
                   "Mar 7, 1981", "Total 3071981.00", "Ref 1030719812")
     assert texts == ["03/07/1981", "03071981", "03 07 1981", "19810307", "03 / 07 / 1981", "Mar 7, 1981"]
+
+
+@pytest.mark.parametrize("text", ["Avery F. Abernathy", "Avery F.Abernathy", "AVERY F ABERNATHY",
+                                  "Avery F, Abernathy", "Abernathy, Avery F.", "ABERNATHY AVERY F",
+                                  "Avery Q. Abernathy", "Avery F. J. Abernathy"])
+def test_a_name_with_its_middle_initial_is_found_whole(text):
+    assert found(f"Employee {text} Wages 100.00") == [text]
