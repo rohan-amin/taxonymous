@@ -6,12 +6,17 @@ Schema (plain JSON, lives in the vault folder, never committed):
                  "deceased": false, "dod": "MM/DD/YYYY"}],
   "addresses": [{"street": "...", "city": "...", "state": "XX", "zip": "....."}],
   "phones": [...], "emails": [...],
-  "accounts":  [{"institution": "...", "number": "...", "name": "..."}],
+  "accounts":  [{"institution": "...", "number": "...", "routing": "...", "name": "..."}],
   "eins":      [{"ein": "..", "description": "..."}],
-  "cards":     [{"number": "...", "description": "..."}]
+  "cards":     [{"number": "...", "description": "..."}],
+  "numbers":   [{"number": "...", "description": "..."}],
+  "preparers": [{"name": "...", "firm": "...", "street": "...", "city": "...", "state": "XX",
+                 "zip": ".....", "phone": "...", "ptin": "P........", "ein": ".."}]
 }
 Only the numbers are redacted; institution, account name and description are the user's
-own labels. Only these details (and anything shaped like an SSN) are redacted.
+own labels. Other numbers are any IDs of yours (an e-file signature PIN, a client ID). A
+preparer's every field is redacted. Only these details (and anything shaped like an SSN)
+are redacted.
 Older profiles listed plain strings for accounts, EINs and cards; both load.
 """
 
@@ -46,6 +51,20 @@ class Address:
 
 
 @dataclass
+class Preparer:
+    """The person or firm who prepared the return: everything about them is redacted."""
+    name: str = ""
+    firm: str = ""
+    street: str = ""
+    city: str = ""
+    state: str = ""
+    zip: str = ""
+    phone: str = ""
+    ptin: str = ""
+    ein: str = ""
+
+
+@dataclass
 class Profile:
     people: list[Person] = field(default_factory=list)
     addresses: list[Address] = field(default_factory=list)
@@ -54,6 +73,9 @@ class Profile:
     eins: list[str] = field(default_factory=list)
     accounts: list[str] = field(default_factory=list)
     cards: list[str] = field(default_factory=list)
+    routing: list[str] = field(default_factory=list)  # the accounts' routing numbers
+    numbers: list[str] = field(default_factory=list)  # other IDs: PINs, client IDs
+    preparers: list[Preparer] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> "Profile":
@@ -69,15 +91,21 @@ class Profile:
             eins=[_number(e, "eins") for e in d.get("eins", [])],
             accounts=[_number(a, "accounts") for a in d.get("accounts", [])],
             cards=[_number(c, "cards") for c in d.get("cards", [])],
+            routing=[r for a in d.get("accounts", []) if (r := str(_record(a, "accounts")["routing"]))],
+            numbers=[_number(n, "numbers") for n in d.get("numbers", [])],
+            preparers=[Preparer(**{k: str(v or "") for k, v in p.items() if k in PREPARER_FIELDS})
+                       for p in d.get("preparers", [])],
         )
 
 
 # per kind of record: the field that is the identifier, and all of its fields
 RECORDS = {
-    "accounts": ("number", ("institution", "number", "name")),
+    "accounts": ("number", ("institution", "number", "routing", "name")),
     "eins": ("ein", ("ein", "description")),
     "cards": ("number", ("number", "description")),
+    "numbers": ("number", ("number", "description")),
 }
+PREPARER_FIELDS = ("name", "firm", "street", "city", "state", "zip", "phone", "ptin", "ein")
 
 
 def _record(item, key: str) -> dict:
@@ -116,7 +144,8 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
     one format. Returns (profile, errors by field path like "people.0.ssn"). Error
     messages never repeat the value."""
     errors: dict[str, str] = {}  # paths use the row numbers as sent, empty rows included
-    out: dict = {k: [] for k in ("people", "addresses", "phones", "emails", "eins", "accounts", "cards")}
+    out: dict = {k: [] for k in ("people", "addresses", "phones", "emails", "eins", "accounts", "cards",
+                                 "numbers", "preparers")}
 
     def text(v) -> str:
         return " ".join(str(v or "").split())
@@ -177,6 +206,38 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
             errors[f"{at}.zip"] = "Use 5 digits (or ZIP+4)."
         out["addresses"].append(a)
 
+    for i, raw in enumerate(d.get("preparers") or []):
+        r = {k: text(raw.get(k)) for k in PREPARER_FIELDS}
+        if not any(r.values()):
+            continue
+        at = f"preparers.{i}"
+        if not (r["name"] or r["firm"]):
+            errors[f"{at}.name"] = "Enter the preparer's name or firm."
+        if r["state"]:
+            r["state"] = r["state"].upper()
+            if not re.fullmatch(r"[A-Z]{2}", r["state"]):
+                errors[f"{at}.state"] = "Use the two-letter state code."
+        if r["zip"] and not ZIP_RE.fullmatch(r["zip"]):
+            errors[f"{at}.zip"] = "Use 5 digits (or ZIP+4)."
+        if r["phone"]:
+            if _phone_ok(r["phone"]):
+                ds = _digits(r["phone"])[-10:]
+                r["phone"] = f"({ds[:3]}) {ds[3:6]}-{ds[6:]}"
+            else:
+                errors[f"{at}.phone"] = "Enter a 10-digit US phone number."
+        if r["ptin"]:
+            ds = _digits(r["ptin"])
+            if len(ds) != 8 or not re.fullmatch(r"[Pp]?[\s-]*[\d\s-]+", r["ptin"]):
+                errors[f"{at}.ptin"] = "A PTIN is P and 8 digits."
+            else:
+                r["ptin"] = "P" + ds
+        if r["ein"]:
+            if len(_digits(r["ein"])) != 9:
+                errors[f"{at}.ein"] = "An EIN has 9 digits."
+            else:
+                r["ein"] = f"{_digits(r['ein'])[:2]}-{_digits(r['ein'])[2:]}"
+        out["preparers"].append(r)
+
     lists = {
         "phones": (_phone_ok, "Enter a 10-digit US phone number."),
         "emails": (lambda v: EMAIL_RE.fullmatch(v), "Enter an email address."),
@@ -199,6 +260,7 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                  lambda v: f"{_digits(v)[:2]}-{_digits(v)[2:]}"),
         "cards": (lambda v: 13 <= len(_digits(v)) <= 19, "A card number has 13 to 19 digits.",
                   lambda v: " ".join(re.findall(r"\d{1,4}", _digits(v)))),
+        "numbers": (_account_ok, "Enter at least 4 letters or digits.", lambda v: v),
     }
     for key, (ok, message, stored) in numbers.items():
         main = RECORDS[key][0]
@@ -212,13 +274,18 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                 errors[f"{key}.{i}.{main}"] = message
             else:
                 r[main] = stored(r[main])
+            if r.get("routing"):  # an account's: optional
+                if len(_digits(r["routing"])) != 9 or re.search(r"[A-Za-z]", r["routing"]):
+                    errors[f"{key}.{i}.routing"] = "A routing number has 9 digits."
+                else:
+                    r["routing"] = _digits(r["routing"])
             out[key].append(r)
     return out, errors
 
 
 # what the review screen can add in one step, from a document: the profile list it goes in
 ITEMS = {"person": "people", "address": "addresses", "account": "accounts", "phone": "phones",
-         "email": "emails", "ein": "eins", "card": "cards"}
+         "email": "emails", "ein": "eins", "card": "cards", "number": "numbers", "preparer": "preparers"}
 
 
 def add_item(d: dict, kind: str, item: dict) -> tuple[dict, dict[str, str]]:

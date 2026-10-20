@@ -131,18 +131,18 @@ class Scanner:
             elif len(_squash(k.value).strip()) >= 4:
                 self.words.append((k.kind, _squash(k.value), _squash(k.value, True), _prose_regex(k)))
 
-    def _profile(self, text: str) -> list[str]:
+    def _profile(self, text: str, raw: bool = False) -> list[str]:
         """Kinds of your details in the text, except what the reviewer left readable: an allowed
         value or identity, and the parts inside an allowed value (an allowed full name's
         first name and surname)."""
-        finds = [f for f in self.matcher.find(PageText(0, text)) if f.key not in self.keys]
+        finds = [f for f in self.matcher.find(PageText(0, text), raw) if f.key not in self.keys]
         ok = [(f.start, f.end) for f in finds if _squash(f.text) in self.allowed]
         return [f.kind for f in finds if not any(s <= f.start and f.end <= e for s, e in ok)]
 
     def known(self, text: str) -> list[str]:
         """Kinds of known values (not generic patterns) in raw file text: exact matches only."""
         text = PLACEHOLDER_RE.sub(" ", text)
-        found = self._profile(text)
+        found = self._profile(text, raw=True)
         squashed = _squash(text)
         found += [kind for kind, exact, _, rx in self.words if _word_in(exact, squashed, rx, text)]
         found += [kind for kind, exact, _ in self.numbers if _number_in(kind, exact, text)]

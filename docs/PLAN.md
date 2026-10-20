@@ -24,7 +24,7 @@ A new document type should need no code change. If one leaks, the fix goes into 
 
 ## What gets redacted
 
-**Since 2026-10-19 only the values in Your details** (in any format, including masked and last-4 forms), anything SSN-shaped, and (since 2026-10-20) every barcode are removed. The guessing detectors described in the rest of this section and in M1–M4 below (labels, long numbers, the name model, cross-document values) were an opt-in mode until 2026-10-20 and have since been removed: on real documents they caused cascading false failures (a caption or "Go to" taken for a name in one document then failed every other one), and the user only needs their own details removed. The milestone notes below are kept as history.
+**Since 2026-10-19 only the values in Your details** (in any format, including masked and last-4 forms; since 2026-10-20 also routing numbers, other numbers such as e-file PINs and client IDs, the tax preparer, and an account's last 4 wherever it stands alone), anything SSN-shaped, and (since 2026-10-20) every barcode are removed. The guessing detectors described in the rest of this section and in M1–M4 below (labels, long numbers, the name model, cross-document values) were an opt-in mode until 2026-10-20 and have since been removed: on real documents they caused cascading false failures (a caption or "Go to" taken for a name in one document then failed every other one), and the user only needs their own details removed. The milestone notes below are kept as history.
 
 Redacted: SSN/ITIN/EIN, state tax IDs, account/routing/card numbers (including masked and last-4 forms), W-2 control numbers, names of people (taxpayer, spouse, dependents, employees, beneficiaries), street addresses, DOB, phone numbers, emails.
 

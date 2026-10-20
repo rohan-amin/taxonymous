@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 
 from .pagetext import PageText
-from .profile import Profile
+from .profile import Address, Profile
 
 IC = re.IGNORECASE
 PRIORITY = {"profile": 2, "pattern": 1, "repeat": 0}
@@ -121,20 +121,28 @@ def date_patterns(value: str) -> list[str]:
 IDENTIFIER_KINDS = ("SSN", "EIN", "TIN", "ACCT", "CARD", "ROUTING", "ID", "PHONE")
 
 
+SHORT = 7  # digits: a shorter number on its own also turns up by chance in a file's drawing code
+YEAR_RE = re.compile(r"(?:19|20)\d\d")
+
+
 class ProfileMatcher:
     def __init__(self, profile: Profile):
-        self.rules: list[tuple[re.Pattern, str, str]] = []
+        # (pattern, kind, key, whether to look for it in a file's raw content too)
+        self.rules: list[tuple[re.Pattern, str, str, bool]] = []
         self.by_digits: dict[str, tuple[str, str]] = {}
         self.by_last4: dict[str, tuple[str, str]] = {}
         self.by_name: dict[str, tuple[str, str]] = {}
         self.surname_of: dict[str, str] = {}  # a person's key -> the key their surname alone has
 
-        def add(pattern: str | None, kind: str, key: str, flags: int = IC) -> None:
+        def add(pattern: str | None, kind: str, key: str, flags: int = IC, raw: bool = True) -> None:
             if pattern:
-                self.rules.append((re.compile(pattern, flags), kind, key))
+                self.rules.append((re.compile(pattern, flags), kind, key, raw))
 
         def add_number(value: str, kind: str, key: str) -> None:
-            add(digit_pattern(value), kind, key)
+            short = len(digits(value)) < SHORT
+            # a short one ("12345", a PIN) isn't an amount's digits ("123.45")
+            add(digit_pattern(value) and (NOT_AMOUNT if short else "") + digit_pattern(value), kind, key,
+                raw=not short)
             if len(digits(value)) >= 4:
                 self.by_digits[digits(value)] = (kind, key)
                 self.by_last4.setdefault(digits(value)[-4:], (kind, key))
@@ -148,17 +156,48 @@ class ProfileMatcher:
             if kind == "SSN":  # "SSN 4323", "TIN: 4323"
                 add(rf"\b(?:ssn|social security(?: number| no\.?)?|i?tin)\b\W{{0,4}}(?P<v>{last4})(?!\d)",
                     kind, key)
+            if kind in ("ACCT", "CARD") and not YEAR_RE.fullmatch(last4):
+                # an account's last four on their own, as statements print them ("Acct 4323",
+                # "...4323", "x4323"); not in an amount (4323.00), a date or a longer number
+                end = r"(?![\w/-]|[.,]\d)"
+                add(rf"(?<![\w.,$/-]){last4}{end}", kind, key, raw=False)
+                add(rf"(?:(?<!\w)[x#*•]|\.{{2,}}|…)\s?(?P<v>{last4}){end}", kind, key, raw=False)
 
-        for i, p in enumerate(profile.people):
-            key = f"person:{i}"
-            self.surname_of[key] = f"surname:{p.parts[2].lower()}"
-            first, middles, last = p.parts
-            f, last_ = re.escape(first), re.escape(last)
+        def add_address(a: Address, key: str) -> None:
+            words = a.street.split()
+            if words:
+                parts = [re.escape(w) for w in words[:-1]]
+                suffix = words[-1].rstrip(".").lower()
+                alias = next((g for g in _SUFFIX_GROUPS if suffix in g), [re.escape(suffix)])
+                parts.append("(?:" + "|".join(alias) + r")\.?")
+                add(r"\b" + r"\s+".join(parts) + r"(?!\w)", "ADDR", key)
+            if a.state and a.zip:
+                city = r"\s+".join(map(re.escape, a.city.split()))
+                town = rf"(?:{city},?\s+)?" if city else ""
+                add(rf"\b{town}{re.escape(a.state)}\s+{re.escape(a.zip)}(?:-\d{{4}})?\b", "ADDR", key)
+
+        def add_phone(v: str, key: str) -> None:
+            ds = digits(v)
+            if len(ds) == 11 and ds[0] == "1":  # +1 / 1- country code: documents mostly leave it out
+                ds = ds[1:]
+            add_number(ds, "PHONE", key)
+
+        def name_rules(name: str) -> tuple[str, str, str, str]:
+            """A full name's parts as patterns: first, middles (initials allowed), last."""
+            words = name.split()
+            first, middles, last = words[0], words[1:-1], words[-1]
             # up to two middle names or initials, any (a document can have the initial wrong, OCR
             # can read its dot as a comma), with or without a space after the dot: "Avery F.
             # Abernathy", "Avery F.Abernathy", "Abernathy, Avery F.", "ABERNATHY AVERY F"
             initial = "|".join([*(re.escape(m) for m in middles if len(m) > 1), "[a-z]"])
             mid = rf"(?:\s+(?:{initial})\b(?:\.|,(?=\s))?){{0,2}}"
+            return re.escape(first), initial, mid, re.escape(last)
+
+        for i, p in enumerate(profile.people):
+            key = f"person:{i}"
+            self.surname_of[key] = f"surname:{p.parts[2].lower()}"
+            first, _, last = p.parts
+            f, initial, mid, last_ = name_rules(p.name)
             add(rf"\b{f}{mid}\s*(?<=[\s.,]){last_}\b", "NAME", key)
             add(rf"\b{last_}(?:,\s*|\s+){f}{mid}", "NAME", key)
             # a joint name gives the surname once: "Avery F. & Jordan K. Abernathy"; the first
@@ -176,34 +215,53 @@ class ProfileMatcher:
                 for pat in date_patterns(p.dob):
                     add(pat, "DOB", f"dob:{i}")
         for i, a in enumerate(profile.addresses):
-            words = a.street.split()
-            parts = [re.escape(w) for w in words[:-1]]
-            suffix = words[-1].rstrip(".").lower() if words else ""
-            alias = next((g for g in _SUFFIX_GROUPS if suffix in g), [suffix])
-            parts.append("(?:" + "|".join(alias) + r")\.?")
-            add(r"\b" + r"\s+".join(parts) + r"(?!\w)", "ADDR", f"addr:{i}")
-            if a.state and a.zip:
-                city = r"\s+".join(map(re.escape, a.city.split()))
-                town = rf"(?:{city},?\s+)?" if city else ""
-                add(rf"\b{town}{re.escape(a.state)}\s+{re.escape(a.zip)}(?:-\d{{4}})?\b", "ADDR", f"addr:{i}")
+            add_address(a, f"addr:{i}")
         for i, v in enumerate(profile.emails):
             add(re.escape(v), "EMAIL", f"email:{i}")
         for i, v in enumerate(profile.phones):
-            ds = digits(v)
-            if len(ds) == 11 and ds[0] == "1":  # +1 / 1- country code: documents mostly leave it out
-                ds = ds[1:]
-            add_number(ds, "PHONE", f"phone:{i}")
-        for kind, values in [("EIN", profile.eins), ("ACCT", profile.accounts), ("CARD", profile.cards)]:
+            add_phone(v, f"phone:{i}")
+        for kind, values in [("EIN", profile.eins), ("ACCT", profile.accounts), ("CARD", profile.cards),
+                             ("ROUTING", profile.routing)]:
             for i, v in enumerate(values):
                 add_number(v, kind, f"{kind.lower()}:{i}")
+        for i, v in enumerate(profile.numbers):
+            if re.search(r"[A-Za-z]", v):  # a client ID like "AB-10442": its letters and digits, any spacing
+                chars = re.sub(r"[^A-Za-z0-9]", "", v)
+                add(r"(?<![A-Za-z0-9])" + r"[\s.\-]?".join(map(re.escape, chars)) + r"(?![A-Za-z0-9])",
+                    "ID", f"id:{i}", raw=len(chars) >= SHORT)
+            else:
+                add_number(v, "ID", f"id:{i}")
+        for i, pr in enumerate(profile.preparers):
+            key = f"preparer:{i}"
+            if len(pr.name.split()) > 1:  # the whole name only: a first name alone is too common
+                f, _, mid, last_ = name_rules(pr.name)
+                add(rf"\b{f}{mid}\s*(?<=[\s.,]){last_}\b", "NAME", f"{key}:name")
+                add(rf"\b{last_}(?:,\s*|\s+){f}{mid}", "NAME", f"{key}:name")
+            for v in (pr.firm, pr.name if len(pr.name.split()) == 1 else ""):
+                words = re.findall(r"[A-Za-z0-9&']+", v)
+                if words:  # "Doe & Co., CPAs" as "DOE & CO CPAS" too
+                    phrase = r"[^A-Za-z0-9&]*".join(map(re.escape, words))
+                    add(rf"(?<![A-Za-z0-9]){phrase}(?![A-Za-z0-9])", "ORG", f"{key}:firm")
+            add_address(Address(pr.street, pr.city, pr.state, pr.zip), f"{key}:addr")
+            if pr.phone:
+                add_phone(pr.phone, f"{key}:phone")
+            if pr.ein:
+                add_number(pr.ein, "EIN", f"{key}:ein")
+            if pr.ptin:  # "P01234567", "P 0123 4567"
+                add(r"(?<![A-Za-z0-9])(?:P[\s-]?)?" + r"[\s-]?".join(digits(pr.ptin)) + r"(?!\d)",
+                    "ID", f"{key}:ptin")
 
     def related(self, keys) -> set[str]:
         """The keys `keys` stand for: a person's, with the key of their surname on its own."""
         return {k for key in keys for k in (key, self.surname_of.get(key)) if k}
 
-    def find(self, pt: PageText) -> list[Finding]:
+    def find(self, pt: PageText, raw: bool = False) -> list[Finding]:
+        """`raw`: the text is a file's raw content, where a short number on its own is
+        likely an object number or a coordinate; only its forms with context count there."""
         out = []
-        for rx, kind, key in self.rules:
+        for rx, kind, key, in_raw in self.rules:
+            if raw and not in_raw:
+                continue
             for m in rx.finditer(pt.text):
                 start, end = m.span("v") if "v" in rx.groupindex else m.span()  # "ending in <v>"
                 out.append(Finding(pt.number, start, end, kind, key, "profile", pt.text[start:end]))

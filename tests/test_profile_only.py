@@ -113,3 +113,27 @@ def test_a_joint_name_keeps_no_initial():
         texts = found(text, details=details)
         assert texts == whole, (text, texts)
     assert found("Avery Fund", "Avery is here", details=details) == ["Avery", "Avery"]
+
+
+def test_a_return_s_preparer_pin_routing_and_last_four_are_redacted(tmp_path):
+    details = {**DETAILS,
+               "accounts": [{"number": "8320968305", "routing": "021000021"}],
+               "numbers": [{"number": "54321", "description": "Signature PIN"},
+                           {"number": "AB-10442", "description": "Client ID"}],
+               "preparers": [{"name": "Jordan Q Okafor", "firm": "Okafor & Co CPAs", "street": "100 Main St",
+                              "city": "Seattle", "state": "WA", "zip": "98101", "ptin": "P00012345",
+                              "phone": "(555) 555-0123", "ein": "00-1234567"}]}
+    ws = _workspace(tmp_path, details)
+    lines = [f"Your signature {NAME}", "Your self-select PIN 54321", "Routing number 021000021",
+             "Account number 8320968305", "Direct deposit to account ending 8305",
+             "Preparer's name Jordan Q Okafor", "PTIN P00012345", "Firm's name OKAFOR & CO CPAS",
+             "Firm's address 100 Main St, Seattle, WA 98101", "Phone no. (555) 555-0123",
+             "Firm's EIN 00-1234567", "Client AB10442", "Refund 543.21", "Total tax 8,305"]
+    _page(lines).save(ws.inbox / "1040.pdf")
+    [outcome] = run(ws, ocr=True)
+    assert outcome.report.passed, outcome.report.issues
+    text = pymupdf.open(ws.outputs("1040")["pdf"])[0].get_text()
+    for gone in ("54321", "021000021", "8305\n", "Okafor", "OKAFOR", "P00012345", "Main St", "98101",
+                 "555-0123", "1234567", "AB10442"):
+        assert gone not in text, gone
+    assert "543.21" in text and "8,305" in text and "Jordan" not in text

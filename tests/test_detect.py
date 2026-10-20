@@ -6,7 +6,7 @@ import pymupdf
 import pytest
 
 from taxonymous.detect import ProfileMatcher, detect
-from taxonymous.pagetext import extract
+from taxonymous.pagetext import PageText, extract
 from taxonymous.profile import Profile
 
 SSN = "-".join(["123", "45", "6789"])
@@ -136,3 +136,40 @@ def test_dotted_ids_are_still_copies():
 
     from taxonymous.detect import number_regex
     assert re.search(number_regex("123456"), "Ref 12.34.56 issued")
+
+
+MORE = Profile.from_dict({
+    "people": [{"name": "Avery F Abernathy"}],
+    "accounts": [{"number": "8320967808", "routing": "021000021"}],
+    "numbers": [{"number": "54321"}, {"number": "AB-10442"}],
+    "preparers": [{"name": "Jordan Q Okafor", "firm": "Okafor & Co., CPAs", "street": "100 Main Street",
+                   "city": "Seattle", "state": "WA", "zip": "98101", "ptin": "P00012345",
+                   "phone": "(555) 555-0123", "ein": "00-1234567"}],
+})
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("Acct 7808", "7808"), ("Account ending 7808", "7808"), ("Checking ...7808", "7808"),
+    ("Card x7808", "7808"), ("Routing 021000021", "021000021"), ("PIN 54321", "54321"),
+    ("Self-select PIN 5 4 3 2 1", "5 4 3 2 1"), ("Client ID ab 10442", "ab 10442"),
+    ("OKAFOR & CO CPAS", "OKAFOR & CO CPAS"), ("Paid preparer Jordan Q. Okafor", "Jordan Q. Okafor"),
+    ("100 Main St", "100 Main St"), ("Seattle, WA 98101", "Seattle, WA 98101"),
+    ("PTIN P00012345", "P00012345"), ("Firm's EIN 00-1234567", "00-1234567"),
+])
+def test_routing_other_numbers_and_the_preparer_are_found(line, expected):
+    assert [f.text for f in findings(line, profile=MORE)] == [expected]
+
+
+@pytest.mark.parametrize("line", [
+    "Wages 7808.00", "Total 7,808", "Ref 178080", "Dated 12/7808", "Refund 543.21", "Jordan called",
+    "Okafor", "Box 12 code D 7808-1",
+])
+def test_short_numbers_and_parts_of_a_preparer_alone_stay(line):
+    assert findings(line, profile=MORE) == []
+
+
+def test_a_short_number_alone_is_not_looked_for_in_raw_file_content():
+    """There "7808" is as likely an object number or a coordinate ("7808 0 R")."""
+    m = ProfileMatcher(MORE)
+    assert m.find(PageText(0, "7808 0 R 54321 0 R"), raw=True) == []
+    assert [f.text for f in m.find(PageText(0, "XXXX7808 P00012345"), raw=True)] == ["XXXX7808", "P00012345"]

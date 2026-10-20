@@ -101,6 +101,7 @@ export interface Address {
 export interface Account {
   institution: string;
   number: string;
+  routing: string;
   name: string;
 }
 
@@ -114,6 +115,23 @@ export interface Card {
   description: string;
 }
 
+export interface OtherNumber {
+  number: string;
+  description: string;
+}
+
+export interface Preparer {
+  name: string;
+  firm: string;
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  phone: string;
+  ptin: string;
+  ein: string;
+}
+
 export interface Profile {
   people: Person[];
   addresses: Address[];
@@ -122,10 +140,13 @@ export interface Profile {
   accounts: Account[];
   eins: Ein[];
   cards: Card[];
+  numbers: OtherNumber[];
+  preparers: Preparer[];
 }
 
 // what can be added to your details from a document in one step (profile.ITEMS)
-export type DetailKind = "person" | "address" | "account" | "phone" | "email" | "ein" | "card";
+export type DetailKind = "person" | "address" | "account" | "phone" | "email" | "ein" | "card" | "number"
+  | "preparer";
 
 export interface ProfileState {
   exists: boolean;

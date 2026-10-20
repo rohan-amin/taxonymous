@@ -357,6 +357,10 @@ FORM = {
     "accounts": [{"institution": "Contoso Bank", "number": "8320968305", "name": "Joint checking"},
                  {"institution": "", "number": "", "name": ""}],  # an empty row
     "cards": [{"number": "4111111111111111", "description": "Travel card"}],
+    "numbers": [{"number": " 54321 ", "description": "Signature PIN"}],
+    "preparers": [{"name": "Jordan Q Okafor", "firm": "Okafor & Co CPAs", "street": "100 Main St",
+                   "city": "Seattle", "state": "wa", "zip": "98101", "phone": "5555550123",
+                   "ptin": "p 0001 2345", "ein": "001234567"}],
 }
 
 
@@ -376,10 +380,14 @@ def test_details_are_cleaned_saved_and_private(fresh):
                                 "role": "taxpayer", "dod": "", "deceased": False}]
     assert saved["addresses"][0]["state"] == "WA"
     assert saved["eins"] == [{"ein": "00-4869454", "description": "Household employer"}]
-    assert saved["accounts"] == [{"institution": "Contoso Bank", "number": "8320968305",
+    assert saved["accounts"] == [{"institution": "Contoso Bank", "number": "8320968305", "routing": "",
                                   "name": "Joint checking"}]
     assert saved["cards"] == [{"number": "4111 1111 1111 1111", "description": "Travel card"}]
     assert saved["phones"] == ["(555) 555-0188"]
+    assert saved["numbers"] == [{"number": "54321", "description": "Signature PIN"}]
+    assert saved["preparers"] == [{"name": "Jordan Q Okafor", "firm": "Okafor & Co CPAs",
+                                   "street": "100 Main St", "city": "Seattle", "state": "WA", "zip": "98101",
+                                   "phone": "(555) 555-0123", "ptin": "P00012345", "ein": "00-1234567"}]
     assert ws.profile_path.stat().st_mode & 0o777 == 0o600
     assert client.get("/api/profile").json()["profile"] == saved
     assert client.post("/api/run").status_code == 202
@@ -390,13 +398,17 @@ def test_bad_details_name_the_fields_and_save_nothing(fresh):
     bad = {**FORM, "people": [{"name": "Avery", "ssn": "987-65-432", "dob": "13/40/1984"}],
            "addresses": [{"street": "", "city": "Tacoma", "state": "Wash", "zip": "984"}],
            "eins": [{"ein": "12345", "description": "x"}], "phones": ["", "555-0188"],
-           "accounts": [{"institution": "Contoso Bank", "number": "", "name": ""}]}
+           "accounts": [{"institution": "Contoso Bank", "number": "", "name": ""},
+                        {"number": "8320968305", "routing": "0210000"}],
+           "numbers": [{"number": "12", "description": "PIN"}],
+           "preparers": [{"street": "100 Main St", "ptin": "P123", "phone": "555-0123"}]}
     r = client.put("/api/profile", json=bad)
     assert r.status_code == 422
     fields = r.json()["detail"]["fields"]
     assert set(fields) == {"people.0.name", "people.0.ssn", "people.0.dob", "addresses.0.street",
                            "addresses.0.state", "addresses.0.zip", "eins.0.ein", "phones.1",
-                           "accounts.0.number"}
+                           "accounts.0.number", "accounts.1.routing", "numbers.0.number",
+                           "preparers.0.name", "preparers.0.ptin", "preparers.0.phone"}
     assert not any("987" in m or "Avery" in m for m in fields.values())  # messages never echo values
     assert not ws.profile_path.exists()
     assert client.put("/api/profile", json={}).status_code == 422  # at least one person
@@ -427,7 +439,7 @@ def test_an_older_profile_with_plain_numbers_still_loads(fresh):
              "eins": ["00-4869454"], "cards": ["4111111111111111"]}
     ws.profile_path.write_text(json.dumps(older))
     p = client.get("/api/profile").json()["profile"]
-    assert p["accounts"] == [{"institution": "", "number": "8320968305", "name": ""}]
+    assert p["accounts"] == [{"institution": "", "number": "8320968305", "routing": "", "name": ""}]
     assert p["eins"] == [{"ein": "00-4869454", "description": ""}]
     assert p["cards"] == [{"number": "4111 1111 1111 1111", "description": ""}]
 
@@ -454,7 +466,7 @@ def test_a_detail_seen_in_a_document_is_added_to_your_details(fresh):
     person = {"name": " Morgan  Delacroix ", "ssn": "987654325", "dob": "", "role": "spouse"}
     r = add("person", **person)
     assert r.status_code == 200 and "Morgan" not in r.text  # real values stay out of responses
-    account = {"institution": "Contoso Bank", "number": "0047812", "name": "Brokerage"}
+    account = {"institution": "Contoso Bank", "number": "0047812", "routing": "", "name": "Brokerage"}
     assert add("account", **account).status_code == 200
     assert add("phone", value="5555550199").status_code == 200
     saved = json.loads(ws.profile_path.read_text())
