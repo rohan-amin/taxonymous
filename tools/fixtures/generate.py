@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from . import degrade, fake, heldout, irs, synthetic
+from . import manifest as manifest_mod
 
 DEFAULT_OUT = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "generated"
 
@@ -37,6 +38,7 @@ def generate(out_dir: Path, seed: int = 7, brokerage_pages: int = 30) -> dict:
         degrade.attach(by_file["daf_acknowledgment.pdf"], by_file["receipt.pdf"], out_dir, out_dir,
                        "daf_with_receipt"),
     ]
+    manifest_mod.settle(records, hh.profile())
     manifest = {"seed": seed, "documents": [r.to_json() for r in records]}
     (out_dir / "household.json").write_text(json.dumps(hh.profile(), indent=2) + "\n")
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

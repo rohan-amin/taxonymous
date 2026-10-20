@@ -35,32 +35,26 @@ Not yet tried in the native window: dragging files in from Finder, and printing.
 
 | Dependency                          | Size    |
 |-------------------------------------|---------|
-| torch (for the name model)          | 549 MB  |
-| en_core_web_trf (the name model)    | 482 MB  |
 | PyMuPDF                             | 58 MB   |
 | Tesseract 5.5 + its dylibs + eng    | ~50 MB  |
-| everything else                     | ~0.3 GB |
+| everything else (numpy, Pillow, FastAPI, zxing-cpp...) | ~0.1 GB |
 
-So the app will weigh about 1.1–1.4 GB either way, and Tauri's small shell doesn't
-help. Both routes need the same work:
+The name model (torch and `en_core_web_trf`, about 1 GB) was removed on 2026-10-20.
+The runtime packages now come to about 150 MB (measured 2026-10-20, without the test-only
+Playwright), so the bundle is roughly 0.2 GB either way. Both routes need the same work:
 
 1. **Bundle Tesseract.** Today it comes from Homebrew. Its binary, the leptonica
    and image-library dylibs, and `eng.traineddata` have to be copied into the
    app, with their library paths rewritten.
-2. **Bundle the name model.** Load it from inside the app rather than from
-   site-packages.
-3. **Sign and notarize** with an Apple Developer ID. Without this, Gatekeeper
+2. **Sign and notarize** with an Apple Developer ID. Without this, Gatekeeper
    blocks a downloaded app.
-4. **Optional, for size:** a small spaCy model (`en_core_web_sm`, ~13 MB, no
-   torch) brings the bundle to roughly 0.3 GB, but it misses more names in
-   prose. That would need measuring on the held-out corpus before choosing it.
 
 ## Recommendation
 
 **pywebview.** It needs no new toolchain, runs the engine in the same process as
 the window, and the spike works today. Tauri's advantages (auto-update, richer
 native menus, a smaller shell) don't outweigh adding Rust and a sidecar for an app
-whose size is set by torch. If auto-update becomes important, Sparkle can be added
+whose size is set by the Python packages. If auto-update becomes important, Sparkle can be added
 to a py2app bundle.
 
 The security model is unchanged: the server is loopback-only and needs the token,

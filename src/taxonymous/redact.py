@@ -35,7 +35,7 @@ import pymupdf
 from PIL import Image, ImageDraw, ImageOps
 
 from . import barcode, ocr
-from .detect import Finding, ProfileMatcher, continue_numbers, detect, merge, relink, repeat_values, repeated
+from .detect import Finding, ProfileMatcher, continue_numbers, detect, merge, repeat_values, repeated
 from .pagetext import PageText, extract
 from .progress import NONE, Progress
 from .sanitize import allow_list, glyphs, moved, sanitize
@@ -429,10 +429,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 progress.step()
         read = _read_pages(doc, scan_numbers + mixed_numbers, matcher, progress)
         scans, mixed = read[:len(scan_numbers)], {p.number: p for p in read[len(scan_numbers):]}
-        everything = [f for _, fs in [*text_pages.values(), *scan_text.values()] for f in fs]
-        everything += [f for p in read for _, f in p.found]
-        relink(everything, repeat_values(everything))
-        # the reviewer's keeps apply after linking: keeping a full name keeps its parts too
+        # the reviewer's keeps
         text_pages = {n: (pt, [f for f in fs if wanted(f)]) for n, (pt, fs) in text_pages.items()}
         for p in read:
             drop_kept(p)

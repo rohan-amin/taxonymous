@@ -24,7 +24,7 @@ def failed(tmp_path):
     ws = Workspace(tmp_path)
     ws.init()
     ws.profile_path.write_text(json.dumps({"people": [{"name": NAME, "ssn": SSN}], "addresses": [
-        {"street": STREET, "city": "Tacoma", "state": "WA", "zip": "98458"}], "find_others": True}))
+        {"street": STREET, "city": "Tacoma", "state": "WA", "zip": "98458"}], "eins": [EIN]}))
     doc = pymupdf.open()
     page = doc.new_page()
     lines = [f"Employee: {NAME}  SSN {SSN}", f"Employer identification number (EIN): {EIN}", STREET,
@@ -49,7 +49,7 @@ def test_mask_keeps_form_words_and_placeholders_only():
 def test_explain_shows_where_without_showing_what(failed, capsys):
     hits = explain(failed.root, "w2_statement", ocr=False)
     kinds = {(h.kind, h.why) for h in hits}
-    assert ("EIN", "a value redacted in this document") in kinds
+    assert ("EIN", "it is in your details") in kinds
     assert ("NAME", "it is in your details") in kinds
     assert any("ID##-#######" in h.context for h in hits)  # the layout that matters survives
 
@@ -69,8 +69,7 @@ def test_explain_one_box_says_where_it_came_from(failed, capsys):
     ein = next(ph for ph, e in vault.entries.items() if e["kind"] == "EIN")
     out = explain_placeholder(failed.root, "w2_statement", ein.strip("<>"))
     assert f"{ein} (EIN) stands for: ##-#######" in out
-    assert "page 1 · a nearby label" in out or "page 1 · its shape" in out
-    assert "a copy of it" in out  # "ID00-..." in the state wages line: not a detector's, the repeat's
+    assert "page 1 by your details ×2" in out  # "ID00-..." in the state wages line too
     assert cli(["explain", "--workspace", str(failed.root), "w2_statement.pdf", ein.strip("<>")]) == 0
     printed = capsys.readouterr().out
     for secret in [*(w for w in NAME.split() if len(w) > 1), *re.findall(r"\d{2,}", SSN + EIN)]:

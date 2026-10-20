@@ -8,12 +8,10 @@ Schema (plain JSON, lives in the vault folder, never committed):
   "phones": [...], "emails": [...],
   "accounts":  [{"institution": "...", "number": "...", "name": "..."}],
   "eins":      [{"ein": "..", "description": "..."}],
-  "cards":     [{"number": "...", "description": "..."}],
-  "find_others": false
+  "cards":     [{"number": "...", "description": "..."}]
 }
 Only the numbers are redacted; institution, account name and description are the user's
-own labels. By default only these details (and anything shaped like an SSN) are redacted;
-`find_others` also redacts names and numbers the detectors find that aren't listed.
+own labels. Only these details (and anything shaped like an SSN) are redacted.
 Older profiles listed plain strings for accounts, EINs and cards; both load.
 """
 
@@ -56,7 +54,6 @@ class Profile:
     eins: list[str] = field(default_factory=list)
     accounts: list[str] = field(default_factory=list)
     cards: list[str] = field(default_factory=list)
-    find_others: bool = False  # also redact other people's names and numbers the detectors find
 
     @classmethod
     def load(cls, path: Path) -> "Profile":
@@ -72,7 +69,6 @@ class Profile:
             eins=[_number(e, "eins") for e in d.get("eins", [])],
             accounts=[_number(a, "accounts") for a in d.get("accounts", [])],
             cards=[_number(c, "cards") for c in d.get("cards", [])],
-            find_others=bool(d.get("find_others", False)),
         )
 
 
@@ -121,7 +117,6 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
     messages never repeat the value."""
     errors: dict[str, str] = {}  # paths use the row numbers as sent, empty rows included
     out: dict = {k: [] for k in ("people", "addresses", "phones", "emails", "eins", "accounts", "cards")}
-    out["find_others"] = bool(d.get("find_others"))
 
     def text(v) -> str:
         return " ".join(str(v or "").split())

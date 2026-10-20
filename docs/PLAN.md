@@ -24,7 +24,7 @@ A new document type should need no code change. If one leaks, the fix goes into 
 
 ## What gets redacted
 
-**Since 2026-10-19 the default is narrower:** only the values in Your details (in any format, including masked and last-4 forms) and anything SSN-shaped. The rest of this section, and the label, long-number, name-model and cross-document rules below, describe the opt-in `find_others` mode. On real documents those guesses caused cascading false failures (a caption or "Go to" taken for a name in one document then failed every other one), and the user only needs their own details removed.
+**Since 2026-10-19 only the values in Your details** (in any format, including masked and last-4 forms), anything SSN-shaped, and (since 2026-10-20) every barcode are removed. The guessing detectors described in the rest of this section and in M1–M4 below (labels, long numbers, the name model, cross-document values) were an opt-in mode until 2026-10-20 and have since been removed: on real documents they caused cascading false failures (a caption or "Go to" taken for a name in one document then failed every other one), and the user only needs their own details removed. The milestone notes below are kept as history.
 
 Redacted: SSN/ITIN/EIN, state tax IDs, account/routing/card numbers (including masked and last-4 forms), W-2 control numbers, names of people (taxpayer, spouse, dependents, employees, beneficiaries), street addresses, DOB, phone numbers, emails.
 
@@ -153,7 +153,7 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
     - Run on the untouched odd files, it fails each hiding place by itself.
   - **Corpus run in one shared workspace (new slow test):** this exposed a pre-M7 false positive. The label detector took the 1099-G footer "Rev. 12-2026" for an account number. Every later form printing that revision then failed. A month-year is no longer an ID value.
   - **Time:** 150 pages redact + verify in 50 s (47 s before; the raw scan and sanitizing cost ~7%).
-  - **Native wrapper:** pywebview runs the unchanged UI in a WKWebView window (`tools/native_window.py`). Recommendation and packaging notes in [`NATIVE.md`](NATIVE.md). The app's size (~1.1 GB) comes from torch and the name model, whichever wrapper is used.
+  - **Native wrapper:** pywebview runs the unchanged UI in a WKWebView window (`tools/native_window.py`). Recommendation and packaging notes in [`NATIVE.md`](NATIVE.md). The app's size (~1.1 GB then) came from torch and the name model, since removed (about 0.2 GB now).
   - UI fix: a "Verifying…" banner stayed up when a job finished before the first poll.
 
 ### After M7: Your details form ✅
@@ -168,21 +168,15 @@ Each milestone ends with its acceptance tests passing in CI-style `uv run pytest
 - A value OCR can't read at all can't be detected. The verifier OCRs the output the same way, so it can't see it either. Low-quality scans should be reviewed by eye (the review UI is M6).
 - Pictures layered on top of other pictures in a text PDF are untested.
 - A page rebuilt as an image (text layer didn't match the page) loses its text layer, like a scan.
-- With `find_others` on, values found in one document are checked for in every other document in the workspace (fail closed). A false positive in one document can therefore fail others until it is fixed or shown in the review UI. Off by default.
-- By default, anything you didn't list (a full account number, someone else's name) stays readable. Review is the check; "Add to my details" fixes it.
+- Anything you didn't list (a full account number, someone else's name) stays readable. Review is the check; "Add to my details" fixes it.
 - `/ActualText` is removed by matching strings after `/ActualText`, `/Alt` and `/E` in content streams, not by a full content-stream parser. The raw check catches any that survive.
-- No native app yet: `tools/native_window.py` is a spike. Bundling Tesseract and the name model, plus signing and notarization, is the remaining work ([`NATIVE.md`](NATIVE.md)).
-- A third party's name that is neither next to a label nor in prose (a name alone in a table cell, a heading that isn't a legal entity name) is not caught unless it also appears somewhere that is.
-- The name model can still miss a name; a surname alone is caught reliably only when the full name also appears in the document.
-- A bare 7+ digit number on a scan is treated as an ID, so an amount OCR misread without its decimal point (`15,158.60` read as `1515880`) is redacted. A few amounts per 300 on degraded scans.
+- No native app yet: `tools/native_window.py` is a spike. Bundling Tesseract, plus signing and notarization, is the remaining work ([`NATIVE.md`](NATIVE.md)).
 - The 150-page timing is on a 14-core M4 Pro; verification is CPU-bound, so a Mac with fewer cores will be slower.
 - Keeping a placeholder in the clear also keeps any shorter value that verification would otherwise flag inside it. It is a reviewer decision, and the review UI should make it a deliberate one.
 - Every reviewer change re-runs the whole document, which is slow for a long scan (a few seconds per page).
 - The UI renders every page image of a document (lazily); a several-hundred-page statement scrolls fine but zooming re-requests the images at the new resolution.
-- A merchant's or payer's own street address and phone are redacted by the patterns even when the organization is public (e.g. on a receipt). "Show it everywhere in this document" handles it per document.
-- The public vs. private organization split is a keyword heuristic (`bank`, `securities`, `charitable`… versus `LLC`, `LP`, `family trust`). The review UI (M6) is the backstop.
 - Your first and last names are matched on their own anywhere in the text, so a first name that is also a common word (e.g. "Grant") will be over-redacted.
-- The label detector was developed against the corpus layouts. Of four held-out types, one passed untouched and three needed generic fixes; expect real documents to find more gaps, which is what review (M6) is for.
+- A USPS Intelligent Mail barcode (the row of tall and short bars above a mailing address) isn't decoded, so it isn't blacked out; mark it by hand.
 
 ## Resolved (2026-10-16)
 

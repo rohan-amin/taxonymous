@@ -10,14 +10,12 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "en-core-web-trf",
     "fastapi>=0.143.3",
     "numpy>=2.5.4",
     "pillow>=13.0.0",
     "pillow-heif>=1.8.1",
     "pymupdf>=1.28.2",
     "python-multipart>=0.0.32",
-    "spacy>=3.8.16",
     "uvicorn>=0.54.0",
     "zxing-cpp>=3.1.1",
 ]
@@ -55,6 +53,3 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-
-[tool.uv.sources]
-en-core-web-trf = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.8.0/en_core_web_trf-3.8.0-py3-none-any.whl" }

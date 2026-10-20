@@ -120,7 +120,6 @@ class Household:
             "eins": [self.household_ein],
             "accounts": sorted(self.accounts.values()),
             "cards": [self.card],
-            "find_others": True,  # the corpus also tests the detectors that find third parties
         }
 
 

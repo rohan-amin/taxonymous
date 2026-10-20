@@ -193,19 +193,6 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
         </section>
       ))}
 
-      <section>
-        <h2>Anything else</h2>
-        <label className="check">
-          <input type="checkbox" checked={!!form.find_others} data-testid="find-others"
-                 onChange={(e) => change({ ...form, find_others: e.target.checked })} />
-          Also try to find other names and numbers that aren't listed here
-        </label>
-        <p className="muted small">
-          Other people's names, account and ID numbers, employers' EINs. It guesses, so it removes some
-          things it shouldn't, and verification can fail on them.
-        </p>
-      </section>
-
       <div className="details-foot">
         <button type="button" className="primary" onClick={save} disabled={saving}>
           {saving ? "Saving…" : "Save"}

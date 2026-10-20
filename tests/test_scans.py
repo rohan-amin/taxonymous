@@ -180,13 +180,11 @@ def _line(text: str) -> PageText:
 
 
 @pytest.mark.parametrize("line, value", [
-    ("VISA **##88*94444", "**##88*94444"),
     ("VISA ************1111 460.79", "************1111"),
     ("Card ending in 1111", "1111"),
-    ("Mastercard 5555 5555 5555 4444 AUTH 1234", "5555 5555 5555 4444"),
 ])
-def test_card_number_after_brand(matcher, line, value):
-    """However OCR mangled the mask, the whole number is covered (and nothing after it)."""
+def test_your_card_after_its_brand(matcher, line, value):
+    """Masked, the whole number is covered (and nothing after it)."""
     assert [f.text for f in detect(_line(line), matcher)] == [value]
 
 
@@ -263,11 +261,12 @@ def test_ids_touching_table_rules_get_boxes_their_own_size(tmp_path, dx, baselin
     blacked out rows, columns and amounts."""
     ws = Workspace(tmp_path)
     ws.init()
-    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}], "find_others": True}))
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}],
+                                           "accounts": ["0000123456", "000000000"]}))
     _ruled_table(ws.inbox / "w2_scan.pdf", dx, baseline)
     [outcome] = run(ws)
     assert outcome.report.passed, outcome.report.issues
-    ids = [r for r in outcome.result.regions if r.kind == "ID"]
+    ids = [r for r in outcome.result.regions if r.kind == "ACCT"]
     assert len({r.placeholder for r in ids}) == 2
     for r in ids:
         x0, y0, x1, y1 = r.rect

@@ -122,7 +122,6 @@ export interface Profile {
   accounts: Account[];
   eins: Ein[];
   cards: Card[];
-  find_others?: boolean; // also redact names and numbers that aren't listed
 }
 
 // what can be added to your details from a document in one step (profile.ITEMS)

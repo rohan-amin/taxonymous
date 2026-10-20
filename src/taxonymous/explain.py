@@ -31,7 +31,6 @@ from .detect import (
     is_number_value,
     number_regex,
     pattern_hits,
-    strong,
 )
 from .pagetext import PageText, extract
 from .profile import Profile
@@ -127,7 +126,7 @@ def _hits(text: str, values: list[Value], matcher: ProfileMatcher,
     match inside a longer one of the same kind (a first name inside the full name) is left out."""
     text = PLACEHOLDER_RE.sub(lambda m: " " * len(m.group()), text)
     out = [(kind, "it has the shape of one", m.start(), m.end())
-           for m, kind in pattern_hits(text, matcher.find_others)]
+           for m, kind in pattern_hits(text)]
     out += [(f.kind, "it is in your details", f.start, f.end) for f in matcher.find(PageText(0, text))]
     for v in values:
         out += [(v.kind, f"a value redacted in {v.origin}", m.start(), m.end())
@@ -142,22 +141,17 @@ def _hits(text: str, values: list[Value], matcher: ProfileMatcher,
     return sorted(kept, key=lambda h: h[2])
 
 
-def _values(ws_vault: Vault, regions: list[dict], used: dict[str, list[str]], others: bool) -> list[Value]:
+def _values(ws_vault: Vault, regions: list[dict]) -> list[Value]:
+    """The values this document's redaction removed, as verification looks for them."""
     here = {r["placeholder"] for r in regions}
-
-    def origin(ph):
-        if ph in here:
-            return "this document"
-        return f"another document ({', '.join(used[ph])}, as {ph[1:-1]})"
-    return [Value(e["kind"], v, origin(ph))
-            for ph, e in ws_vault.entries.items() if ph in used for v in e["values"]
-            if len(v.strip()) >= 4 and identifies(e["kind"], v)  # what verification looks for
-            and not MASK_RE.search(v)  # a masked form: its last four alone are no leak
-            and (ph in here or others and strong(e["kind"], v))]
+    return [Value(e["kind"], v, "this document")
+            for ph, e in ws_vault.entries.items() if ph in here for v in e["values"]
+            if len(v.strip()) >= 4 and identifies(e["kind"], v)
+            and not MASK_RE.search(v)]  # a masked form: its last four alone are no leak
 
 
 def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
-    from .pipeline import Workspace, allowed_values, users
+    from .pipeline import Workspace, allowed_values
     from .redact import Overrides, output_stem
 
     ws = Workspace(Path(workspace))
@@ -167,7 +161,7 @@ def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
     vault = Vault(ws.vault_dir / "placeholders.json")
     allowed = allowed_values(vault, Overrides.load(ws.overrides_path(stem)))
     regions = json.loads(out["regions"].read_text()) if out["regions"].exists() else []
-    values = [v for v in _values(vault, regions, users(ws), matcher.find_others) if v.text not in allowed]
+    values = [v for v in _values(vault, regions) if v.text not in allowed]
     source = next(p for p in ws.pending() if output_stem(p) == stem)
     original = pymupdf.open(source) if source.suffix.lower() == ".pdf" else None
     doc = pymupdf.open(out["pdf"])
@@ -334,8 +328,8 @@ def render(hits: list[Hit], issues: list[dict]) -> str:
     return "\n".join(lines)
 
 
-SOURCES = {"profile": "your details", "pattern": "its shape", "label": "a nearby label",
-           "ner": "the name model", "repeat": "appearing elsewhere in the document", "manual": "you"}
+SOURCES = {"profile": "your details", "pattern": "its shape", "repeat": "appearing elsewhere in the document",
+           "manual": "you", "barcode": "being a barcode"}
 
 
 def explain_placeholder(workspace, stem: str, placeholder: str) -> str:

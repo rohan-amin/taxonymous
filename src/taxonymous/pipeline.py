@@ -14,7 +14,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from .detect import ProfileMatcher, pattern_hits, strong
+from .detect import ProfileMatcher, pattern_hits
 from .pagetext import PageText
 from .profile import Profile
 from .progress import NONE, Progress
@@ -70,7 +70,7 @@ class Workspace:
             return stem
         matcher = _matcher(self.profile_path)
         spots = [(f.start, f.end, f.kind) for f in matcher.find(PageText(0, stem))]
-        spots += [(m.start(), m.end(), kind) for m, kind in pattern_hits(stem, matcher.find_others)]
+        spots += [(m.start(), m.end(), kind) for m, kind in pattern_hits(stem)]
         merged: list[list] = []
         for start, stop, kind in sorted(spots):
             # overlapping, or one name in pieces with an initial between ("Avery F Abernathy")
@@ -100,29 +100,6 @@ def placeholders_of(ws: Workspace, stem: str) -> set[str]:
     """The placeholders a document's last redaction uses."""
     regions = ws.outputs(stem)["regions"]
     return {r["placeholder"] for r in json.loads(regions.read_text())} if regions.exists() else set()
-
-
-def in_use(ws: Workspace, current: tuple[str, Result] | None = None) -> set[str]:
-    """Placeholders that some document's latest redaction uses: from each document's regions
-    file, or for the one being redacted now, from this run. A value the vault remembers from
-    an earlier run that nothing redacts any more (a detector mistake since fixed) isn't one."""
-    return set(users(ws, current))
-
-
-def users(ws: Workspace, current: tuple[str, Result] | None = None) -> dict[str, list[str]]:
-    """For each placeholder in use, the inbox file names of the documents that use it."""
-    out: dict[str, list[str]] = {}
-    for src in ws.pending():
-        stem = output_stem(src)
-        if current and stem == current[0]:
-            used = {r.placeholder for r in current[1].regions}
-        elif ws.outputs(stem)["regions"].exists():
-            used = {r["placeholder"] for r in json.loads(ws.outputs(stem)["regions"].read_text())}
-        else:
-            continue
-        for ph in used:
-            out.setdefault(ph, []).append(src.name)
-    return out
 
 
 def allowed_values(vault: Vault, overrides: Overrides) -> set[str]:
@@ -186,18 +163,18 @@ def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, ove
             known: list[Known], ocr: bool, result: Result | None, progress: Progress = NONE) -> Report:
     """Everything this document's redaction (`result`, None to check its last one) found, and
     the vault's values for the placeholders it uses, except what the reviewer kept in the
-    clear here: a whole placeholder, or single boxes. With `find_others`, also the values
-    other documents' redactions use, when they are telling (see `strong`)."""
+    clear here: a whole placeholder, or single boxes. Other documents don't count: each is
+    checked for your details, SSN shapes and its own redactions."""
     allowed = allowed_values(vault, overrides)
-    used = in_use(ws, (stem, result) if result else None)
     here = {r.placeholder for r in result.regions} if result else placeholders_of(ws, stem)
-    known = known + [Known(e["kind"], v) for ph in used & vault.entries.keys()
-                     for e in [vault.entries[ph]] for v in e["values"]
-                     if ph in here or matcher.find_others and strong(e["kind"], v)]
-    shown = [Shown(n, r, vault.entries.get(ph, {}).get("values", [])) for n, r, ph in overrides.show]
+    known = known + [Known(vault.entries[ph]["kind"], v) for ph in here & vault.entries.keys()
+                     for v in vault.entries[ph]["values"]]
+    shown = [Shown(n, r, e.get("values", []), e.get("key", ""))
+             for n, r, ph in overrides.show for e in [vault.entries.get(ph, {})]]
+    keys = [vault.entries[ph]["key"] for ph in overrides.keep if ph in vault.entries]
     out = ws.outputs(stem)
     return verify(out["pdf"], matcher, [k for k in known if k.value not in allowed], out["txt"], ocr=ocr,
-                  allowed=allowed, shown=shown, progress=progress)
+                  allowed=allowed, shown=shown, progress=progress, allowed_keys=keys)
 
 
 def reverify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, ocr: bool = True,

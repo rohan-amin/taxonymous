@@ -103,10 +103,10 @@ def _party_lines(rec: DocRecord, who: Org | Person, with_name: bool, with_phone:
             if with_phone:
                 lines.append(who.phone)
         else:
-            rec.add_redact(who.name, "ORG_PRIVATE")
-            lines += [rec.add_redact(x, "ADDRESS") for x in who.address.lines()]
+            rec.add_redact(who.name, "ORG_PRIVATE", third_party=True)
+            lines += [rec.add_redact(x, "ADDRESS", third_party=True) for x in who.address.lines()]
             if with_phone:
-                lines.append(rec.add_redact(who.phone, "PHONE"))
+                lines.append(rec.add_redact(who.phone, "PHONE", third_party=True))
         return lines
     tp = who.third_party
     lines = [rec.add_redact(who.name, "NAME", tp)] if with_name else []
@@ -116,7 +116,9 @@ def _party_lines(rec: DocRecord, who: Org | Person, with_name: bool, with_phone:
 
 def _name(rec: DocRecord, who: Org | Person) -> str:
     if isinstance(who, Org):
-        return rec.add_keep(who.name, "ORG_PUBLIC") if who.public else rec.add_redact(who.name, "ORG_PRIVATE")
+        if who.public:
+            return rec.add_keep(who.name, "ORG_PUBLIC")
+        return rec.add_redact(who.name, "ORG_PRIVATE", third_party=True)
     return rec.add_redact(who.name, "NAME", who.third_party)
 
 
@@ -139,17 +141,17 @@ def fill(form: str, out_dir: Path, name: str, hh: Household, parties: Parties, s
             value = ""
             if ftype == "TIN":
                 if role == "issuer":
-                    value = rec.add_redact(parties.issuer_tin, "EIN")
+                    value = rec.add_redact(parties.issuer_tin, "EIN", third_party=True)
                 else:
                     value = rec.add_redact(parties.subject.ssn, "SSN", tp)
             elif ftype == "STATE_ID":
-                value = rec.add_redact(f"{hh.address.state}-{parties.issuer_tin[3:]}-1", "STATE_ID")
+                value = rec.add_keep(f"{hh.address.state}-{parties.issuer_tin[3:]}-1", "STATE_ID")
             elif ftype == "CONTROL":
-                value = rec.add_redact(f"C{parties.issuer_tin[3:]}{seed % 97:02d}", "CONTROL_NUMBER")
+                value = rec.add_keep(f"C{parties.issuer_tin[3:]}{seed % 97:02d}", "CONTROL_NUMBER")
             elif ftype == "ACCOUNT":
                 value = rec.add_redact(hh.accounts["brokerage" if "b" in form else "bank"], "ACCOUNT")
             elif ftype == "ROUTING":
-                value = rec.add_redact(hh.routing, "ROUTING")
+                value = rec.add_keep(hh.routing, "ROUTING")  # not in the profile
             elif ftype == "CUSIP":
                 value = rec.add_keep(cusip(Random(f"{seed}:{name}:cusip")), "CUSIP")
             elif ftype == "FIRST" and isinstance(who, Person):

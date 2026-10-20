@@ -1,4 +1,4 @@
-"""The default: only your details, and anything shaped like an SSN, are redacted."""
+"""Only your details, and anything shaped like an SSN, are redacted."""
 
 import json
 
@@ -53,11 +53,6 @@ def test_masked_and_last_four_forms_of_your_numbers_are_found():
     assert texts == ["XXX-XX-4323", "4323", "****8305", "8305"]
 
 
-def test_the_detectors_still_run_when_asked():
-    texts = found(*W2, details={**DETAILS, "find_others": True})
-    assert EIN in texts and "0047812" in texts
-
-
 def _workspace(tmp_path, details: dict) -> Workspace:
     ws = Workspace(tmp_path)
     ws.init()
@@ -74,18 +69,6 @@ def test_a_w2_passes_with_the_employer_left_readable(tmp_path):
     assert EIN in text and "Contoso Widgets LLC" in text and "Morgan Delacroix" in text
     for gone in ("Abernathy", SSN, OTHER_SSN, "Fenwick", "98458"):
         assert gone not in text, gone
-
-
-def test_what_another_document_redacted_fails_nothing_here(tmp_path):
-    """A name the detectors once took from a tax return ("Go to") isn't looked for in a
-    W-2 once they are off."""
-    ws = _workspace(tmp_path, {**DETAILS, "find_others": True})
-    _page(["Preparer Morgan Delacroix", f"Employee {NAME}"]).save(ws.inbox / "a_return.pdf")
-    assert run(ws, ocr=False)[0].report.passed
-    ws.profile_path.write_text(json.dumps(DETAILS))
-    _page([f"Employee {NAME}", "Prepared with Morgan Delacroix"]).save(ws.inbox / "b_w2.pdf")
-    outcomes = {o.source.name: o for o in run(ws, ocr=False)}
-    assert outcomes["b_w2.pdf"].report.passed, outcomes["b_w2.pdf"].report.issues
 
 
 def test_your_details_left_in_a_file_still_fail_it(tmp_path):

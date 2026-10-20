@@ -294,19 +294,19 @@ def k1_statement(out_dir: Path, hh: Household, seed: int) -> DocRecord:
     def amt(lo: float, hi: float) -> str:
         return "$" + rec.add_keep(amount(rng, lo, hi), "AMOUNT")
 
-    firm_name = rec.add_redact(firm.name, "ORG_PRIVATE")
+    firm_name = rec.add_redact(firm.name, "ORG_PRIVATE", third_party=True)
     doc = pymupdf.open()
     page = doc.new_page(width=LETTER.width, height=LETTER.height)
     pen = Pen(page, x=72, y=72)
     pen.line(firm_name, 13, bold=True)
-    pen.line(f"EIN {rec.add_redact(firm.ein, 'EIN')}", 9)
+    pen.line(f"EIN {rec.add_redact(firm.ein, 'EIN', third_party=True)}", 9)
     pen.skip(8)
     pen.line(f"Schedule K-1 (Form 1065), Tax Year {TAX_YEAR}: Statement A, Supplemental Information", 10,
              bold=True)
     pen.skip(6)
     pen.line(f"Partner: {rec.add_redact(tp.name, 'NAME')}", 10)
     pen.line(f"Partner's identifying number: {rec.add_redact('XXX-XX-' + tp.ssn[-4:], 'SSN_MASKED')}", 10)
-    pen.line(f"Capital account no. {rec.add_redact(capital, 'ACCOUNT')}", 10)
+    pen.line(f"Capital account no. {rec.add_keep(capital, 'ACCOUNT')}", 10)  # not in the profile
     pen.skip(12)
     pen.para(f"During {TAX_YEAR} the Partnership was managed by {full(gp)}, its general partner. "
              f"Following the death of {full(deceased)} in June, that interest passed to the estate, "
@@ -353,11 +353,11 @@ def pay_stub(out_dir: Path, hh: Household, seed: int) -> DocRecord:
     doc = pymupdf.open()
     page = doc.new_page(width=LETTER.width, height=LETTER.height / 2)
     pen = Pen(page, y=40)
-    pen.at(54, rec.add_redact(emp.name, "ORG_PRIVATE"), 11, bold=True)
+    pen.at(54, rec.add_redact(emp.name, "ORG_PRIVATE", third_party=True), 11, bold=True)
     pen.at(LETTER.width - 54, "Earnings Statement", 11, bold=True, right=True)
     pen.skip(13)
     for line in emp.address.lines():
-        pen.at(54, rec.add_redact(line, "ADDRESS"), 8)
+        pen.at(54, rec.add_redact(line, "ADDRESS", third_party=True), 8)
         pen.skip(10)
     pen.skip(8)
     left, right = 54, 330
@@ -371,7 +371,7 @@ def pay_stub(out_dir: Path, hh: Household, seed: int) -> DocRecord:
     pen.skip(11)
     pen.at(left, rec.add_redact(hh.address.city_line.upper(), "ADDRESS"), 8)
     pen.at(right, "Employee ID:", 8)
-    pen.at(420, rec.add_redact(f"{rng.randrange(100000, 999999)}", "EMPLOYEE_ID"), 8)
+    pen.at(420, rec.add_keep(f"{rng.randrange(100000, 999999)}", "EMPLOYEE_ID"), 8)
     pen.skip(11)
     pen.at(right, "SSN:", 8)
     pen.at(420, rec.add_redact("XXX-XX-" + tp.ssn[-4:], "SSN_MASKED"), 8)
@@ -426,8 +426,8 @@ def property_tax_bill(out_dir: Path, hh: Household, seed: int) -> DocRecord:
     pen.at(220, "Tax Account", 7, bold=True)
     pen.at(380, "Statement Date", 7, bold=True)
     pen.skip(10)
-    pen.at(54, rec.add_redact(parcel, "PARCEL"), 9)
-    pen.at(220, rec.add_redact(tax_acct, "ACCOUNT"), 9)
+    pen.at(54, rec.add_keep(parcel, "PARCEL"), 9)
+    pen.at(220, rec.add_keep(tax_acct, "ACCOUNT"), 9)  # not in the profile
     pen.at(380, f"02/14/{TAX_YEAR}", 9)
     pen.skip(20)
     pen.line("Taxpayer", 7, bold=True)

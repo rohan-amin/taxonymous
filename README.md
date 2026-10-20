@@ -20,7 +20,7 @@ Scrub personal identifiers from tax documents **on your own machine**, so you ca
 uv run taxonymous serve --workspace ~/Dropbox/Taxes/taxonymous  # creates the folders and opens it in your browser
 ```
 
-1. **Your details:** enter the names, SSNs, birth dates, addresses and account numbers to remove. They are saved only in the workspace's `vault/profile.json` and never uploaded. Only these (in any format, including masked forms like `XXX-XX-1234`) and anything shaped like an SSN are removed; everything else, such as an employer's name and EIN, stays readable. If review shows something of yours left in, **Add to my details** adds it and redacts the document again. To also guess at other people's names and numbers, turn on *Also try to find other names and numbers* (more false alarms).
+1. **Your details:** enter the names, SSNs, birth dates, addresses and account numbers to remove. They are saved only in the workspace's `vault/profile.json` and never uploaded. Only these (in any format, including masked forms like `XXX-XX-1234`) and anything shaped like an SSN are removed; everything else, such as an employer's name and EIN, stays readable. If review shows something of yours left in, **Add to my details** adds it and redacts the document again. Barcodes are blacked out whatever they hold.
 2. **Add files** (or drop PDFs and photos on the window), then **Run all**.
 3. Review each document, then **Export** it to `ready-to-upload/`.
 

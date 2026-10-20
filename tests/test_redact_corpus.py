@@ -32,10 +32,14 @@ def test_amounts_and_public_names_survive(redacted):
     assert not lost
 
 
-def test_third_party_identifiers_are_redacted_without_being_in_the_profile(redacted):
+def test_other_peoples_ssns_are_redacted_and_their_other_details_kept(redacted):
+    """A household employee's or a beneficiary's SSN goes though nobody listed it; their
+    name and other numbers stay (in `keep`, checked above)."""
     results, _ = redacted
-    third = [(name, i) for name, (d, _) in results.items() for i in d["redact"] if i["third_party"]]
-    assert {name for name, _ in third} >= {"w2_household_employee.pdf", "ira_statement.pdf"}
+    third = {name for name, (d, _) in results.items() for i in d["redact"] if i["third_party"]}
+    assert third, "the corpus has someone else's SSN somewhere"
+    kept = {name for name, (d, _) in results.items() for i in d["keep"] if i["type"] in ("NAME", "EIN")}
+    assert kept
 
 
 def test_outputs_are_scrubbed(redacted):

@@ -8,7 +8,7 @@ Checks, all fail-closed:
              wherever it is (catches hiding places the other checks don't render)
   text       the PDF text layer and the .txt contain no known value (anything redacted
              from this document, any profile value in any format) and no identifier-shaped
-             pattern (only SSN shapes, unless the profile's `find_others` is set);
+             pattern (SSN shapes);
              placeholders are ignored
   ocr        the same, on Tesseract OCR of every rendered page, so text that was only
              covered (not removed) or that lives in image pixels is still caught; matching
@@ -93,6 +93,7 @@ class Shown:
     page: int  # 0-based
     rect: tuple[float, float, float, float]
     values: list[str]
+    key: str = ""  # the identity it is a box of
 
 
 def _squash(s: str, fuzzy: bool = False) -> str:
@@ -110,9 +111,11 @@ def _digit_regex(ds: str, fuzzy: bool) -> re.Pattern:
 class Scanner:
     """Finds known values and identifier patterns in a block of text."""
 
-    def __init__(self, matcher: ProfileMatcher, known: list[Known], allowed: Iterable[str] = ()):
+    def __init__(self, matcher: ProfileMatcher, known: list[Known], allowed: Iterable[str] = (),
+                 keys: Iterable[str] = ()):
         self.matcher = matcher
         self.allowed = {_squash(a) for a in allowed}
+        self.keys = matcher.related(keys)  # identities left readable: any form of them
         self.numbers: list[tuple[str, re.Pattern, re.Pattern]] = []
         self.words: list[tuple[str, str, str, re.Pattern | None]] = []
         for k in known:
@@ -126,10 +129,18 @@ class Scanner:
             elif len(_squash(k.value).strip()) >= 4:
                 self.words.append((k.kind, _squash(k.value), _squash(k.value, True), _prose_regex(k)))
 
+    def _profile(self, text: str) -> list[str]:
+        """Kinds of your details in the text, except what the reviewer left readable: an allowed
+        value or identity, and the parts inside an allowed value (an allowed full name's
+        first name and surname)."""
+        finds = [f for f in self.matcher.find(PageText(0, text)) if f.key not in self.keys]
+        ok = [(f.start, f.end) for f in finds if _squash(f.text) in self.allowed]
+        return [f.kind for f in finds if not any(s <= f.start and f.end <= e for s, e in ok)]
+
     def known(self, text: str) -> list[str]:
         """Kinds of known values (not generic patterns) in raw file text: exact matches only."""
         text = PLACEHOLDER_RE.sub(" ", text)
-        found = [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
+        found = self._profile(text)
         squashed = _squash(text)
         found += [kind for kind, exact, _, rx in self.words if _word_in(exact, squashed, rx, text)]
         found += [kind for kind, exact, _ in self.numbers if _number_in(kind, exact, text)]
@@ -138,9 +149,9 @@ class Scanner:
     def scan(self, text: str, fuzzy: bool = False) -> list[str]:
         """Kinds of everything that should not be in this text."""
         text = PLACEHOLDER_RE.sub(" ", text)
-        found = [kind for m, kind in pattern_hits(text, self.matcher.find_others)
+        found = [kind for m, kind in pattern_hits(text)
                  if _squash(m.group()) not in self.allowed]
-        found += [f.kind for f in self.matcher.find(PageText(0, text)) if _squash(f.text) not in self.allowed]
+        found += self._profile(text)
         squashed = _squash(text, fuzzy)
         found += [kind for kind, exact, loose, rx in self.words
                   if _word_in(loose if fuzzy else exact, squashed, rx, text)]
@@ -296,10 +307,12 @@ def _passes(page: pymupdf.Page) -> tuple[str, ...]:
 
 def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | None = None,
            ocr: bool = True, allowed: Iterable[str] = (), shown: list[Shown] = (),
-           progress: Progress = NONE) -> Report:
+           progress: Progress = NONE, allowed_keys: Iterable[str] = ()) -> Report:
+    """`allowed`: values the reviewer left readable everywhere; `allowed_keys` their
+    identities (a person, an account), so the same in any form is not a leak either."""
     report = Report(pdf=str(pdf), ocr=ocr)
-    allowed = list(allowed)
-    scanner = Scanner(matcher, known, allowed)
+    allowed, allowed_keys = list(allowed), list(allowed_keys)
+    scanner = Scanner(matcher, known, allowed, allowed_keys)
     try:
         doc = pymupdf.open(pdf)
         report.pages = doc.page_count
@@ -307,7 +320,8 @@ def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | N
         # a value left readable in one spot is in the file's raw text; the text and OCR
         # checks below hold it to that spot
         excused = [v for s in shown for v in s.values]
-        report.issues += _raw(doc, Scanner(matcher, known, [*allowed, *excused]))
+        report.issues += _raw(doc, Scanner(matcher, known, [*allowed, *excused],
+                                           [*allowed_keys, *(s.key for s in shown if s.key)]))
         if shown:
             doc = _without_shown(doc, list(shown))
         progress.start("checking", doc.page_count)
