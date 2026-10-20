@@ -291,3 +291,30 @@ def test_a_word_box_that_took_in_the_table_shrinks_to_its_text():
     assert same == normal  # ordinary words are left alone
     x0, y0, x1, y1 = tight.rect
     assert abs(y0 - top) <= 4 and abs(y1 - bottom) <= 4 and x0 >= 298 and abs(x1 - right) <= 4, tight.rect
+
+
+def test_a_value_only_verification_s_ocr_reads_is_read_again_at_its_resolution(tmp_path, monkeypatch):
+    """OCR can read a value at one resolution and miss it at another: the redactor reads a
+    page at 300 dpi, verification the output at 200. When verification's OCR finds one
+    the redactor's didn't, the page is read again at 200 dpi too. Here the 300 dpi read
+    is made to see nothing."""
+    ws = Workspace(tmp_path)
+    ws.init()
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}],
+                                           "accounts": ["8320968305"]}))
+    page = pymupdf.open().new_page()
+    page.insert_text((72, 100), "Payment Date      Account Number      Amount", fontsize=11)
+    page.insert_text((72, 120), "04/15/2025        ****8305            1,250.00", fontsize=11)
+    out = pymupdf.open()
+    out.new_page(width=page.rect.width, height=page.rect.height).insert_image(
+        page.rect, pixmap=page.get_pixmap(dpi=300))
+    out.save(ws.inbox / "eftps.pdf")
+    monkeypatch.setattr(ocr, "variants", lambda img: [(Image.new(img.mode, img.size, "white"), None)])
+    [outcome] = run(ws)
+    assert outcome.report.passed, outcome.report.issues
+    assert any("read again at the resolution" in n for n in outcome.report.notes)
+    [box] = [r for r in outcome.result.regions if r.kind == "ACCT"]
+    x0, y0, x1, y1 = box.rect
+    assert 100 < x0 and x1 < 300 and 105 < y1 and y0 < 125, box  # over "****8305" on the page
+    monkeypatch.undo()
+    assert "125000" in read(ws.outputs("eftps")["pdf"])  # the amount stays

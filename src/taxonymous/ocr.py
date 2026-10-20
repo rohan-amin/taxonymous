@@ -26,6 +26,7 @@ from .pagetext import Line, PageText
 
 PASSES = ("3", "11")  # tesseract --psm: automatic layout, sparse text
 RENDER_DPI = 300  # for pages with no embedded scan to take the resolution from
+VERIFY_DPI = 200  # what verification reads each output page at
 MIN_DPI, MAX_DPI = 150, 400
 COLUMN_GAP = 1.5  # a gap wider than this many text heights splits an OCR line (form columns)
 SIZE_JUMP = 1.8  # so does a jump in text height (an amount next to a big printed year)

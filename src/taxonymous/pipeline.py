@@ -128,6 +128,7 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
     else:
         found = [Known(f.kind, f.text) for f in result.findings]
         report = _verify(ws, stem, matcher, vault, overrides, found, ocr, result, progress)
+        notes = []
         retry = _text_layer_mismatch(report, result)
         if retry:
             # what OCR sees on these pages isn't what their text layer says (a broken font
@@ -136,8 +137,20 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
             found = [Known(f.kind, f.text) for f in result.findings]
             report = _verify(ws, stem, matcher, vault, overrides, found, ocr, result, progress)
             pages = ", ".join(str(n + 1) for n in sorted(retry))
-            report.notes.append(f"Page(s) {pages}: the text layer didn't match what the page shows, "
-                                "so the page was rebuilt as an image from OCR.")
+            notes.append(f"Page(s) {pages}: the text layer didn't match what the page shows, "
+                         "so the page was rebuilt as an image from OCR.")
+        missed = _missed_by_ocr(report, result)
+        if missed:
+            # verification's OCR read something the redactor's reads of the original didn't
+            # (they are at a higher resolution): read those pages at verification's too
+            result = redact_file(src, ws.work, matcher, vault, overrides, as_images=retry, progress=progress,
+                                 as_verified=missed)
+            found = [Known(f.kind, f.text) for f in result.findings]
+            report = _verify(ws, stem, matcher, vault, overrides, found, ocr, result, progress)
+            pages = ", ".join(str(n + 1) for n in sorted(missed))
+            notes.append(f"Page(s) {pages}: OCR of the output read something the first reading missed, "
+                         "so the page was read again at the resolution verification uses.")
+        report.notes += notes
         if result.moved:
             pages = ", ".join(map(str, result.moved))
             report.notes.append(f"Page(s) {pages}: removing text moved the text around it (this file "
@@ -160,6 +173,12 @@ def _text_layer_mismatch(report: Report, result: Result) -> frozenset[int]:
     return frozenset(i.page - 1 for i in report.issues
                      if i.check == "ocr" and i.page and i.page not in result.image_pages
                      and (i.page, i.kind) not in in_text)
+
+
+def _missed_by_ocr(report: Report, result: Result) -> frozenset[int]:
+    """0-based pages built from OCR where OCR of the output still found something."""
+    return frozenset(i.page - 1 for i in report.issues
+                     if i.check == "ocr" and i.page and i.page in result.image_pages)
 
 
 def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, overrides: Overrides,

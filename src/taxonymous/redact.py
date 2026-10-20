@@ -149,6 +149,8 @@ class _Ocr:
     dpi: float = 0
     reads: list[tuple[PageText, list[ocr.Word]]] = field(default_factory=list)
     found: list[tuple[PageText, Finding]] = field(default_factory=list)
+    # more pictures of the page to read, each with the matrix onto `img`'s pixels
+    extra: list[tuple[Image.Image, pymupdf.Matrix]] = field(default_factory=list)
 
 
 def output_stem(src: Path) -> str:
@@ -197,26 +199,32 @@ def _image(page: pymupdf.Page, dpi: float) -> Image.Image:
     return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
 
-def _render(page: pymupdf.Page) -> _Ocr:
+def _render(page: pymupdf.Page, as_verified: bool = False) -> _Ocr:
+    """`as_verified`: also read the page at the resolution verification reads the output
+    at; OCR can see a value at one and not at the other."""
     dpi = _dpi(page)
     img = _image(page, dpi)
-    return _Ocr(page.number, img, page.rect.width / img.width, dpi)
+    p = _Ocr(page.number, img, page.rect.width / img.width, dpi)
+    if as_verified and round(dpi) != ocr.VERIFY_DPI:
+        low = _image(page, ocr.VERIFY_DPI)
+        p.extra.append((low, pymupdf.Matrix(img.width / low.width, img.height / low.height)))
+    return p
 
 
 def _read_pages(doc: pymupdf.Document, numbers: list[int], matcher: ProfileMatcher,
-                progress: Progress = NONE) -> list[_Ocr]:
+                progress: Progress = NONE, as_verified: frozenset[int] = frozenset()) -> list[_Ocr]:
     out = []
     for i in range(0, len(numbers), OCR_BATCH):
-        batch = [_render(doc[n]) for n in numbers[i:i + OCR_BATCH]]
+        batch = [_render(doc[n], n in as_verified) for n in numbers[i:i + OCR_BATCH]]
         _read_all(batch, matcher, progress)
         for p in batch:
-            p.img = None  # rendered again if the page is rebuilt
+            p.img, p.extra = None, []  # rendered again if the page is rebuilt
         out += batch
     return out
 
 
 def _read_all(pages: list[_Ocr], matcher: ProfileMatcher, progress: Progress = NONE) -> None:
-    views = [(p, ocr.variants(p.img)) for p in pages]
+    views = [(p, ocr.variants(p.img) + p.extra) for p in pages]
     jobs = [(ocr.png(img), psm) for _, vs in views for img, _ in vs for psm in ocr.PASSES]
     done = progress.per_page([len(vs) * len(ocr.PASSES) for _, vs in views])
     tsvs = iter(ocr.run_all(jobs, tsv=True, done=done))
@@ -376,10 +384,12 @@ def _image_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
 
 def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 overrides: Overrides | None = None, as_images: frozenset[int] = frozenset(),
-                progress: Progress = NONE, text_too: frozenset[int] = frozenset()) -> Result:
+                progress: Progress = NONE, text_too: frozenset[int] = frozenset(),
+                as_verified: frozenset[int] = frozenset()) -> Result:
     """`as_images`: 0-based pages to rebuild from OCR even though they have a text layer
     (one that doesn't match what the page shows). `text_too`: those of them whose text
-    layer is right (only redacting it went wrong): what it has is blacked out as well."""
+    layer is right (only redacting it went wrong): what it has is blacked out as well.
+    `as_verified`: pages read by OCR to read at verification's resolution too."""
     src, out_dir = Path(src), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = output_stem(src)
@@ -421,7 +431,8 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
             # from what they show (their text layer is still right)
             doc.close()
             retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | broken,
-                                progress=progress, text_too=text_too | broken)
+                                progress=progress, text_too=text_too | broken,
+                                as_verified=as_verified)
             retry.moved = sorted(set(retry.moved) | {n + 1 for n in broken})
             return retry
         # pass 1: find everything, on every page
@@ -442,7 +453,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 mixed_numbers.append(page.number)
             else:
                 progress.step()
-        read = _read_pages(doc, scan_numbers + mixed_numbers, matcher, progress)
+        read = _read_pages(doc, scan_numbers + mixed_numbers, matcher, progress, as_verified)
         scans, mixed = read[:len(scan_numbers)], {p.number: p for p in read[len(scan_numbers):]}
         # the reviewer's keeps
         text_pages = {n: (pt, [f for f in fs if wanted(f)]) for n, (pt, fs) in text_pages.items()}
@@ -486,7 +497,8 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         doc.close()
         rebuild = {n - 1 for n in result.moved}
         retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | rebuild,
-                            progress=progress, text_too=text_too | rebuild)
+                            progress=progress, text_too=text_too | rebuild,
+                            as_verified=as_verified)
         retry.moved = sorted(set(retry.moved) | set(result.moved))
         return retry
     drawn = [glyphs(page) for page in doc]  # to check the saved file against
@@ -510,7 +522,8 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     if shifted - {n - 1 for n in result.image_pages}:
         out.close()
         retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | shifted,
-                            progress=progress, text_too=text_too | shifted)
+                            progress=progress, text_too=text_too | shifted,
+                            as_verified=as_verified)
         retry.moved = sorted(set(retry.moved) | set(result.moved) | {n + 1 for n in shifted})
         return retry
     pages = [f"=== Page {p.number + 1} ===\n"

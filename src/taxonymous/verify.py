@@ -56,7 +56,7 @@ MASK_RE = re.compile(r"[*Xx•#]{2,}")
 CONFUSABLE = {"0": "0Oo", "1": "1Il|i", "2": "2Z", "5": "5S", "6": "6b", "8": "8B", "9": "9g"}
 # letters OCR swaps for each other in words ("Iyer" read as "lyer")
 LETTER_FOLD = str.maketrans({"l": "i", "1": "i", "|": "i", "!": "i", "0": "o", "5": "s", "8": "b"})
-OCR_DPI = 200
+OCR_DPI = ocr_mod.VERIFY_DPI
 DENSE_CHARS = 1500  # a page with more text than this and no images is read with one OCR pass
 
 
