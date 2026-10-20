@@ -563,6 +563,10 @@ def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], va
         strips.append(rect)  # a reviewer's box takes everything it touches
         result.region(page.number, rect, ph, "REDACTED", "manual")
         _add_label(labels, rect, ph)
+    if not boxes:
+        for rect, ph in labels:
+            _label(page, rect, ph)
+        return  # nothing to remove, nothing rewritten
     before = glyphs(page)
     for rect in boxes:
         page.add_redact_annot(rect, fill=(0, 0, 0))

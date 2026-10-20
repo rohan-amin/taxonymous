@@ -214,6 +214,10 @@ class ProfileMatcher:
             mid = rf"(?:\s+(?:{initial})\b(?:\.|,(?=\s))?){{0,2}}"
             add(rf"\b{f}{mid}\s*(?<=[\s.,]){last_}\b", "NAME", key)
             add(rf"\b{last_}(?:,\s*|\s+){f}{mid}", "NAME", key)
+            # a joint name gives the surname once: "Avery F. & Jordan K. Abernathy"; the first
+            # name and an initial with a dot, or before "&" / "and", are this person
+            add(rf"\b(?:{f}|{re.escape(first.upper())})(?:\s+[A-Z]\.){{1,2}}", "NAME", key, 0)
+            add(rf"\b{f}(?:\s+(?:{initial})\b\.?){{1,2}}(?=\s*(?:&|\band\b))", "NAME", key)
             if len(first) > 2:
                 add(rf"\b(?:{f}|{re.escape(first.upper())})\b", "NAME", key, 0)
             if len(last) > 2:

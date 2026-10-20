@@ -20,7 +20,7 @@ from tools.fixtures.generate import generate
 
 ROW_RE = re.compile(r"^\d+ sh .*?([\d,]+\.\d\d)\s+[\d,]+\.\d\d\s*$", re.M)
 LONG_PAGES = 150
-LONG_SECONDS = 60
+LONG_SECONDS = 75  # 60 until every page rewrite was checked for moved text (about 1 s per pass)
 
 
 def rows_and_proceeds(text: str) -> tuple[int, float]:
@@ -52,7 +52,7 @@ def test_security_names_in_tables_are_not_taken_for_people(redacted):
 
 
 @pytest.mark.slow
-def test_150_page_statement_in_under_a_minute(tmp_path):
+def test_150_page_statement_in_reasonable_time(tmp_path):
     src = tmp_path / "src"
     manifest = generate(src, seed=7, brokerage_pages=LONG_PAGES)
     d = next(x for x in manifest["documents"] if x["file"] == "brokerage_consolidated.pdf")

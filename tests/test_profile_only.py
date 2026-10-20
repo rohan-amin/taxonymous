@@ -119,3 +119,14 @@ def test_a_birth_date_is_found_however_a_form_prints_it():
                                   "Avery Q. Abernathy", "Avery F. J. Abernathy"])
 def test_a_name_with_its_middle_initial_is_found_whole(text):
     assert found(f"Employee {text} Wages 100.00") == [text]
+
+
+def test_a_joint_name_keeps_no_initial():
+    """The surname is given once: "Avery F. & Jordan K. Abernathy"."""
+    details = {**DETAILS, "people": [*DETAILS["people"], {"name": "Jordan K Abernathy", "role": "spouse"}]}
+    for text, whole in [("Avery F. & Jordan K. Abernathy", ["Avery F.", "Jordan K. Abernathy"]),
+                        ("AVERY F & JORDAN K ABERNATHY", ["AVERY F", "JORDAN K ABERNATHY"]),
+                        ("Avery F and Jordan Abernathy", ["Avery F", "Jordan Abernathy"])]:
+        texts = found(text, details=details)
+        assert texts == whole, (text, texts)
+    assert found("Avery Fund", "Avery is here", details=details) == ["Avery", "Avery"]
