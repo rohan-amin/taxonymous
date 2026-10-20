@@ -178,7 +178,7 @@ def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
             if page and original is not None and page <= original.page_count:
                 reading = extract(original[page - 1]).text
                 hit.split = not _regex(Value(kind, value, ""), fuzzy=False).search(reading)
-                if hit.split and ocr:
+                if (hit.split or check == "ocr") and ocr:  # only OCR saw it: how did the redactor's?
                     hit.reads = ocr_reads(original[page - 1], matcher, value)
 
     pages_with = {(i["check"], i["page"]) for i in report["issues"]}
@@ -311,6 +311,8 @@ def render(hits: list[Hit], issues: list[dict]) -> str:
         lines.append(f"    {h.context}")
         if h.split:
             lines.append("    not in one piece in the redactor's reading of the original page")
+        if h.reads:
+            lines.append("    the redactor's OCR of the original, where those digits are:")
             lines += [f"      {r}" for r in h.reads]
         if h.where:
             lines.append(f"    in {h.where}")

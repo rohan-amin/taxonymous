@@ -189,7 +189,8 @@ def _structure(doc: pymupdf.Document) -> list[Issue]:
         issues.append(Issue("structure", "attachments"))
     if doc.is_encrypted or doc.needs_pass:
         issues.append(Issue("structure", "encrypted"))
-    catalog = doc.xref_object(doc.pdf_catalog())
+    # a key set to null is gone, though MuPDF still writes it out ("/OpenAction null")
+    catalog = re.sub(r"/\w+\s+null\b", "", doc.xref_object(doc.pdf_catalog()))
     if "/JavaScript" in catalog or "/OpenAction" in catalog or "/AA" in catalog:
         issues.append(Issue("structure", "javascript-or-actions"))
     if "/AcroForm" in catalog:

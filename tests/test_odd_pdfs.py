@@ -87,6 +87,24 @@ def test_a_page_whose_text_redaction_moves_is_rebuilt_from_ocr(processed):
     assert any("moved the text around it" in n for n in outcome.report.notes)
 
 
+def test_a_rebuilt_page_with_a_right_text_layer_blacks_out_what_the_text_has(tmp_path, monkeypatch):
+    """OCR can misread a value on a page rebuilt because redaction moved its text; its
+    text layer is right, so what that finds is blacked out too."""
+    from taxonymous import ocr, redact
+
+    def blind(pages, matcher, progress=None):  # OCR that reads nothing
+        for p in pages:
+            p.reads = [(ocr.page_text([], p.number, p.scale), [])]
+            p.found = []
+    monkeypatch.setattr(redact, "_read_all", blind)
+    h = fake.household(7)
+    odd.flipped_coordinates(h, tmp_path / "w2.pdf")
+    matcher = ProfileMatcher(Profile.from_dict(h.profile()))
+    result = redact.redact_file(tmp_path / "w2.pdf", tmp_path / "out", matcher, Vault(tmp_path / "v.json"))
+    assert result.moved == [1] and result.image_pages == [1]
+    assert {"SSN", "NAME", "ACCT"} <= {r.kind for r in result.regions}
+
+
 def test_pages_keep_their_visible_area_and_rotation(processed):
     _, _, _, outcomes = processed
     cropped = pymupdf.open(outcomes["outside_cropbox.pdf"].result.pdf)[0]

@@ -258,6 +258,22 @@ def _ocr_regions(p: _Ocr, vault: Vault, result: Result, within: list[pymupdf.Rec
     return out
 
 
+def _text_regions(pt: PageText, found: list[Finding], vault: Vault, result: Result,
+                  shown: list[pymupdf.Rect]) -> list[tuple[pymupdf.Rect, str, Finding]]:
+    """Padded rectangles over what the text layer found, for a page rebuilt as an image."""
+    out = []
+    for f in found:
+        rects = [r + (-1, -1, 1, 1) for r in pt.rects(f.start, f.end)]
+        if _is_shown(rects, shown):
+            continue
+        ph = vault.placeholder(f.kind, f.key, f.text)
+        if not any(g.page == f.page and g.key == f.key and g.text == f.text for g in result.findings):
+            result.findings.append(f)
+        result.placeholders[ph] = f.kind
+        out += [(r, ph, f) for r in rects]
+    return out
+
+
 def _substituted(pt: PageText, regions: list[tuple[pymupdf.Rect, str, Finding]]) -> str:
     """The OCR text with every redacted run replaced by its placeholder."""
     out: list[str] = []
@@ -342,9 +358,10 @@ def _image_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
 
 def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 overrides: Overrides | None = None, as_images: frozenset[int] = frozenset(),
-                progress: Progress = NONE) -> Result:
+                progress: Progress = NONE, text_too: frozenset[int] = frozenset()) -> Result:
     """`as_images`: 0-based pages to rebuild from OCR even though they have a text layer
-    (one that doesn't match what the page shows)."""
+    (one that doesn't match what the page shows). `text_too`: those of them whose text
+    layer is right (only redacting it went wrong): what it has is blacked out as well."""
     src, out_dir = Path(src), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = output_stem(src)
@@ -383,11 +400,15 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         sanitize(doc)  # only what the pages show is left to detect
         # pass 1: find everything, on every page
         text_pages: dict[int, tuple[PageText, list[Finding]]] = {}
+        scan_text: dict[int, tuple[PageText, list[Finding]]] = {}  # text_too pages
         scan_numbers, mixed_numbers = [], []
         progress.start("reading", doc.page_count)  # a page counts once its text (and OCR, if any) is read
         for page in doc:
             if page.number in as_images or not _visible_text(page):
                 scan_numbers.append(page.number)
+                if page.number in text_too:
+                    pt = extract(page)
+                    scan_text[page.number] = (pt, detect(pt, matcher))
                 continue
             pt = extract(page)
             text_pages[page.number] = (pt, detect(pt, matcher))
@@ -397,13 +418,16 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 progress.step()
         read = _read_pages(doc, scan_numbers + mixed_numbers, matcher, progress)
         scans, mixed = read[:len(scan_numbers)], {p.number: p for p in read[len(scan_numbers):]}
-        everything = [f for _, fs in text_pages.values() for f in fs] + [f for p in read for _, f in p.found]
+        everything = [f for _, fs in [*text_pages.values(), *scan_text.values()] for f in fs]
+        everything += [f for p in read for _, f in p.found]
         relink(everything, repeat_values(everything))
         # the reviewer's keeps apply after linking: keeping a full name keeps its parts too
         text_pages = {n: (pt, [f for f in fs if wanted(f)]) for n, (pt, fs) in text_pages.items()}
         for p in read:
             drop_kept(p)
-        everything = [f for _, fs in text_pages.values() for f in fs] + [f for p in read for _, f in p.found]
+        scan_text = {n: (pt, [f for f in fs if wanted(f)]) for n, (pt, fs) in scan_text.items()}
+        everything = [f for _, fs in [*text_pages.values(), *scan_text.values()] for f in fs]
+        everything += [f for p in read for _, f in p.found]
         values = repeat_values(everything)
 
         # pass 2: add what the rest of the document found, and redact
@@ -425,6 +449,10 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
             _repeat_ocr(p, values)
             drop_kept(p)
             regions = _ocr_regions(p, vault, result, shown=overrides.shown(p.number))
+            if p.number in scan_text:
+                pt, found = scan_text[p.number]
+                found = [f for f in merge(found + repeated(pt, found, values), pt) if wanted(f)]
+                regions += _text_regions(pt, found, vault, result, overrides.shown(p.number))
             regions += _manual_ocr(p, stem, manual.get(p.number, []), vault, result)
             texts[p.number] = _rebuild(doc, p, regions, p.number, result)
             result.image_pages.append(p.number + 1)
@@ -433,8 +461,9 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     if result.moved:
         # rebuild those pages from what they show, as a scan's are; the original draws them right
         doc.close()
-        retry = redact_file(src, out_dir, matcher, vault, overrides,
-                            as_images=as_images | {n - 1 for n in result.moved}, progress=progress)
+        moved = {n - 1 for n in result.moved}
+        retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | moved,
+                            progress=progress, text_too=text_too | moved)
         retry.moved = sorted(set(retry.moved) | set(result.moved))
         return retry
     doc.scrub(attached_files=True, clean_pages=True, embedded_files=True, hidden_text=True,

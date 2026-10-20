@@ -177,6 +177,7 @@ def flipped_coordinates(h: Household, out: Path) -> list[str]:
         esc = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
         ops.append(f"1 0 0 1 72 {72 + i * 18} Tm ({esc}) '")
     _append_stream(doc, page, "\n".join([*ops, "ET", "Q"]).encode("latin-1"))
+    doc.xref_set_key(doc.pdf_catalog(), "OpenAction", "<< /S /JavaScript /JS (this.print\\(\\);) >>")
     doc.save(out)
     return _values(h)
 
