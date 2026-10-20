@@ -289,6 +289,50 @@ def white_and_tiny(h: Household, out: Path) -> list[str]:
     return _values(h)
 
 
+def barcodes(h: Household, out: Path, rotation: int = 0) -> list[str]:
+    """A state return's 2D barcode holding the return's data, as a picture, and a QR code
+    and a linear barcode of the SSN drawn as bars (a payment voucher)."""
+    import numpy as np
+    import zxingcpp
+
+    p = h.taxpayer
+    doc = pymupdf.open()
+    page = doc.new_page()
+    _write(page, _lines(h))
+    data = f"{p.name}|{p.ssn}|{_account(h)}|1234.56"
+    pdf417 = np.asarray(zxingcpp.create_barcode(data, zxingcpp.PDF417).to_image(scale=2))
+    page.insert_image(pymupdf.Rect(72, 300, 72 + pdf417.shape[1] * 0.6, 300 + pdf417.shape[0] * 0.6),
+                      stream=_png(pdf417))
+    for fmt, x, y, module in [(zxingcpp.QRCode, 72, 450, 1.6), (zxingcpp.Code128, 300, 450, 1.0)]:
+        bits = np.asarray(zxingcpp.create_barcode(p.ssn, fmt).to_image(scale=1)) < 128
+        shape = page.new_shape()
+        for row, line in enumerate(bits):  # each run of dark modules on a row is one rectangle
+            col = 0
+            while col < len(line):
+                if line[col]:
+                    end = col
+                    while end < len(line) and line[end]:
+                        end += 1
+                    shape.draw_rect(pymupdf.Rect(x + col * module, y + row * module,
+                                                 x + end * module, y + (row + 1) * module))
+                    col = end
+                else:
+                    col += 1
+        shape.finish(fill=(0, 0, 0), color=None, width=0)
+        shape.commit()
+    page.set_rotation(rotation)
+    doc.save(out)
+    return _values(h)
+
+
+def _png(gray) -> bytes:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.fromarray(gray).save(buf, "PNG")
+    return buf.getvalue()
+
+
 def covered_by_image(h: Household, out: Path) -> list[str]:
     """Identifiers under an opaque picture (a lazy 'redaction')."""
     doc = pymupdf.open()
@@ -424,6 +468,8 @@ BUILDERS: dict[str, Callable[[Household, Path], list[str]]] = {
     "invisible_text.pdf": invisible_text,
     "white_and_tiny.pdf": white_and_tiny,
     "covered_by_image.pdf": covered_by_image,
+    "barcodes.pdf": barcodes,
+    "barcodes_rotated.pdf": lambda h, o: barcodes(h, o, rotation=90),
     "actual_text.pdf": actual_text,
     "bookmarks.pdf": bookmarks,
     "orphan_object.pdf": orphan_object,

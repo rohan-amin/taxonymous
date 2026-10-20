@@ -109,6 +109,39 @@ def test_a_rebuilt_page_with_a_right_text_layer_blacks_out_what_the_text_has(tmp
     assert {"SSN", "NAME", "ACCT"} <= {r.kind for r in result.regions}
 
 
+@pytest.mark.parametrize("name", ["barcodes.pdf", "barcodes_rotated.pdf"])
+def test_barcodes_are_blacked_out(processed, name):
+    """A picture of a 2D barcode and two drawn as bars: each is found and covered, and
+    nothing of them is left to read."""
+    from taxonymous import barcode
+
+    _, ws, _, outcomes = processed
+    original = pymupdf.open(ws.inbox / name)
+    assert len(barcode.on_page(original[0])) == 3
+    outcome = outcomes[name]
+    assert sum(r.kind == "BARCODE" for r in outcome.result.regions) == 3
+    out = pymupdf.open(outcome.result.pdf)[0]
+    assert not barcode.on_page(out)
+    # the drawn ones' bars are gone from the file, not only covered
+    assert not [d for d in out.get_drawings() if d["rect"].width < 3 and d["fill"] == (0, 0, 0)]
+
+
+def test_a_scanned_barcode_is_blacked_out(tmp_path):
+    from taxonymous import barcode
+    from taxonymous.redact import redact_file
+
+    h = fake.household(7)
+    odd.barcodes(h, tmp_path / "drawn.pdf")
+    scan = pymupdf.open()
+    scan.new_page().insert_image(scan[0].rect, stream=pymupdf.open(tmp_path / "drawn.pdf")[0]
+                                 .get_pixmap(dpi=200).tobytes("png"))
+    scan.save(tmp_path / "scan.pdf")
+    matcher = ProfileMatcher(Profile.from_dict(h.profile()))
+    result = redact_file(tmp_path / "scan.pdf", tmp_path / "out", matcher, Vault(tmp_path / "v.json"))
+    assert result.image_pages == [1] and sum(r.kind == "BARCODE" for r in result.regions) == 3
+    assert not barcode.on_page(pymupdf.open(result.pdf)[0])
+
+
 def test_pages_keep_their_visible_area_and_rotation(processed):
     _, _, _, outcomes = processed
     cropped = pymupdf.open(outcomes["outside_cropbox.pdf"].result.pdf)[0]
@@ -126,6 +159,7 @@ def test_pages_keep_their_visible_area_and_rotation(processed):
     ("bookmarks.pdf", "raw"),
     ("orphan_object.pdf", "raw"),
     ("incremental_update.pdf", "raw"),
+    ("barcodes.pdf", "structure"),
 ])
 def test_the_verifier_alone_catches_each_hiding_place(processed, tmp_path, name, check):
     """The original file, as if the redactor had done nothing at all."""

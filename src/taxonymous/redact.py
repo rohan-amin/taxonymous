@@ -34,7 +34,7 @@ from pathlib import Path
 import pymupdf
 from PIL import Image, ImageDraw, ImageOps
 
-from . import ocr
+from . import barcode, ocr
 from .detect import Finding, ProfileMatcher, continue_numbers, detect, merge, relink, repeat_values, repeated
 from .pagetext import PageText, extract
 from .progress import NONE, Progress
@@ -322,11 +322,14 @@ def _manual_ocr(p: _Ocr, stem: str, boxes: list[pymupdf.Rect], vault: Vault, res
     return out
 
 
-def _rebuild(doc: pymupdf.Document, p: _Ocr, regions, at: int | None, result: Result) -> str:
+def _rebuild(doc: pymupdf.Document, p: _Ocr, regions, at: int | None, result: Result, vault: Vault,
+             stem: str) -> str:
     """Replace page `at` (or append) with the burned image; return its placeholder text."""
     img = p.img.copy() if p.img is not None else _image(doc[at], p.dpi)
     draw = ImageDraw.Draw(img)
     labels: list[tuple[pymupdf.Rect, str]] = []
+    for r in _barcodes(p.number, barcode.find(img, p.scale), stem, vault, result, labels):
+        draw.rectangle([r.x0 / p.scale, r.y0 / p.scale, r.x1 / p.scale, r.y1 / p.scale], fill=(0, 0, 0))
     for r, ph, f in regions:
         draw.rectangle([r.x0 / p.scale, r.y0 / p.scale, r.x1 / p.scale, r.y1 / p.scale], fill=(0, 0, 0))
         _add_label(labels, r, ph)
@@ -389,7 +392,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         drop_kept(photo)
         regions = _ocr_regions(photo, vault, result, shown=overrides.shown(0))
         regions += _manual_ocr(photo, stem, manual.get(0, []), vault, result)
-        texts[0] = _rebuild(doc, photo, regions, None, result)
+        texts[0] = _rebuild(doc, photo, regions, None, result, vault, stem)
         result.image_pages.append(1)
         progress.step()
     else:
@@ -462,7 +465,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 found = [f for f in merge(found + repeated(pt, found, values), pt) if wanted(f)]
                 regions += _text_regions(pt, found, vault, result, overrides.shown(p.number))
             regions += _manual_ocr(p, stem, manual.get(p.number, []), vault, result)
-            texts[p.number] = _rebuild(doc, p, regions, p.number, result)
+            texts[p.number] = _rebuild(doc, p, regions, p.number, result, vault, stem)
             result.image_pages.append(p.number + 1)
             progress.step()
 
@@ -518,6 +521,17 @@ def _strip(rect: pymupdf.Rect, chars: list[pymupdf.Rect]) -> pymupdf.Rect:
     return rect
 
 
+def _barcodes(number: int, rects: list[pymupdf.Rect], stem: str, vault: Vault, result: Result,
+              labels: list[tuple[pymupdf.Rect, str]]) -> list[pymupdf.Rect]:
+    """Record each barcode on a page as a box of its own (see `barcode`)."""
+    for i, rect in enumerate(rects):
+        ph = vault.placeholder("BARCODE", f"barcode:{stem}:{number}:{i}", "")
+        result.placeholders[ph] = "BARCODE"
+        result.region(number, rect, ph, "BARCODE", "barcode")
+        _add_label(labels, rect, ph)
+    return rects
+
+
 def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], vault: Vault,
                       result: Result, images: _Ocr | None, stem: str, manual: list[pymupdf.Rect],
                       shown: list[pymupdf.Rect]) -> None:
@@ -563,11 +577,17 @@ def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], va
         strips.append(rect)  # a reviewer's box takes everything it touches
         result.region(page.number, rect, ph, "REDACTED", "manual")
         _add_label(labels, rect, ph)
-    if not boxes:
-        for rect, ph in labels:
-            _label(page, rect, ph)
+    codes = _barcodes(page.number, barcode.on_page(page), stem, vault, result, labels)
+    if not boxes and not codes:
         return  # nothing to remove, nothing rewritten
     before = glyphs(page)
+    if codes:
+        # all of it: the pixels of a picture, the bars of a drawn one, a barcode font's characters
+        for rect in codes:
+            page.add_redact_annot(rect, fill=(0, 0, 0))
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,
+                              graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
+                              text=pymupdf.PDF_REDACT_TEXT_REMOVE)
     for rect in boxes:
         page.add_redact_annot(rect, fill=(0, 0, 0))
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,

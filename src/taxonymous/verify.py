@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pymupdf
 
+from . import barcode
 from . import ocr as ocr_mod
 from .detect import (
     NOT_AMOUNT,
@@ -312,6 +313,8 @@ def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | N
         progress.start("checking", doc.page_count)
         for page in doc:
             report.issues += [Issue("text", k, page.number + 1) for k in scanner.scan(page.get_text())]
+            if barcode.on_page(page):  # one that still reads: whatever it holds is in the file
+                report.issues.append(Issue("structure", "barcode", page.number + 1))
             if not ocr:
                 progress.step()
         if txt is not None:

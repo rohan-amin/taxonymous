@@ -19,6 +19,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "spacy>=3.8.16",
     "uvicorn>=0.54.0",
+    "zxing-cpp>=3.1.1",
 ]
 
 [project.scripts]
