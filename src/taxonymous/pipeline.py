@@ -142,14 +142,14 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
         missed = _missed_by_ocr(report, result)
         if missed:
             # verification's OCR read something the redactor's reads of the original didn't
-            # (they are at a higher resolution): read those pages at verification's too
+            # (another resolution, the JPEG): read the built pages as verification does too
             result = redact_file(src, ws.work, matcher, vault, overrides, as_images=retry, progress=progress,
                                  as_verified=missed)
             found = [Known(f.kind, f.text) for f in result.findings]
             report = _verify(ws, stem, matcher, vault, overrides, found, ocr, result, progress)
             pages = ", ".join(str(n + 1) for n in sorted(missed))
             notes.append(f"Page(s) {pages}: OCR of the output read something the first reading missed, "
-                         "so the page was read again at the resolution verification uses.")
+                         "so the redacted page was read again the way verification reads it.")
         report.notes += notes
         if result.moved:
             pages = ", ".join(map(str, result.moved))

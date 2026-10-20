@@ -293,11 +293,11 @@ def test_a_word_box_that_took_in_the_table_shrinks_to_its_text():
     assert abs(y0 - top) <= 4 and abs(y1 - bottom) <= 4 and x0 >= 298 and abs(x1 - right) <= 4, tight.rect
 
 
-def test_a_value_only_verification_s_ocr_reads_is_read_again_at_its_resolution(tmp_path, monkeypatch):
-    """OCR can read a value at one resolution and miss it at another: the redactor reads a
-    page at 300 dpi, verification the output at 200. When verification's OCR finds one
-    the redactor's didn't, the page is read again at 200 dpi too. Here the 300 dpi read
-    is made to see nothing."""
+def test_a_value_only_verification_s_ocr_reads_is_found_in_the_built_page(tmp_path, monkeypatch):
+    """OCR can read a value in the output and miss it in the original (another resolution,
+    the JPEG). When verification's OCR finds one the redactor's didn't, the built page is
+    read the way verification reads it, and what that finds is blacked out too. Here the
+    reads of the original are made to see nothing."""
     ws = Workspace(tmp_path)
     ws.init()
     ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}],
@@ -309,10 +309,12 @@ def test_a_value_only_verification_s_ocr_reads_is_read_again_at_its_resolution(t
     out.new_page(width=page.rect.width, height=page.rect.height).insert_image(
         page.rect, pixmap=page.get_pixmap(dpi=300))
     out.save(ws.inbox / "eftps.pdf")
-    monkeypatch.setattr(ocr, "variants", lambda img: [(Image.new(img.mode, img.size, "white"), None)])
+    original = ocr.variants  # 300 dpi reads of the original (2550 pixels wide) see nothing
+    monkeypatch.setattr(ocr, "variants", lambda img: [(Image.new(img.mode, img.size, "white"), None)]
+                        if img.width > 2000 else original(img))
     [outcome] = run(ws)
     assert outcome.report.passed, outcome.report.issues
-    assert any("read again at the resolution" in n for n in outcome.report.notes)
+    assert any("read again the way verification reads it" in n for n in outcome.report.notes)
     [box] = [r for r in outcome.result.regions if r.kind == "ACCT"]
     x0, y0, x1, y1 = box.rect
     assert 100 < x0 and x1 < 300 and 105 < y1 and y0 < 125, box  # over "****8305" on the page

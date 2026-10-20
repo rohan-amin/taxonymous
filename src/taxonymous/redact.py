@@ -28,6 +28,7 @@ drew to redact.
 import io
 import json
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -149,8 +150,6 @@ class _Ocr:
     dpi: float = 0
     reads: list[tuple[PageText, list[ocr.Word]]] = field(default_factory=list)
     found: list[tuple[PageText, Finding]] = field(default_factory=list)
-    # more pictures of the page to read, each with the matrix onto `img`'s pixels
-    extra: list[tuple[Image.Image, pymupdf.Matrix]] = field(default_factory=list)
 
 
 def output_stem(src: Path) -> str:
@@ -199,32 +198,26 @@ def _image(page: pymupdf.Page, dpi: float) -> Image.Image:
     return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
 
-def _render(page: pymupdf.Page, as_verified: bool = False) -> _Ocr:
-    """`as_verified`: also read the page at the resolution verification reads the output
-    at; OCR can see a value at one and not at the other."""
+def _render(page: pymupdf.Page) -> _Ocr:
     dpi = _dpi(page)
     img = _image(page, dpi)
-    p = _Ocr(page.number, img, page.rect.width / img.width, dpi)
-    if as_verified and round(dpi) != ocr.VERIFY_DPI:
-        low = _image(page, ocr.VERIFY_DPI)
-        p.extra.append((low, pymupdf.Matrix(img.width / low.width, img.height / low.height)))
-    return p
+    return _Ocr(page.number, img, page.rect.width / img.width, dpi)
 
 
 def _read_pages(doc: pymupdf.Document, numbers: list[int], matcher: ProfileMatcher,
-                progress: Progress = NONE, as_verified: frozenset[int] = frozenset()) -> list[_Ocr]:
+                progress: Progress = NONE) -> list[_Ocr]:
     out = []
     for i in range(0, len(numbers), OCR_BATCH):
-        batch = [_render(doc[n], n in as_verified) for n in numbers[i:i + OCR_BATCH]]
+        batch = [_render(doc[n]) for n in numbers[i:i + OCR_BATCH]]
         _read_all(batch, matcher, progress)
         for p in batch:
-            p.img, p.extra = None, []  # rendered again if the page is rebuilt
+            p.img = None  # rendered again if the page is rebuilt
         out += batch
     return out
 
 
 def _read_all(pages: list[_Ocr], matcher: ProfileMatcher, progress: Progress = NONE) -> None:
-    views = [(p, ocr.variants(p.img) + p.extra) for p in pages]
+    views = [(p, ocr.variants(p.img)) for p in pages]
     jobs = [(ocr.png(img), psm) for _, vs in views for img, _ in vs for psm in ocr.PASSES]
     done = progress.per_page([len(vs) * len(ocr.PASSES) for _, vs in views])
     tsvs = iter(ocr.run_all(jobs, tsv=True, done=done))
@@ -345,25 +338,46 @@ def _manual_ocr(p: _Ocr, stem: str, boxes: list[pymupdf.Rect], vault: Vault, res
     return out
 
 
+def _as_verified(img: Image.Image, scale: float, number: int) -> _Ocr:
+    """The built page as verification will read it: the JPEG on a page, rendered at its
+    resolution, read by OCR."""
+    tmp = pymupdf.open()
+    page = tmp.new_page(width=img.width * scale, height=img.height * scale)
+    page.insert_image(page.rect, stream=_jpeg(img))
+    pix = page.get_pixmap(dpi=ocr.VERIFY_DPI, colorspace=pymupdf.csGRAY)
+    low = Image.frombytes("L", (pix.width, pix.height), pix.samples)
+    return _Ocr(number, low, page.rect.width / pix.width, ocr.VERIFY_DPI)
+
+
+def _jpeg(img: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=JPEG_QUALITY)
+    return buf.getvalue()
+
+
 def _rebuild(doc: pymupdf.Document, p: _Ocr, regions, at: int | None, result: Result, vault: Vault,
-             stem: str) -> str:
-    """Replace page `at` (or append) with the burned image; return its placeholder text."""
+             stem: str, check: Callable[[_Ocr], list] | None = None) -> str:
+    """Replace page `at` (or append) with the burned image; return its placeholder text.
+    `check`: what more to black out, given the built page as verification reads it."""
     img = p.img.copy() if p.img is not None else _image(doc[at], p.dpi)
     draw = ImageDraw.Draw(img)
     labels: list[tuple[pymupdf.Rect, str]] = []
     for r in _barcodes(p.number, barcode.find(img, p.scale), stem, vault, result, labels):
         draw.rectangle([r.x0 / p.scale, r.y0 / p.scale, r.x1 / p.scale, r.y1 / p.scale], fill=(0, 0, 0))
-    for r, ph, f in regions:
-        draw.rectangle([r.x0 / p.scale, r.y0 / p.scale, r.x1 / p.scale, r.y1 / p.scale], fill=(0, 0, 0))
-        _add_label(labels, r, ph)
-        result.region(p.number, r, ph, f.kind, f.source)
-    buf = io.BytesIO()
-    img.save(buf, "JPEG", quality=JPEG_QUALITY)
+    more = regions
+    for _ in range(3 if check else 1):
+        for r, ph, f in more:
+            draw.rectangle([r.x0 / p.scale, r.y0 / p.scale, r.x1 / p.scale, r.y1 / p.scale], fill=(0, 0, 0))
+            _add_label(labels, r, ph)
+            result.region(p.number, r, ph, f.kind, f.source)
+        more = check(_as_verified(img, p.scale, p.number)) if check else []
+        if not more:
+            break
     width, height = img.width * p.scale, img.height * p.scale
     if at is not None:
         doc.delete_page(at)
     page = doc.new_page(at if at is not None else -1, width=width, height=height)
-    page.insert_image(page.rect, stream=buf.getvalue())
+    page.insert_image(page.rect, stream=_jpeg(img))
     for rect, ph in labels:
         _label(page, rect, ph)
     # the clearest pass becomes the text: most characters read with confidence
@@ -389,7 +403,8 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     """`as_images`: 0-based pages to rebuild from OCR even though they have a text layer
     (one that doesn't match what the page shows). `text_too`: those of them whose text
     layer is right (only redacting it went wrong): what it has is blacked out as well.
-    `as_verified`: pages read by OCR to read at verification's resolution too."""
+    `as_verified`: pages rebuilt from OCR to also read as verification will, once built:
+    what its OCR of the output finds is blacked out too."""
     src, out_dir = Path(src), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = output_stem(src)
@@ -405,6 +420,13 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
 
     def drop_kept(p: _Ocr) -> None:
         p.found = [(pt, f) for pt, f in p.found if wanted(f)]
+
+    def check(built: _Ocr) -> list[tuple[pymupdf.Rect, str, Finding]]:
+        """What OCR of a built page still reads: OCR can see a value in the output that it
+        didn't in the original (another resolution, JPEG), and verification reads the output."""
+        _read_all([built], matcher)
+        drop_kept(built)
+        return _ocr_regions(built, vault, result, shown=overrides.shown(built.number))
 
     if src.suffix.lower() in IMAGE_SUFFIXES:
         doc = pymupdf.open()
@@ -453,7 +475,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 mixed_numbers.append(page.number)
             else:
                 progress.step()
-        read = _read_pages(doc, scan_numbers + mixed_numbers, matcher, progress, as_verified)
+        read = _read_pages(doc, scan_numbers + mixed_numbers, matcher, progress)
         scans, mixed = read[:len(scan_numbers)], {p.number: p for p in read[len(scan_numbers):]}
         # the reviewer's keeps
         text_pages = {n: (pt, [f for f in fs if wanted(f)]) for n, (pt, fs) in text_pages.items()}
@@ -488,7 +510,8 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 found = [f for f in merge(found + repeated(pt, found, values), pt) if wanted(f)]
                 regions += _text_regions(pt, found, vault, result, overrides.shown(p.number))
             regions += _manual_ocr(p, stem, manual.get(p.number, []), vault, result)
-            texts[p.number] = _rebuild(doc, p, regions, p.number, result, vault, stem)
+            texts[p.number] = _rebuild(doc, p, regions, p.number, result, vault, stem,
+                                       check if p.number in as_verified else None)
             result.image_pages.append(p.number + 1)
             progress.step()
 
