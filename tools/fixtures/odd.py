@@ -161,11 +161,12 @@ def type3_broken_encoding(h: Household, out: Path) -> list[str]:
     return _type3_page(h, out, 1)
 
 
-def flipped_coordinates(h: Household, out: Path) -> list[str]:
+def flipped_coordinates(h: Household, out: Path, past_edge: bool = False) -> list[str]:
     """Coordinates that run down the page, set in one content stream and used in a later
     one, with a font drawn upside down to match, and lines shown with ' (next line, then
     show), as a payroll service's W-2 has them. MuPDF's redaction puts the text it keeps
-    in the wrong place on such a page, and misses what it should remove."""
+    in the wrong place on such a page, and misses what it should remove. With `past_edge`,
+    a box reaches past the page's edge, so cutting that away rewrites the page first."""
     doc = pymupdf.open()
     page = doc.new_page()
     font = _type3(doc, 0, flip=True)
@@ -176,7 +177,8 @@ def flipped_coordinates(h: Household, out: Path) -> list[str]:
     for i, line in enumerate(_lines(h)):
         esc = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
         ops.append(f"1 0 0 1 72 {72 + i * 18} Tm ({esc}) '")
-    _append_stream(doc, page, "\n".join([*ops, "ET", "Q"]).encode("latin-1"))
+    edge = [f"0 {page.rect.height - 20:g} 40 26 re f"] if past_edge else []
+    _append_stream(doc, page, "\n".join([*ops, "ET", *edge, "Q"]).encode("latin-1"))
     doc.xref_set_key(doc.pdf_catalog(), "OpenAction", "<< /S /JavaScript /JS (this.print\\(\\);) >>")
     doc.save(out)
     return _values(h)
@@ -405,6 +407,7 @@ BUILDERS: dict[str, Callable[[Household, Path], list[str]]] = {
     "type3.pdf": type3,
     "type3_broken_encoding.pdf": type3_broken_encoding,
     "flipped_coordinates.pdf": flipped_coordinates,
+    "flipped_past_edge.pdf": lambda h, o: flipped_coordinates(h, o, past_edge=True),
     "vector_text.pdf": vector_text,
     "letter_spaced.pdf": letter_spaced,
     "hidden_layer.pdf": hidden_layer,

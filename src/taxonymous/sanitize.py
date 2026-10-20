@@ -22,21 +22,32 @@ REPLACEMENT_RE = re.compile(rb"/(?:ActualText|Alt|E)(?=[\s(<])\s*")
 EDGE = 1.0  # points: content this far past the edge still counts as on the page
 
 
-def sanitize(doc: pymupdf.Document) -> None:
-    """Call after flattening annotations and form fields (their values are page text by then)."""
+def sanitize(doc: pymupdf.Document, skip: frozenset[int] = frozenset()) -> set[int]:
+    """Call after flattening annotations and form fields (their values are page text by then).
+    Returns the 0-based pages whose text cutting away what is off the page moved (see
+    `moved`): rebuild those from what they show. Pages in `skip` (being rebuilt anyway)
+    keep what is off the page; a picture of the page doesn't have it."""
     allow_list(doc)
     own_resources(doc)
     _strip_replacement_text(doc)
+    broken = set()
     for page in doc:
-        clip_to_visible(page)
+        if page.number in skip:
+            continue
+        before = glyphs(page)
+        if clip_to_visible(page) and moved(before, glyphs(page)):
+            broken.add(page.number)
+    return broken
 
 
 def allow_list(doc: pymupdf.Document) -> None:
     """Cut the document and page dictionaries down to the keys a page needs to display."""
     catalog = doc.pdf_catalog()
-    for key in doc.xref_get_keys(catalog):
-        if key not in CATALOG_KEYS:  # outline, page labels, layers, names, structure tree, forms...
-            doc.xref_set_key(catalog, key, "null")
+    kept = [(k, doc.xref_get_key(catalog, k)) for k in doc.xref_get_keys(catalog) if k in CATALOG_KEYS]
+    # written anew: a key set to null stays in the file as "/OpenAction null"
+    # (outline, page labels, layers, names, structure tree, forms, actions... all go)
+    entries = "".join(f" /{k} {v}" for k, (kind, v) in kept if kind != "null")
+    doc.update_object(catalog, f"<<{entries} >>")
     for xref in range(1, doc.xref_length()):
         kind = doc.xref_get_key(xref, "Type")[1]
         allowed = PAGE_KEYS if kind == "/Page" else PAGES_KEYS if kind == "/Pages" else None
@@ -153,6 +164,21 @@ def _strip_replacement_text(doc: pymupdf.Document) -> None:
             cleaned = strip_replacement_strings(data)
             if cleaned != data:
                 doc.update_stream(xref, cleaned)
+
+
+def glyphs(page: pymupdf.Page) -> set[tuple[str, int, int]]:
+    """Every character the page draws, where it starts, to the nearest point."""
+    return {(chr(c[0]), round(c[2][0]), round(c[2][1]))
+            for span in page.get_texttrace() for c in span["chars"]}
+
+
+def moved(before: set[tuple[str, int, int]], after: set[tuple[str, int, int]]) -> bool:
+    """Is any character drawn somewhere it wasn't before? MuPDF's redaction rewrites the
+    page's drawing code, and gets the place of text wrong when the page flips its
+    coordinates but the text doesn't: the text it keeps lands elsewhere, and what it should
+    have removed stays (it looked for it in the wrong place)."""
+    near = {(c, x + dx, y + dy) for c, x, y in before for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+    return not after <= near
 
 
 def outside(page: pymupdf.Page) -> list[pymupdf.Rect]:

@@ -36,7 +36,16 @@ from .detect import (
 from .pagetext import PageText, extract
 from .profile import Profile
 from .vault import Vault
-from .verify import BINARY_SUBTYPES, CONFUSABLE, OCR_DPI, PAGE_HEADER_RE, PLACEHOLDER_RE, _decode, _passes
+from .verify import (
+    BINARY_SUBTYPES,
+    CONFUSABLE,
+    MASK_RE,
+    OCR_DPI,
+    PAGE_HEADER_RE,
+    PLACEHOLDER_RE,
+    _decode,
+    _passes,
+)
 
 CONTEXT = 30  # characters either side, extended to whole words
 KEEP_WORDS = {w for w in FORM_WORDS if len(w) > 1} | {  # a lone letter can be an initial
@@ -143,6 +152,7 @@ def _values(ws_vault: Vault, regions: list[dict], used: dict[str, list[str]], ot
     return [Value(e["kind"], v, origin(ph))
             for ph, e in ws_vault.entries.items() if ph in used for v in e["values"]
             if len(v.strip()) >= 4 and identifies(e["kind"], v)  # what verification looks for
+            and not MASK_RE.search(v)  # a masked form: its last four alone are no leak
             and (ph in here or others and strong(e["kind"], v))]
 
 

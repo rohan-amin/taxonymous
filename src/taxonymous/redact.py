@@ -38,7 +38,7 @@ from . import ocr
 from .detect import Finding, ProfileMatcher, continue_numbers, detect, merge, relink, repeat_values, repeated
 from .pagetext import PageText, extract
 from .progress import NONE, Progress
-from .sanitize import allow_list, sanitize
+from .sanitize import allow_list, glyphs, moved, sanitize
 from .vault import Vault
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif", ".webp"}
@@ -397,7 +397,15 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         if doc.needs_pass:
             raise ValueError(f"{src.name} is password-protected; remove the password first")
         doc.bake(annots=True, widgets=True)
-        sanitize(doc)  # only what the pages show is left to detect
+        broken = sanitize(doc, skip=as_images)  # only what the pages show is left to detect
+        if broken:
+            # cutting away what is off the page moved their text: start again, and rebuild them
+            # from what they show (their text layer is still right)
+            doc.close()
+            retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | broken,
+                                progress=progress, text_too=text_too | broken)
+            retry.moved = sorted(set(retry.moved) | {n + 1 for n in broken})
+            return retry
         # pass 1: find everything, on every page
         text_pages: dict[int, tuple[PageText, list[Finding]]] = {}
         scan_text: dict[int, tuple[PageText, list[Finding]]] = {}  # text_too pages
@@ -500,21 +508,6 @@ def _strip(rect: pymupdf.Rect, chars: list[pymupdf.Rect]) -> pymupdf.Rect:
     return rect
 
 
-def _glyphs(page: pymupdf.Page) -> set[tuple[str, int, int]]:
-    """Every character the page draws, where it starts, to the nearest point."""
-    return {(chr(c[0]), round(c[2][0]), round(c[2][1]))
-            for span in page.get_texttrace() for c in span["chars"]}
-
-
-def _moved(before: set[tuple[str, int, int]], after: set[tuple[str, int, int]]) -> bool:
-    """Is any character drawn somewhere it wasn't before? MuPDF's redaction rewrites the
-    page's drawing code, and gets the place of text wrong when the page flips its
-    coordinates but the text doesn't: the text it keeps lands elsewhere, and what it should
-    have removed stays (it looked for it in the wrong place)."""
-    near = {(c, x + dx, y + dy) for c, x, y in before for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
-    return not after <= near
-
-
 def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], vault: Vault,
                       result: Result, images: _Ocr | None, stem: str, manual: list[pymupdf.Rect],
                       shown: list[pymupdf.Rect]) -> None:
@@ -560,7 +553,7 @@ def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], va
         strips.append(rect)  # a reviewer's box takes everything it touches
         result.region(page.number, rect, ph, "REDACTED", "manual")
         _add_label(labels, rect, ph)
-    before = _glyphs(page)
+    before = glyphs(page)
     for rect in boxes:
         page.add_redact_annot(rect, fill=(0, 0, 0))
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,
@@ -571,7 +564,7 @@ def _redact_text_page(page: pymupdf.Page, pt: PageText, found: list[Finding], va
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
                           graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
                           text=pymupdf.PDF_REDACT_TEXT_REMOVE)
-    if _moved(before, _glyphs(page)):
+    if moved(before, glyphs(page)):
         result.moved.append(page.number + 1)
     # placeholders go in after the real text is gone
     for rect, ph in labels:

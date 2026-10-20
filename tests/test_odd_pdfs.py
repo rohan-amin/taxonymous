@@ -80,9 +80,11 @@ def test_a_text_layer_that_doesnt_match_the_page_is_rebuilt_from_ocr(processed, 
     assert "rebuilt as an image" in outcome.report.notes[0]
 
 
-def test_a_page_whose_text_redaction_moves_is_rebuilt_from_ocr(processed):
-    """MuPDF misplaces text on a page with downward coordinates and ' lines."""
-    outcome = processed[3]["flipped_coordinates.pdf"]
+@pytest.mark.parametrize("name", ["flipped_coordinates.pdf", "flipped_past_edge.pdf"])
+def test_a_page_whose_text_redaction_moves_is_rebuilt_from_ocr(processed, name):
+    """MuPDF misplaces text on a page with downward coordinates and ' lines, when it
+    removes an identifier, or cuts away what reaches past the page's edge."""
+    outcome = processed[3][name]
     assert outcome.result.moved == [1] and outcome.result.image_pages == [1]
     assert any("moved the text around it" in n for n in outcome.report.notes)
 

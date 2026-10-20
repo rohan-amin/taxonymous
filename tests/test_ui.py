@@ -147,7 +147,8 @@ def test_mark_final_scrub_preview_and_export(page, site):
 
     page.get_by_role("button", name="Final scrub (1)").click()
     wait_banner(page, "Final scrub done")
-    assert page.locator(".scrubbed").count() == 1  # the preview outlines what was just removed
+    page.locator(".scrubbed").wait_for()  # the preview outlines what was just removed, once it reloads
+    assert page.locator(".scrubbed").count() == 1
     assert amount not in pymupdf.open(ws.outputs("k1_statement")["pdf"])[0].get_text()
 
     page.get_by_role("button", name="Export", exact=True).click()
