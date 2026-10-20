@@ -1,6 +1,11 @@
 """How is a PDF built? Its structure, without any of its text.
 
     uv run python -m tools.pdf_shape FILE.pdf [FILE.pdf ...]
+    uv run python -m tools.pdf_shape --ops PAGE FILE.pdf [FILE.pdf ...]
+
+--ops prints how one page (1-based PAGE) places its text: the text, position and
+graphics-state operators, with coordinates as they are and every letter and digit inside
+a text string masked (a/A, #). Lines, fills and colours are left out.
 
 For comparing an original with its redacted copy when redaction didn't take: how the file
 was saved (updates, repairs, encryption), what its catalog holds (forms, JavaScript), and
@@ -84,7 +89,62 @@ def shape(path: Path, label: str) -> list[str]:
     return out
 
 
+TOKEN_RE = re.compile(rb"""
+    (?P<str>\((?:\\.|[^\\()]|\((?:\\.|[^\\()])*\))*\))   # (string), one level of nesting
+  | (?P<hex><[0-9A-Fa-f\s]*>)
+  | (?P<other><<|>>|\[|\]|/[^\s/<>\[\]()%]*|[^\s/<>\[\]()%]+)
+  | (?P<comment>%[^\r\n]*)
+""", re.X | re.S)
+
+
+def _masked(token: bytes) -> str:
+    text = token.decode("latin-1")
+    return re.sub(r"\d", "#", re.sub(r"[a-z]", "a", re.sub(r"[A-Z]", "A", text)))
+
+
+TEXT_OPS = {"q", "Q", "cm", "BT", "ET", "Tf", "Td", "TD", "Tm", "T*", "TL", "Tc", "Tw", "Tz", "Ts", "Tr",
+            "Tj", "TJ", "'", '"', "Do", "ID"}
+
+
+def ops(data: bytes) -> list[str]:
+    """A content stream as lines of operands and operator, strings masked."""
+    lines, operands = [], []
+    pos = 0
+    while (m := TOKEN_RE.search(data, pos)):
+        pos = m.end()
+        if m.group("str") or m.group("hex"):
+            operands.append(_masked(m.group()) if m.group("str") else f"<{len(m.group()) // 2} bytes>")
+        elif m.group("other"):
+            t = m.group().decode("latin-1")
+            if re.fullmatch(r"[A-Za-z'\"*]+\d?\*?", t) and t not in ("true", "false", "null"):
+                if t in TEXT_OPS:
+                    lines.append(" ".join([*operands, t]))
+                operands = []
+                if t == "ID":  # inline image data up to EI
+                    end = data.find(b"EI", pos)
+                    pos = len(data) if end < 0 else end + 2
+                    lines.append("<inline image> EI")
+            else:
+                operands.append(t)
+    return lines
+
+
+def page_ops(path: Path, number: int) -> list[str]:
+    doc = pymupdf.open(path)
+    page = doc[number - 1]
+    out = []
+    for i, xref in enumerate(page.get_contents()):
+        out.append(f"--- content stream {i + 1} of {len(page.get_contents())} (object {xref})")
+        out += ops(doc.xref_stream(xref) or b"")
+    return out
+
+
 if __name__ == "__main__":
+    if sys.argv[1] == "--ops":
+        for i, arg in enumerate(sys.argv[3:]):
+            print(f"=== file {i + 1}, page {sys.argv[2]}")
+            print("\n".join(page_ops(Path(arg), int(sys.argv[2]))))
+        sys.exit()
     for i, arg in enumerate(sys.argv[1:]):  # not by name: a file name can hold yours
         print("\n".join(shape(Path(arg), f"file {i + 1}")))
         print()
