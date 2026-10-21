@@ -215,6 +215,16 @@ def test_a_school_district_is_found_as_the_state_return_prints_it():
     assert texts_of(lines, profile) == ["TACOMA UNION FREE"]
 
 
+def test_a_city_state_and_zip_in_boxes_of_their_own_are_found():
+    """A form prints them in boxes of their own, its state and ZIP can run together, and a
+    state alone is everywhere on a state return."""
+    profile = Profile.from_dict({"addresses": [{"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "WA",
+                                                "zip": "98458"}]})
+    lines = ["City, town, or post office TACOMA", "State ZIP code WA98458", "ZIP 98458-1234", "98458",
+             "WA IT-201", "Wages 98458.00", "Total 98,458", "Ref 1984581"]
+    assert texts_of(lines, profile) == ["TACOMA", "WA98458", "98458-1234", "98458"]
+
+
 def test_an_employer_is_found_however_it_is_printed():
     profile = Profile.from_dict({"people": [{"name": "Avery Abernathy", "employer": "Contoso Widgets, LLC"}]})
     assert texts_of(["Employer's name CONTOSO WIDGETS LLC", "Contoso"], profile) == ["CONTOSO WIDGETS LLC"]

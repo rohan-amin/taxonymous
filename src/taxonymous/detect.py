@@ -188,10 +188,17 @@ class ProfileMatcher:
                 alias = next((g for g in _SUFFIX_GROUPS if suffix in g), [re.escape(suffix)])
                 parts.append("(?:" + "|".join(alias) + r")\.?")
                 add(r"\b" + r"\s+".join(parts) + r"(?!\w)", "ADDR", key)
+            # a form prints them in boxes of their own ("SCARSDALE" | "NY" | "10583"), and its
+            # state and ZIP can run together ("NY10583"); a state alone ("NY") is everywhere
             if a.state and a.zip:
                 city = r"\s+".join(map(re.escape, a.city.split()))
                 town = rf"(?:{city},?\s+)?" if city else ""
-                add(rf"\b{town}{re.escape(a.state)}\s+{re.escape(a.zip)}(?:-\d{{4}})?\b", "ADDR", key)
+                add(rf"\b{town}{re.escape(a.state)}\s*{re.escape(a.zip)}(?:-\d{{4}})?(?!\d)", "ADDR", key)
+            if len(digits(a.zip)) >= 5:  # its own number, not part of an amount or a longer one
+                zip5 = digits(a.zip)[:5]
+                add(rf"(?<![\d,.$]){NOT_AMOUNT}{zip5}(?:-\d{{4}})?(?![\d,]|\.\d)", "ADDR", key, raw=False)
+            if len(a.city.strip()) >= 3:
+                add(phrase(a.city), "ADDR", key)
             if a.school_district:  # "Scarsdale Union Free", "SCARSDALE UNION FREE"
                 add(phrase(a.school_district), "ADDR", key)
 
