@@ -19,8 +19,6 @@ import pymupdf
 from . import ocr as ocr_mod
 from .detect import (
     FORM_WORDS,
-    NOT_AMOUNT,
-    NUMBER_SEP,
     PROSE_KINDS,
     ProfileMatcher,
     detect,
@@ -37,7 +35,6 @@ from .profile import Profile
 from .vault import Vault
 from .verify import (
     BINARY_SUBTYPES,
-    CONFUSABLE,
     MASK_RE,
     OCR_DPI,
     PAGE_HEADER_RE,
@@ -101,11 +98,7 @@ class Hit:
 
 def _regex(v: Value, fuzzy: bool) -> re.Pattern:
     if is_number_value(v.text):
-        ds = digits(v.text)
-        if fuzzy:
-            parts = [f"[{re.escape(CONFUSABLE.get(d, d))}]" for d in ds]
-            return re.compile(r"(?<![0-9])" + NOT_AMOUNT + NUMBER_SEP.join(parts) + r"(?![0-9])")
-        return re.compile(number_regex(ds))
+        return re.compile(number_regex(digits(v.text), fuzzy))
     words = re.findall(r"[A-Za-z0-9]+", v.text)
     between = r"[^A-Za-z0-9]+"
     return re.compile(r"(?<![A-Za-z0-9])" + between.join(map(re.escape, words)) + r"(?![A-Za-z0-9])", re.I)

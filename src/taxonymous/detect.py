@@ -78,13 +78,17 @@ NUMBER_SEP = r"[\s.\-()/,]{0,2}"  # what may sit between the digits of the same 
 # an amount ("61234.50", "1,234.56") is never a copy of a number, whatever its digits:
 # "6123450" (an OCR read that lost the point) must not black out the wages
 NOT_AMOUNT = r"(?![0-9][0-9,]*\.[0-9]{2}(?!\.?[0-9]))"
+# characters Tesseract commonly reads in place of each digit
+CONFUSABLE = {"0": "0Oo", "1": "1Il|i", "2": "2Z", "5": "5S", "6": "6b", "8": "8B", "9": "9g"}
 
 
-def number_regex(ds: str) -> str:
+def number_regex(ds: str, fuzzy: bool = False) -> str:
     """The digits `ds` however they are spaced or punctuated, as their own number (not
-    inside a longer one, and not an amount). Verification uses the same rule, so whatever
-    it would call a copy of a value, redaction finds too."""
-    return r"(?<![0-9])" + NOT_AMOUNT + NUMBER_SEP.join(ds) + r"(?![0-9])"
+    inside a longer one, and not an amount); `fuzzy`, as OCR may misread them too.
+    Verification uses the same rule, so whatever it would call a copy of a value,
+    redaction finds too."""
+    parts = [f"[{re.escape(CONFUSABLE.get(d, d))}]" if fuzzy else d for d in ds]
+    return r"(?<![0-9])" + NOT_AMOUNT + NUMBER_SEP.join(parts) + r"(?![0-9])"
 
 
 def is_number_value(text: str) -> bool:
@@ -399,14 +403,15 @@ def repeat_values(findings: list[Finding]) -> dict[str, Finding]:
     return values
 
 
-def repeated(pt: PageText, found: list[Finding], values: dict[str, Finding]) -> list[Finding]:
+def repeated(pt: PageText, found: list[Finding], values: dict[str, Finding],
+             fuzzy: bool = False) -> list[Finding]:
     """Occurrences of `values` on this page that nothing in `found` covers yet. A number is
-    found by its digits, however it is spaced or punctuated here."""
+    found by its digits, however it is spaced or punctuated here (`fuzzy`: or misread)."""
     taken = [(f.start, f.end) for f in found]
     out = []
     for text, f in values.items():
         if is_number_value(text):
-            pattern = number_regex(digits(text))
+            pattern = number_regex(digits(text), fuzzy)
         else:
             pattern = r"(?<!\w)" + r"\s+".join(map(re.escape, text.split())) + r"(?!\w)"
         for m in re.finditer(pattern, pt.text):

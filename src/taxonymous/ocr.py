@@ -118,10 +118,12 @@ def _lines(words: list[Word]) -> list[list[Word]]:
     return out
 
 
-def page_text(words: list[Word], number: int, scale: float, matrix: pymupdf.Matrix | None = None) -> PageText:
+def page_text(words: list[Word], number: int, scale: float, matrix: pymupdf.Matrix | None = None,
+              fold: bool = True) -> PageText:
     """A PageText in page points: pixels mapped through `matrix` (from a straightened
     copy back to the original image), then times `scale`. Character boxes are the
-    word box split evenly, close enough to cover a match inside a word."""
+    word box split evenly, close enough to cover a match inside a word. `fold`: digits
+    misread as letters put back (one character for one, so either text has the same boxes)."""
     pt = PageText(number=number)
     chunks: list[str] = []
     boxes: list[pymupdf.Rect | None] = []
@@ -138,7 +140,7 @@ def page_text(words: list[Word], number: int, scale: float, matrix: pymupdf.Matr
             if matrix is not None:
                 r = r * matrix
             x0, y0, x1, y1 = r.x0 * scale, r.y0 * scale, r.x1 * scale, r.y1 * scale
-            text = NUMBERISH_RE.sub(lambda m: _fold(m.group()), w.text)
+            text = NUMBERISH_RE.sub(lambda m: _fold(m.group()), w.text) if fold else w.text
             step = (x1 - x0) / len(text)
             for k, c in enumerate(text):
                 chunks.append(c)
@@ -155,8 +157,10 @@ def page_text(words: list[Word], number: int, scale: float, matrix: pymupdf.Matr
 
 
 def png(img: Image.Image) -> bytes:
+    """With the image's resolution, when it has one: Tesseract reads differently without it."""
     buf = io.BytesIO()
-    img.convert("L").save(buf, "PNG")
+    dpi = img.info.get("dpi")
+    img.convert("L").save(buf, "PNG", **({"dpi": dpi} if dpi else {}))
     return buf.getvalue()
 
 

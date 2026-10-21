@@ -35,8 +35,6 @@ import pymupdf
 from . import barcode
 from . import ocr as ocr_mod
 from .detect import (
-    NOT_AMOUNT,
-    NUMBER_SEP,
     PROSE_KINDS,
     ProfileMatcher,
     digits,
@@ -44,6 +42,7 @@ from .detect import (
     in_prose,
     incidental,
     is_number_value,
+    number_regex,
     pattern_hits,
 )
 from .pagetext import PageText
@@ -52,8 +51,6 @@ from .sanitize import CATALOG_KEYS, PAGE_KEYS, outside
 
 PLACEHOLDER_RE = re.compile(r"<[A-Z]+_[A-Z0-9]+>")
 MASK_RE = re.compile(r"[*Xx•#]{2,}")
-# characters Tesseract commonly reads in place of each digit
-CONFUSABLE = {"0": "0Oo", "1": "1Il|i", "2": "2Z", "5": "5S", "6": "6b", "8": "8B", "9": "9g"}
 # letters OCR swaps for each other in words ("Iyer" read as "lyer")
 LETTER_FOLD = str.maketrans({"l": "i", "1": "i", "|": "i", "!": "i", "0": "o", "5": "s", "8": "b"})
 OCR_DPI = ocr_mod.VERIFY_DPI
@@ -106,8 +103,7 @@ def _squash(s: str, fuzzy: bool = False) -> str:
 
 
 def _digit_regex(ds: str, fuzzy: bool) -> re.Pattern:
-    parts = [f"[{re.escape(CONFUSABLE.get(d, d))}]" if fuzzy else d for d in ds]
-    return re.compile(r"(?<![0-9])" + NOT_AMOUNT + NUMBER_SEP.join(parts) + r"(?![0-9])")
+    return re.compile(number_regex(ds, fuzzy))
 
 
 class Scanner:

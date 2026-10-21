@@ -320,3 +320,26 @@ def test_a_value_only_verification_s_ocr_reads_is_found_in_the_built_page(tmp_pa
     assert 100 < x0 and x1 < 300 and 105 < y1 and y0 < 125, box  # over "****8305" on the page
     monkeypatch.undo()
     assert "125000" in read(ws.outputs("eftps")["pdf"])  # the amount stays
+
+
+def test_the_built_page_is_searched_for_every_value_as_verification_reads_it(tmp_path, monkeypatch):
+    """Verification looks for every value the document redacts, in OCR's text as read, and
+    forgives misreads; so does the read of the built page. Here an SSN on the text page is
+    printed on the scanned one glued to letters ("AB98...", which putting digits back in
+    would make "A898..."), with an l for its last 1."""
+    ws = Workspace(tmp_path)
+    ws.init()
+    ws.profile_path.write_text(json.dumps({"people": [{"name": "Avery F Abernathy"}]}))
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Spouse SSN 987-65-4321", fontsize=11)
+    page = pymupdf.open().new_page()
+    page.insert_text((72, 100), "Voucher   2024   AB98765432l   06", fontsize=14)
+    doc.new_page(width=page.rect.width, height=page.rect.height).insert_image(
+        page.rect, pixmap=page.get_pixmap(dpi=300))
+    doc.save(ws.inbox / "voucher.pdf")
+    original = ocr.variants  # 300 dpi reads of the original (2550 pixels wide) see nothing
+    monkeypatch.setattr(ocr, "variants", lambda img: [(Image.new(img.mode, img.size, "white"), None)]
+                        if img.width > 2000 else original(img))
+    [outcome] = run(ws)
+    assert outcome.report.passed, outcome.report.issues
+    assert [r.page for r in outcome.result.regions if r.kind == "SSN"] == [0, 1]

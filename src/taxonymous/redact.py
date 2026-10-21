@@ -36,7 +36,17 @@ import pymupdf
 from PIL import Image, ImageDraw, ImageOps
 
 from . import barcode, ocr
-from .detect import Finding, ProfileMatcher, continue_numbers, detect, merge, repeat_values, repeated
+from .detect import (
+    SHORT,
+    Finding,
+    ProfileMatcher,
+    continue_numbers,
+    detect,
+    is_number_value,
+    merge,
+    repeat_values,
+    repeated,
+)
 from .pagetext import PageText, extract
 from .progress import NONE, Progress
 from .sanitize import allow_list, glyphs, moved, sanitize
@@ -149,7 +159,13 @@ class _Ocr:
     scale: float
     dpi: float = 0
     reads: list[tuple[PageText, list[ocr.Word]]] = field(default_factory=list)
+    # the reads as OCR gave them, where they differ: putting digits back can glue a value to
+    # the letters around it ("AB987654321" -> "A8987654321"), and verification reads these
+    raw: list[PageText] = field(default_factory=list)
     found: list[tuple[PageText, Finding]] = field(default_factory=list)
+
+    def texts(self) -> list[PageText]:
+        return [pt for pt, _ in self.reads] + self.raw
 
 
 def output_stem(src: Path) -> str:
@@ -227,13 +243,15 @@ def _read_all(pages: list[_Ocr], matcher: ProfileMatcher, progress: Progress = N
             h = next((h for h in (ocr.median_height(w) for w, _ in reads) if h), None)
             p.scale = PHOTO_TEXT_HEIGHT / h if h else 72 / 200
         p.reads = [(ocr.page_text(w, p.number, p.scale, m), w) for w, m in reads]
-        p.found = [(pt, f) for pt, _ in p.reads for f in detect(pt, matcher)]
+        raw = [ocr.page_text(w, p.number, p.scale, m, fold=False) for w, m in reads]
+        p.raw = [r for r, (pt, _) in zip(raw, p.reads, strict=True) if r.text != pt.text]
+        p.found = [(pt, f) for pt in p.texts() for f in detect(pt, matcher)]
 
 
 def _repeat_ocr(p: _Ocr, values: dict[str, Finding]) -> None:
     """OCR reads disagree (a label is recognised in one and not another), so a value
     any read or page redacts is redacted wherever any read sees it."""
-    for pt, _ in p.reads:
+    for pt in p.texts():
         p.found += [(pt, f) for f in repeated(pt, [f for t, f in p.found if t is pt], values)]
 
 
@@ -338,14 +356,17 @@ def _manual_ocr(p: _Ocr, stem: str, boxes: list[pymupdf.Rect], vault: Vault, res
     return out
 
 
-def _as_verified(img: Image.Image, scale: float, number: int) -> _Ocr:
-    """The built page as verification will read it: the JPEG on a page, rendered at its
-    resolution, read by OCR."""
+def _as_verified(img: Image.Image, scale: float, number: int, labels: list[tuple[pymupdf.Rect, str]]) -> _Ocr:
+    """The built page as verification will read it: the JPEG on a page with its placeholder
+    labels (they change how OCR splits a line), rendered at its resolution, read by OCR."""
     tmp = pymupdf.open()
     page = tmp.new_page(width=img.width * scale, height=img.height * scale)
     page.insert_image(page.rect, stream=_jpeg(img))
+    for rect, ph in labels:
+        _label(page, rect, ph)
     pix = page.get_pixmap(dpi=ocr.VERIFY_DPI, colorspace=pymupdf.csGRAY)
     low = Image.frombytes("L", (pix.width, pix.height), pix.samples)
+    low.info["dpi"] = (ocr.VERIFY_DPI, ocr.VERIFY_DPI)  # as verification's render carries it
     return _Ocr(number, low, page.rect.width / pix.width, ocr.VERIFY_DPI)
 
 
@@ -370,7 +391,7 @@ def _rebuild(doc: pymupdf.Document, p: _Ocr, regions, at: int | None, result: Re
             draw.rectangle([r.x0 / p.scale, r.y0 / p.scale, r.x1 / p.scale, r.y1 / p.scale], fill=(0, 0, 0))
             _add_label(labels, r, ph)
             result.region(p.number, r, ph, f.kind, f.source)
-        more = check(_as_verified(img, p.scale, p.number)) if check else []
+        more = check(_as_verified(img, p.scale, p.number, labels)) if check else []
         if not more:
             break
     width, height = img.width * p.scale, img.height * p.scale
@@ -421,10 +442,16 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     def drop_kept(p: _Ocr) -> None:
         p.found = [(pt, f) for pt, f in p.found if wanted(f)]
 
+    numbers: dict[str, Finding] = {}  # every number the document redacts, once pass 1 has run
+
     def check(built: _Ocr) -> list[tuple[pymupdf.Rect, str, Finding]]:
         """What OCR of a built page still reads: OCR can see a value in the output that it
-        didn't in the original (another resolution, JPEG), and verification reads the output."""
+        didn't in the original (another resolution, JPEG), and verification reads the output,
+        looking for every value this document redacts, as OCR may misread it."""
         _read_all([built], matcher)
+        for pt in built.texts():
+            built.found += [(pt, f) for f in repeated(pt, [f for t, f in built.found if t is pt], numbers,
+                                                      fuzzy=True)]
         drop_kept(built)
         return _ocr_regions(built, vault, result, shown=overrides.shown(built.number))
 
@@ -485,6 +512,9 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         everything = [f for _, fs in [*text_pages.values(), *scan_text.values()] for f in fs]
         everything += [f for p in read for _, f in p.found]
         values = repeat_values(everything)
+        numbers.update({ds: Finding(0, 0, 0, kind, key, "profile", ds)
+                        for ds, (kind, key) in matcher.by_digits.items() if len(ds) >= SHORT})
+        numbers.update({t: f for t, f in values.items() if is_number_value(t)})
 
         # pass 2: add what the rest of the document found, and redact
         progress.start("redacting", doc.page_count)
