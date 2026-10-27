@@ -170,3 +170,5 @@ Never put real tax documents in this repo. Test fixtures are generated from blan
 ## License
 
 AGPL-3.0-or-later. See [LICENSE](LICENSE).
+
+In short: it's free to use, share and change, for any purpose. If you share a changed version, or run one as a service other people use over a network, you must make your source code available under the same license.
