@@ -1,6 +1,6 @@
 # Taxonymous
 
-Taxonymous removes your personal details (names, Social Security numbers, addresses, account numbers) from tax documents **on your own computer**. You can then share the cleaned-up copies with an AI assistant such as Claude, and get help with your taxes without the AI ever seeing who you are.
+Taxonymous removes your personal details (names, Social Security numbers, addresses, account numbers) from tax documents **on your own computer**. You can then share the cleaned-up copies with an AI assistant such as Claude, and get help with your taxes without handing over your name, Social Security number or account numbers.
 
 > **Status:** early. It works on real returns, W-2s, 1099s and brokerage statements, but it is new. **Always look over every page on the review screen before you upload anything.**
 
@@ -28,6 +28,13 @@ Taxonymous removes your personal details (names, Social Security numbers, addres
 - Use AI to find your details. It looks only for the exact details you entered, in whatever format a document prints them (`987-65-4321`, `XXX-XX-4321`, `ending in 4321`). Something you didn't list, such as your employer's name or a relative's address, stays readable unless you add it.
 - Upload anything for you. Nothing reaches Claude, or any other AI, until you upload files from `ready-to-upload` yourself.
 - Replace your review. It double-checks itself, but you are the final check.
+- Make you anonymous. See below.
+
+### It hides your details, not your identity
+
+A tax return is a detailed picture of your life. Even with your name, SSN, address and accounts removed, what's left can point to you: your employer and exact salary, the town you work in, a rental property, the partnerships on your K-1s, the dates things happened. A determined person who already knows something about you could put those together and work out whose return it is.
+
+Taxonymous is built to keep the details that identify you directly away from the AI. It does not make the document impossible to trace back to you. If that matters, add more to your details (your employer, a rental property's address) and use **Mark areas** for anything else you'd rather not share.
 
 ## What you need
 
@@ -52,10 +59,10 @@ cd taxonymous
 
 ## Using it
 
-Start it, telling it where to keep your files (any folder you like; it is created if it doesn't exist):
+Start it, telling it where to keep your files. Any folder works, and it is created if it doesn't exist, but pick one that isn't synced to the cloud (see [Things to consider](#things-to-consider)):
 
 ```sh
-uv run taxonymous serve --workspace ~/Documents/Taxes/taxonymous
+uv run taxonymous serve --workspace ~/Taxes/taxonymous
 ```
 
 The review screen opens in your web browser. Keep the Terminal window open while you work; close it (or press Control-C) to stop.
@@ -85,7 +92,7 @@ Exported files are renamed with your details taken out too: `Abernathy W-2.pdf` 
 
 What you enter under **Your details** is saved in `vault/profile.json`, a plain text file in your workspace. It is the list of everything to remove, and nothing else is removed (except SSN-shaped numbers and barcodes).
 
-- Each detail is found however a document prints it: with or without dashes, in capitals, `Avery F. Abernathy` or `ABERNATHY AVERY F`, an account as `****7808` or `ending in 7808`.
+- Each detail is found however a document prints it: with or without dashes, in capitals, `Avery F. Abernathy` or `ABERNATHY AVERY F`, an account as `****5678` or `ending in 5678`.
 - Besides names, SSNs, birth dates, addresses, phones, emails, accounts, EINs and cards, you can list: each account's routing number; other numbers of yours, such as an e-file PIN or a client ID; your tax preparer (name, firm, address, phone, PTIN, EIN); each person's occupation and employer; and each address's school district.
 - An address's city and ZIP are also removed on their own, since forms print them in separate boxes. A city name is removed everywhere it appears, even as part of a bank branch's address.
 - Use the screen to edit it. If you do edit the file by hand, it looks like this (fake values):
@@ -97,23 +104,37 @@ What you enter under **Your details** is saved in `vault/profile.json`, a plain 
   "addresses": [{"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "WA", "zip": "98458"}],
   "phones": ["(555) 555-0142"],
   "emails": ["avery@example.com"],
-  "accounts": [{"institution": "Bank", "number": "8320967808", "routing": "021000021"}]
+  "accounts": [{"institution": "Bank", "number": "0001235678", "routing": "000000000"}]
 }
 ```
 
 Keep the `vault` folder private. It holds your real details in plain text.
 
-## When a document fails
+## When something is missed or a document fails
 
-A document fails when the check finds one of your details still in the cleaned copy. It stays in `work` and is not exported. The review screen shows which kind of detail was found and on which page.
+A document **fails** when the check finds one of your details still in the cleaned copy. It stays in `work` and is not exported, and the review screen shows which kind of detail was found and on which page. Something is **missed** when you spot one of your details on the review screen that the check didn't flag.
 
-To see more without revealing your data, run:
+Either way, there are three fixes, from quickest to most involved:
+
+1. **It's a detail you never listed** (a second account, an old address, a preparer's phone): **Add to my details**. It is removed from this document and every other one.
+2. **It's a one-off** (a handwritten note, a stray number): **Mark areas** over it, then **Final scrub**.
+3. **A detail you did list wasn't recognized**, because a document prints it in a way Taxonymous doesn't know yet (an unusual mask, a city and ZIP run together). This needs a change to the matching rules. Please report it so it gets fixed for everyone; you can do that without sharing your documents.
+
+To see what went wrong without revealing your data, run:
 
 ```sh
-uv run taxonymous explain --workspace ~/Documents/Taxes/taxonymous "document name.pdf"
+uv run taxonymous explain --workspace ~/Taxes/taxonymous "document name.pdf"
 ```
 
-It prints the text around each problem with every letter shown as `a` and every digit as `#`, so you can share the output (for example, in a bug report) without exposing anything.
+It prints the text around each problem with every letter shown as `a` and every digit as `#`. Paste that into a [GitHub issue](https://github.com/rohan-amin/taxonymous/issues), along with how the missed detail is printed, with its digits changed to fake ones (for example, `Acct ...5678`). That is enough to write the new rule.
+
+If you're making the change yourself: the matching rules are in `src/taxonymous/detect.py` (`ProfileMatcher`). Add a test with fake values to `tests/test_detect.py` showing the line that was missed, change the rule until it passes, and run the whole test suite, because a rule that finds more can also black out things it shouldn't (an amount, a box number). Never add a real document to the repo.
+
+## Things to consider
+
+- **Where your workspace lives.** Your details are saved in plain text in `vault/profile.json`, and your original documents sit in `inbox`. If the workspace is inside a folder that syncs to the cloud (Dropbox, Google Drive, OneDrive, or iCloud, which often syncs Desktop and Documents), those copies go to that company's servers. Put the workspace in a folder that doesn't sync, such as `~/Taxes`, and delete it when you're done with the season.
+- **It takes some time.** Scans and photos are read several times to be sure. A long return can take several minutes.
+- **It is still a technical tool.** Setup uses the Terminal, and digging into a failure means running a command. A simpler, double-click Mac app is planned, but doesn't exist yet.
 
 ## Privacy details
 
