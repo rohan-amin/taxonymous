@@ -228,3 +228,10 @@ def test_a_city_state_and_zip_in_boxes_of_their_own_are_found():
 def test_an_employer_is_found_however_it_is_printed():
     profile = Profile.from_dict({"people": [{"name": "Avery Abernathy", "employer": "Contoso Widgets, LLC"}]})
     assert texts_of(["Employer's name CONTOSO WIDGETS LLC", "Contoso"], profile) == ["CONTOSO WIDGETS LLC"]
+
+
+def test_a_form_s_letter_after_a_name_is_not_its_initial():
+    """"ABERNATHY AVERY W-2" (a file name, a heading): the W is the form's, not a middle initial."""
+    profile = Profile.from_dict({"people": [{"name": "Avery F Abernathy"}]})
+    assert texts_of(["ABERNATHY AVERY W-2", "Abernathy, Avery F. W-2", "AVERY F ABERNATHY"], profile) == [
+        "ABERNATHY AVERY", "Abernathy, Avery F.", "AVERY F ABERNATHY"]

@@ -220,9 +220,10 @@ class ProfileMatcher:
             first, middles, last = words[0], words[1:-1], words[-1]
             # up to two middle names or initials, any (a document can have the initial wrong, OCR
             # can read its dot as a comma), with or without a space after the dot: "Avery F.
-            # Abernathy", "Avery F.Abernathy", "Abernathy, Avery F.", "ABERNATHY AVERY F"
+            # Abernathy", "Avery F.Abernathy", "Abernathy, Avery F.", "ABERNATHY AVERY F";
+            # not a form's letter: the "W" of "ABERNATHY AVERY W-2"
             initial = "|".join([*(re.escape(m) for m in middles if len(m) > 1), "[a-z]"])
-            mid = rf"(?:\s+(?:{initial})\b(?:\.|,(?=\s))?){{0,2}}"
+            mid = rf"(?:\s+(?:{initial})(?![\w-])(?:\.|,(?=\s))?){{0,2}}"
             return re.escape(first), initial, mid, re.escape(last)
 
         for i, p in enumerate(profile.people):
