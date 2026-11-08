@@ -188,9 +188,18 @@ def _fontsize(rect: pymupdf.Rect, text: str) -> float:
 
 def _label(page: pymupdf.Page, rect: pymupdf.Rect, ph: str) -> None:
     # insert_text never drops text that doesn't fit, so every redaction is visible in the text layer
+    if page.rotation == 0:
+        # a box padded past the edge of the page (a value printed at the edge of a scan):
+        # the label goes in the part on the page, never past it (verification refuses that)
+        rect = rect & page.rect if not (rect & page.rect).is_empty else rect
     fs = _fontsize(rect, ph)
-    page.insert_text((rect.x0 + 0.5, rect.y1 - (rect.height - fs) / 2 - 0.15 * fs), ph,
-                     fontname="helv", fontsize=fs, color=(1, 1, 1))
+    x, y = rect.x0 + 0.5, rect.y1 - (rect.height - fs) / 2 - 0.15 * fs
+    if page.rotation == 0:
+        bounds = page.rect
+        width = pymupdf.get_text_length(ph, fontname="helv", fontsize=fs)
+        x = max(bounds.x0 + 0.5, min(x, bounds.x1 - width - 0.5))
+        y = max(bounds.y0 + fs, min(y, bounds.y1 - 0.3 * fs))  # the ascent above, descent below
+    page.insert_text((x, y), ph, fontname="helv", fontsize=fs, color=(1, 1, 1))
 
 
 def _add_label(labels: list[tuple[pymupdf.Rect, str]], rect: pymupdf.Rect, ph: str) -> None:

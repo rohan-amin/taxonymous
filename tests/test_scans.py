@@ -343,3 +343,35 @@ def test_the_built_page_is_searched_for_every_value_as_verification_reads_it(tmp
     [outcome] = run(ws)
     assert outcome.report.passed, outcome.report.issues
     assert [r.page for r in outcome.result.regions if r.kind == "SSN"] == [0, 1]
+
+
+@pytest.mark.parametrize("edge", ["left", "top", "right", "bottom"])
+def test_a_name_at_the_edge_of_a_scan_is_labeled_on_the_page(edge, corpus, tmp_path):
+    """A box found by OCR is padded, so at the edge of a scan it reaches past the page;
+    its placeholder label must still be drawn on the page, or verification refuses it."""
+    from PIL import ImageFont
+
+    from taxonymous.sanitize import outside
+    _, _, profile = corpus
+    name = profile["people"][0]["name"].upper()
+    font = ImageFont.load_default(size=34)
+    img = Image.new("RGB", (1700, 2200), "white")
+    draw = ImageDraw.Draw(img)
+    draw.text((300, 300), "Form W-2 Wage and Tax Statement", fill="black", font=font)
+    width = draw.textlength(name, font=font)
+    height = draw.textbbox((0, 0), name, font=font)[3]
+    x, y = {"left": (0, 600), "top": (300, 0), "right": (1700 - width, 900),
+            "bottom": (300, 2200 - height - 1)}[edge]
+    draw.text((x, y), name, fill="black", font=font)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    ws = Workspace(tmp_path / "ws")
+    ws.init()
+    ws.profile_path.write_text(json.dumps(profile))
+    doc = pymupdf.open()
+    doc.new_page(width=612, height=792).insert_image(pymupdf.Rect(0, 0, 612, 792), stream=buf.getvalue())
+    doc.save(ws.inbox / "w2.pdf")
+    outcome = run(ws)[0]
+    assert outcome.report.passed, outcome.report.issues
+    assert any(f.kind == "NAME" for f in outcome.result.findings)
+    assert not outside(pymupdf.open(ws.outputs("w2")["pdf"])[0])
