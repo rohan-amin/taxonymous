@@ -30,6 +30,10 @@ the same browser can't drive it). It makes no outbound connections.
   DELETE /api/documents/{id}/shown/{i}          redact a shown box again (its index in `shown`)
   POST   /api/documents/{id}/verify             verify the current output again (queued)
   POST   /api/documents/{id}/export             copy to ready-to-upload/, only if it passed
+  POST   /api/merge?folder=<F>                  {"max_mb": n | null} merge the folder's passed documents
+                                                into one PDF in ready-to-upload/ (or parts under n MB),
+                                                checked again first (queued)
+  GET    /api/merge?folder=<F>                  that merge: queued, running, or its last result
 
 The review UI (ui/, built into ui/dist) is served at /. Its files hold no data,
 so they need no token; every /api request does.
@@ -60,6 +64,8 @@ from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .detect import ProfileMatcher
+from .merge import last as last_merge
+from .merge import merge
 from .pipeline import Workspace, export, process, reverify
 from .profile import Profile, add_item, clean
 from .profile import save as save_profile
@@ -85,8 +91,15 @@ def check_loopback(host: str) -> None:
 @dataclass
 class Job:
     stem: str
-    action: str  # "process" | "verify"
+    action: str  # "process" | "verify" | "merge"
     forget: list[str] = field(default_factory=list)  # vault keys of boxes the reviewer removed
+    folder: str = ""  # merge: the folder, and the size of each file
+    max_mb: float | None = None
+
+
+def merge_id(folder: str) -> str:
+    """A merge's place in the worker's queue: no document's id starts with a dot."""
+    return f".merge:{folder}"
 
 
 class Worker:
@@ -165,6 +178,9 @@ class Worker:
         for key in job.forget:
             vault.forget(key)
         vault.save()
+        if job.action == "merge":
+            merge(self.ws, job.folder, matcher, vault, job.max_mb, ocr=self.ocr, progress=self.progress)
+            return
         src = _source(self.ws, job.stem)
         if job.action == "verify":
             reverify(self.ws, job.stem, matcher, vault, ocr=self.ocr, progress=self.progress)
@@ -250,6 +266,10 @@ class Box(BaseModel):
 
 class Boxes(BaseModel):
     boxes: list[Box]
+
+
+class MergeOptions(BaseModel):
+    max_mb: float | None = None  # split into files of at most this many MB
 
 
 class Detail(BaseModel):
@@ -488,6 +508,26 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         if not released:
             raise HTTPException(409, "cannot export: verification has not passed")
         return {"released": [p.name for p in released]}
+
+    @app.post("/api/merge", status_code=202)
+    def merge_folder(body: MergeOptions, folder: str = ""):
+        need_profile()
+        folder = _folder(folder)
+        if body.max_mb is not None and not 0.1 <= body.max_mb <= 10_000:
+            raise HTTPException(400, "the size limit is in MB, from 0.1")
+        if not any(ws.stem(p).startswith(folder + "/") or not folder for p in ws.pending()):
+            raise HTTPException(404, f"no documents in {folder or 'the inbox'}")
+        if not worker.busy(merge_id(folder)):
+            worker.submit(Job(merge_id(folder), "merge", folder=folder, max_mb=body.max_mb))
+        return {"queued": [merge_id(folder)]}
+
+    @app.get("/api/merge")
+    def merge_status(folder: str = ""):
+        folder = _folder(folder)
+        job = merge_id(folder)
+        state = ("running" if worker.running == job else "queued") if worker.busy(job) else None
+        return {"folder": folder, "state": state, "error": worker.errors.get(job),
+                "progress": worker.progress_of(job), "last": last_merge(ws, folder)}
 
     # last: an id holds slashes, so this would take every /api/documents/... GET above
     @app.get("/api/documents/{stem:path}")

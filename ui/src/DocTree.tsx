@@ -1,8 +1,9 @@
 // The sidebar's document list: inbox/'s folders as headings you can fold, each with its
 // documents (and folders) under it, then the documents in inbox/ itself.
+import { useCallback, useEffect, useState } from "react";
 import type { DragEvent } from "react";
-import { busy } from "./api";
-import type { DocSummary } from "./api";
+import { api, busy } from "./api";
+import type { DocSummary, MergeState } from "./api";
 import { ProgressBar } from "./Viewer";
 
 export interface Folder {
@@ -73,6 +74,7 @@ function FolderItem({ f, depth, p }: { f: Folder; depth: number; p: Props }) {
   const failed = docs.filter((d) => d.status === "failed" || d.status === "error").length;
   const working = docs.some((d) => busy(d.status));
   const open = !p.collapsed.has(f.path);
+  const [merging, setMerging] = useState(false);
   const onDrop = (e: DragEvent) => {
     if (!e.dataTransfer.files.length) return;
     e.preventDefault();
@@ -105,9 +107,100 @@ function FolderItem({ f, depth, p }: { f: Folder; depth: number; p: Props }) {
         <button type="button" className="run-folder" onClick={() => p.onRun(f.path)} disabled={!p.canRun}
                 aria-label={`Run ${f.name}`}
                 title={p.canRun ? `Redact and verify everything in ${f.name}` : "Add your details first"}>Run</button>
+        <button type="button" className={`run-folder${merging ? " on" : ""}`} onClick={() => setMerging((m) => !m)}
+                aria-label={`Merge ${f.name}`} aria-expanded={merging}
+                title={`Merge what passed in ${f.name} into one PDF, for an upload that takes only so many files`}>
+          Merge
+        </button>
       </li>
+      {merging && <MergePanel f={f} depth={depth} passed={passed.length} left={docs.length - passed.length}
+                              canRun={p.canRun} onClose={() => setMerging(false)} />}
       {open && body(f, depth + 1, p)}
     </>
+  );
+}
+
+// the size limit last used: a convenience of this browser
+const MAX_MB = "taxonymous-merge-max-mb";
+
+function loadMaxMb(): string {
+  try {
+    return localStorage.getItem(MAX_MB) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function MergePanel({ f, depth, passed, left, canRun, onClose }:
+  { f: Folder; depth: number; passed: number; left: number; canRun: boolean; onClose: () => void }) {
+  const [maxMb, setMaxMb] = useState(loadMaxMb);
+  const [state, setState] = useState<MergeState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => api.mergeState(f.path).then(setState).catch((e) => setError((e as Error).message)),
+    [f.path]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const working = !!state?.state;
+  useEffect(() => {
+    if (!working) return;
+    const t = setInterval(load, 1000);
+    return () => clearInterval(t);
+  }, [working, load]);
+
+  const limit = maxMb.trim() ? Number(maxMb) : null;
+  const badLimit = limit !== null && !(limit >= 0.1);
+  const start = async () => {
+    setError(null);
+    try {
+      localStorage.setItem(MAX_MB, maxMb.trim());
+    } catch {
+      /* not kept: fine */
+    }
+    try {
+      await api.merge(f.path, limit);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const last = state?.last;
+  const issues = last?.parts.flatMap((part) => part.issues) ?? [];
+  return (
+    <li className="merge-panel" style={{ marginLeft: depth * 14 }} data-testid="merge-panel">
+      <div>
+        Merge the <strong>{passed}</strong> document{passed === 1 ? "" : "s"} in {f.name} that passed into one PDF,
+        with a contents page.{left > 0 && ` ${left} not passed will be left out.`}
+      </div>
+      <label className="merge-limit">
+        Split into files of at most
+        <input type="number" min="0.1" step="any" value={maxMb} placeholder="no limit" aria-label="Size limit in MB"
+               onChange={(e) => setMaxMb(e.target.value)} />
+        MB
+      </label>
+      <div className="merge-actions">
+        <button type="button" className="primary" onClick={start} disabled={!passed || !canRun || working || badLimit}>
+          {working ? (state?.state === "queued" ? "Waiting…" : "Merging…") : "Merge"}
+        </button>
+        <button type="button" onClick={onClose}>Close</button>
+      </div>
+      {state?.progress && <div className="muted">{state.progress.label}…</div>}
+      {error && <div className="side-error">{error}</div>}
+      {state?.error && <div className="side-error">{state.error}</div>}
+      {!working && last && (last.passed ? (
+        <div className="side-ok" data-testid="merge-result">
+          In ready-to-upload: {last.files.map((file) => file.split("/").pop()).join(", ")}
+          {" "}({last.parts.reduce((n, part) => n + part.pages, 0)} pages)
+          {last.too_big.length > 0 && <div className="side-error">
+            Part {last.too_big.join(", ")} is over the limit: one document bigger than that on its own.</div>}
+        </div>
+      ) : (
+        <div className="side-error" data-testid="merge-result">
+          {last.parts.length ? `Not merged: the check found ${[...new Set(issues.map((i) => `${i.kind}${i.page ? ` (page ${i.page})` : ""}`))].join(", ")}.`
+            : "Not merged: nothing here has passed yet."}
+        </div>
+      ))}
+    </li>
   );
 }
 

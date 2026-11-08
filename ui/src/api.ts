@@ -56,6 +56,23 @@ export interface DocDetail extends DocSummary {
   added: { page: number; rect: Rect }[];
 }
 
+// a folder's merge into one PDF (or parts): queued or running, and how the last one went
+export interface MergeState {
+  folder: string;
+  state: "queued" | "running" | null;
+  error: string | null;
+  progress: Progress | null;
+  last: {
+    passed: boolean;
+    files: string[]; // in ready-to-upload/
+    parts: { documents: string[]; pages: number; issues: Issue[] }[];
+    skipped: string[]; // not passed, so left out
+    max_mb: number | null;
+    too_big: number[]; // parts over the limit: one document bigger on its own
+    time: string;
+  } | null;
+}
+
 export interface Box {
   page: number;
   rect: Rect;
@@ -211,6 +228,9 @@ export const api = {
     call("DELETE", `${doc(id)}/kept?placeholder=${encodeURIComponent(placeholder)}`),
   verify: (id: string) => call("POST", `${doc(id)}/verify`),
   export: (id: string) => call<{ released: string[] }>("POST", `${doc(id)}/export`),
+  merge: (folder: string, maxMb: number | null) =>
+    call("POST", `/api/merge?folder=${encodeURIComponent(folder)}`, { max_mb: maxMb }),
+  mergeState: (folder: string) => call<MergeState>("GET", `/api/merge?folder=${encodeURIComponent(folder)}`),
 };
 
 export function pageImage(id: string, page: number, which: "original" | "redacted", dpi: number,

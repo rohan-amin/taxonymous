@@ -99,7 +99,7 @@ button.export:not(:disabled) {
 
 .app {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 290px 1fr;
   height: 100%;
 }
 
@@ -258,14 +258,72 @@ button.export:not(:disabled) {
 .docs li.folder .run-folder {
   flex: none;
   width: auto;
-  padding: 2px 8px;
-  font-size: 12px;
+  padding: 1px 6px;
+  font-size: 11px;
   border-color: var(--line);
   background: var(--panel);
 }
 
 .docs li.folder .run-folder:hover:not(:disabled) {
   border-color: var(--accent);
+}
+
+.docs li.folder .run-folder.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.docs li.merge-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin: 2px 0 8px 24px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.docs li.merge-panel .side-ok,
+.docs li.merge-panel .side-error {
+  margin: 0;
+}
+
+.docs li.merge-panel button {
+  flex: none;
+  width: auto;
+  margin: 0;
+  display: inline-block;
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+.docs li.merge-panel button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.docs li.merge-panel button:disabled {
+  opacity: 0.5;
+}
+
+.merge-limit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.merge-limit input {
+  width: 80px;
+}
+
+.merge-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .side-target {

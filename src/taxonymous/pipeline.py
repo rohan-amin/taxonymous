@@ -209,19 +209,27 @@ def _verify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, ove
     the vault's values for the placeholders it uses, except what the reviewer kept in the
     clear here: a whole placeholder, or single boxes. Other documents don't count: each is
     checked for your details, SSN shapes and its own redactions."""
-    allowed = allowed_values(vault, overrides)
+    allowed, keys, shown = readable(ws, stem, vault, overrides, result)
     here = {r.placeholder for r in result.regions} if result else placeholders_of(ws, stem)
     known = known + [Known(vault.entries[ph]["kind"], v) for ph in here & vault.entries.keys()
                      for v in vault.entries[ph]["values"]]
+    out = ws.outputs(stem)
+    return verify(out["pdf"], matcher, [k for k in known if k.value not in allowed], out["txt"], ocr=ocr,
+                  allowed=allowed, shown=shown, progress=progress, allowed_keys=keys)
+
+
+def readable(ws: Workspace, stem: str, vault: Vault, overrides: Overrides, result: Result | None = None,
+             ) -> tuple[set[str], list[str], list[Shown]]:
+    """What the reviewer left readable in a document: values kept in the clear everywhere in
+    it, the identities they belong to, and single boxes left in the clear."""
+    allowed = allowed_values(vault, overrides)
     # a shown box, and the rest of the value it is part of (a name wrapped onto the next line)
     parts = result.shown_json() if result else _read(ws.outputs(stem)["shown"])
     shown = [Shown(n, r, e.get("values", []), e.get("key", ""),
                    [tuple(s["rect"]) for s in parts if s["page"] == n and _same(s["of"], r)])
              for n, r, ph in overrides.show for e in [vault.entries.get(ph, {})]]
     keys = [vault.entries[ph]["key"] for ph in overrides.keep if ph in vault.entries]
-    out = ws.outputs(stem)
-    return verify(out["pdf"], matcher, [k for k in known if k.value not in allowed], out["txt"], ocr=ocr,
-                  allowed=allowed, shown=shown, progress=progress, allowed_keys=keys)
+    return allowed, keys, shown
 
 
 def _read(path: Path) -> list:

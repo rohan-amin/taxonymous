@@ -5,6 +5,7 @@
   taxonymous redact FILE... --profile P --out DIR --vault DIR     (no verification)
   taxonymous verify FILE --profile P [--vault DIR] [--no-ocr]
   taxonymous serve  --workspace DIR [--port N]    review UI + local API (loopback only)
+  taxonymous merge  --workspace DIR [FOLDER] [--max-mb N]   one PDF of a folder's passed documents
 """
 
 import argparse
@@ -19,7 +20,7 @@ from .pipeline import Workspace, run
 from .profile import Profile
 from .redact import redact_file
 from .vault import Vault
-from .verify import Known, verify
+from .verify import Issue, Known, verify
 
 
 def _workspace_arg(p: argparse.ArgumentParser) -> None:
@@ -60,6 +61,11 @@ def main(argv: list[str] | None = None) -> int:
     ex.add_argument("document", help="its name in inbox/ (w2.pdf, 2024/w2.pdf), or its id (w2, 2024/w2)")
     ex.add_argument("placeholder", nargs="?", help="explain one box instead, e.g. ID_10: why it is there")
     ex.add_argument("--no-ocr", action="store_true", help="skip re-reading pages with OCR (faster)")
+    mg = sub.add_parser("merge", help="merge a folder's passed documents into one PDF in ready-to-upload/")
+    _workspace_arg(mg)
+    mg.add_argument("folder", nargs="?", default="", help="a folder in inbox/ (2024); all of it if left out")
+    mg.add_argument("--max-mb", type=float, help="split into files of at most this many MB")
+    mg.add_argument("--no-ocr", action="store_true", help="skip OCR verification (not for real use)")
     sv = sub.add_parser("serve", help="run the local API for the review UI (127.0.0.1 only)")
     _workspace_arg(sv)
     sv.add_argument("--host", default="127.0.0.1", help="loopback address (127.0.0.1, ::1, localhost)")
@@ -101,6 +107,31 @@ def main(argv: list[str] | None = None) -> int:
         print(render(explain(ws.root, stem, ocr=not args.no_ocr), issues))
         for line in off_page(ws.outputs(stem)["pdf"], issues):
             print(line)
+        return 0
+
+    if args.command == "merge":
+        from .merge import merge
+        ws = Workspace(args.workspace)
+        if not ws.profile_path.exists():
+            print(f"No profile at {ws.profile_path}", file=sys.stderr)
+            return 2
+        folder = args.folder.replace("\\", "/").strip("/")
+        if not (ws.inbox / folder).is_dir():
+            print(f"No folder {folder!r} in {ws.inbox}", file=sys.stderr)
+            return 2
+        record = merge(ws, folder, ProfileMatcher(Profile.load(ws.profile_path)),
+                       Vault(ws.vault_dir / "placeholders.json"), args.max_mb, ocr=not args.no_ocr)
+        for name in record["skipped"]:
+            print(f"left out (not passed): {name}")
+        for n in record["too_big"]:
+            print(f"part {n} is over {args.max_mb:g} MB: one document bigger than that on its own")
+        if not record["passed"]:
+            issues = [i for part in record["parts"] for i in part["issues"]]
+            print("Nothing merged: " + ("no document here has passed" if not record["parts"]
+                                       else _summary([Issue(**i) for i in issues])), file=sys.stderr)
+            return 1
+        for f in record["files"]:
+            print(f"ready-to-upload/{f}")
         return 0
 
     if args.command == "init":

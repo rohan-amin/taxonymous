@@ -90,6 +90,8 @@ Exported files are renamed with your details taken out too: `Abernathy W-2.pdf` 
 
 You can sort `inbox` into folders, one per tax year for example (`inbox/2024/W-2.pdf`). `work` and `ready-to-upload` get the same folders, so two years' `W-2.pdf` never mix. Folder names have your details taken out the same way. On the review screen each folder is a heading you can fold, with its own **Run** button, and a checkbox that picks everything in it that passed. **Add files** puts new files in the folder of the document you have open (it says which), or in `inbox` itself. Dropping files on a folder heading puts them in that folder. To explain a document whose name is in two folders, include the folder: `explain --workspace DIR 2024/W-2.pdf`.
 
+**Merge** (on a folder heading) puts the documents in that folder that passed into one PDF in `ready-to-upload`, for an upload that takes only a few files: `2024/2024 merged.pdf`. Its first page lists each document (by its name with your details taken out) and the pages it's on. Give a size limit to get several files instead (`2024 merged (part 1 of 3).pdf`), each under it unless one document is bigger on its own; a document is never split. The merged file is checked again before it's put there, and a merge replaces that folder's previous one. From the Terminal: `uv run taxonymous merge --workspace DIR 2024 --max-mb 25`.
+
 ## Your details (`vault/profile.json`)
 
 What you enter under **Your details** is saved in `vault/profile.json`, a plain text file in your workspace. It is the list of everything to remove, and nothing else is removed (except SSN-shaped numbers and barcodes).

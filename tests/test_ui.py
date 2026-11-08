@@ -453,6 +453,17 @@ def test_the_sidebar_shows_folders_that_fold_run_and_pick(folder_site, browser):
     year.locator("input.pick").check()
     assert pg.get_by_role("button", name="Export selected (1)").is_enabled()
 
+    # a folder's Merge puts what passed in it into one PDF in ready-to-upload
+    pg.get_by_role("button", name="Merge 2024").click()
+    panel = pg.locator("[data-testid=merge-panel]")
+    panel.get_by_role("button", name="Merge").click()
+    time.sleep(0.3)
+    app.state.worker.wait()
+    panel.locator("[data-testid=merge-result]").wait_for(timeout=10_000)
+    assert "2024 merged.pdf" in panel.inner_text()
+    assert (ws.ready / "2024" / "2024 merged.pdf").exists()
+    panel.get_by_role("button", name="Close").click()
+
     # folding a folder hides what is in it
     pg.locator("[data-testid=folder][data-folder='2023'] .fold").click()
     hidden = "[data-testid=documents] li[data-folder='2023']:not(.folder)"
