@@ -420,16 +420,19 @@ def _image_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
 def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
                 overrides: Overrides | None = None, as_images: frozenset[int] = frozenset(),
                 progress: Progress = NONE, text_too: frozenset[int] = frozenset(),
-                as_verified: frozenset[int] = frozenset()) -> Result:
+                as_verified: frozenset[int] = frozenset(), stem: str | None = None) -> Result:
     """`as_images`: 0-based pages to rebuild from OCR even though they have a text layer
     (one that doesn't match what the page shows). `text_too`: those of them whose text
     layer is right (only redacting it went wrong): what it has is blacked out as well.
     `as_verified`: pages rebuilt from OCR to also read as verification will, once built:
-    what its OCR of the output finds is blacked out too."""
+    what its OCR of the output finds is blacked out too. `stem`: the document's id in its
+    workspace ("2024/w2"), which keys the reviewer's boxes; the outputs go in `out_dir`
+    under the file's own name."""
     src, out_dir = Path(src), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = output_stem(src)
-    result = Result(src, out_dir / f"{stem}.redacted.pdf", out_dir / f"{stem}.redacted.txt")
+    stem = stem or output_stem(src)
+    name = output_stem(src)
+    result = Result(src, out_dir / f"{name}.redacted.pdf", out_dir / f"{name}.redacted.txt")
     texts: dict[int, str] = {}
     overrides = overrides or Overrides()
     manual: dict[int, list[pymupdf.Rect]] = {}
@@ -481,7 +484,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
             doc.close()
             retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | broken,
                                 progress=progress, text_too=text_too | broken,
-                                as_verified=as_verified)
+                                as_verified=as_verified, stem=stem)
             retry.moved = sorted(set(retry.moved) | {n + 1 for n in broken})
             return retry
         # pass 1: find everything, on every page
@@ -551,7 +554,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         rebuild = {n - 1 for n in result.moved}
         retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | rebuild,
                             progress=progress, text_too=text_too | rebuild,
-                            as_verified=as_verified)
+                            as_verified=as_verified, stem=stem)
         retry.moved = sorted(set(retry.moved) | set(result.moved))
         return retry
     drawn = [glyphs(page) for page in doc]  # to check the saved file against
@@ -576,7 +579,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         out.close()
         retry = redact_file(src, out_dir, matcher, vault, overrides, as_images=as_images | shifted,
                             progress=progress, text_too=text_too | shifted,
-                            as_verified=as_verified)
+                            as_verified=as_verified, stem=stem)
         retry.moved = sorted(set(retry.moved) | set(result.moved) | {n + 1 for n in shifted})
         return retry
     pages = [f"=== Page {p.number + 1} ===\n"

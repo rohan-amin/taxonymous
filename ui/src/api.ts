@@ -21,8 +21,9 @@ export interface Progress {
 }
 
 export interface DocSummary {
-  id: string;
+  id: string; // its path in inbox/, as an output stem: "w2", "2024/w2"
   name: string;
+  folder: string; // the folder in inbox/ it is in ("2024", "2024/brokerage"), "" for inbox/ itself
   status: Status;
   version: number;
   exported: boolean;
@@ -184,7 +185,7 @@ async function call<T>(method: string, path: string, body?: unknown, form?: Form
   return (type.includes("json") ? res.json() : res.text()) as Promise<T>;
 }
 
-const doc = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
+const doc = (id: string) => `/api/documents/${id.split("/").map(encodeURIComponent).join("/")}`;
 
 export const api = {
   profile: () => call<ProfileState>("GET", "/api/profile"),
@@ -193,12 +194,13 @@ export const api = {
   documents: () => call<DocSummary[]>("GET", "/api/documents"),
   document: (id: string) => call<DocDetail>("GET", doc(id)),
   text: (id: string) => call<string>("GET", `${doc(id)}/text`),
-  upload: (file: File) => {
+  upload: (file: File, folder = "") => {
     const form = new FormData();
     form.append("file", file);
+    form.append("folder", folder);
     return call<DocSummary>("POST", "/api/documents", undefined, form);
   },
-  runAll: () => call("POST", "/api/run"),
+  runAll: (folder = "") => call("POST", folder ? `/api/run?folder=${encodeURIComponent(folder)}` : "/api/run"),
   run: (id: string) => call("POST", `${doc(id)}/run`),
   addBoxes: (id: string, boxes: Box[]) => call("POST", `${doc(id)}/redactions`, { boxes }),
   removeRedaction: (id: string, placeholder: string) =>
@@ -218,6 +220,9 @@ export function pageImage(id: string, page: number, which: "original" | "redacte
 }
 
 export const busy = (s: Status) => s === "queued" || s === "running";
+
+// how a document is named where its folder matters: "2024 / W-2.pdf"
+export const label = (d: { name: string; folder: string }) => (d.folder ? `${d.folder.replaceAll("/", " / ")} / ${d.name}` : d.name);
 
 export const SOURCE_LABEL: Record<string, string> = {
   profile: "your profile",

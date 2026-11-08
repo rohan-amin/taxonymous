@@ -205,6 +205,91 @@ button.export:not(:disabled) {
   border-color: var(--line);
 }
 
+.docs li.folder {
+  align-items: center;
+  margin-top: 4px;
+}
+
+.docs li.folder .pick {
+  margin-top: 0;
+}
+
+.docs li.folder .fold {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0;
+  font-weight: 600;
+}
+
+.docs li.folder.target .fold {
+  border-color: var(--line);
+  border-style: dashed;
+}
+
+.docs .chev {
+  width: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.docs .count {
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.docs .tally {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.docs .tally .ok {
+  color: var(--ok);
+}
+
+.docs .tally .bad {
+  color: var(--bad);
+}
+
+.docs li.folder .run-folder {
+  flex: none;
+  width: auto;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+.docs li.folder .run-folder:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.side-target {
+  margin: 0 16px 12px;
+  font-size: 12px;
+}
+
+.side-target strong {
+  color: var(--text);
+}
+
+.side-target .link {
+  border: none;
+  background: none;
+  padding: 0 0 0 6px;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.folder-path {
+  margin-right: 4px;
+}
+
 .docs .name {
   overflow: hidden;
   text-overflow: ellipsis;

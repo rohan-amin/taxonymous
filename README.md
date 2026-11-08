@@ -88,6 +88,8 @@ The folder you chose when starting it holds four folders:
 
 Exported files are renamed with your details taken out too: `Abernathy W-2.pdf` becomes `NAME W-2.redacted.pdf`.
 
+You can sort `inbox` into folders, one per tax year for example (`inbox/2024/W-2.pdf`). `work` and `ready-to-upload` get the same folders, so two years' `W-2.pdf` never mix. Folder names have your details taken out the same way. On the review screen each folder is a heading you can fold, with its own **Run** button, and a checkbox that picks everything in it that passed. **Add files** puts new files in the folder of the document you have open (it says which), or in `inbox` itself. Dropping files on a folder heading puts them in that folder. To explain a document whose name is in two folders, include the folder: `explain --workspace DIR 2024/W-2.pdf`.
+
 ## Your details (`vault/profile.json`)
 
 What you enter under **Your details** is saved in `vault/profile.json`, a plain text file in your workspace. It is the list of everything to remove, and nothing else is removed (except SSN-shaped numbers and barcodes).

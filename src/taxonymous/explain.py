@@ -145,7 +145,7 @@ def _values(ws_vault: Vault, regions: list[dict]) -> list[Value]:
 
 def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
     from .pipeline import Workspace, allowed_values
-    from .redact import Overrides, output_stem
+    from .redact import Overrides
 
     ws = Workspace(Path(workspace))
     out = ws.outputs(stem)
@@ -155,7 +155,7 @@ def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
     allowed = allowed_values(vault, Overrides.load(ws.overrides_path(stem)))
     regions = json.loads(out["regions"].read_text()) if out["regions"].exists() else []
     values = [v for v in _values(vault, regions) if v.text not in allowed]
-    source = next(p for p in ws.pending() if output_stem(p) == stem)
+    source = ws.source(stem)
     original = pymupdf.open(source) if source.suffix.lower() == ".pdf" else None
     doc = pymupdf.open(out["pdf"])
     hits: dict[tuple, Hit] = {}
@@ -330,7 +330,6 @@ def explain_placeholder(workspace, stem: str, placeholder: str) -> str:
     on which page, with what was around it, and every page it was redacted on. For a box
     that hides something it shouldn't, such as an amount taken for an ID."""
     from .pipeline import Workspace
-    from .redact import output_stem
 
     ws = Workspace(Path(workspace))
     ph = placeholder if placeholder.startswith("<") else f"<{placeholder}>"
@@ -349,7 +348,7 @@ def explain_placeholder(workspace, stem: str, placeholder: str) -> str:
         f"page {p} by {SOURCES.get(s, s)}" + (f" ×{n}" if n > 1 else "")
         for (p, s), n in sorted(boxes.items())) or "none"))
 
-    source = next(p for p in ws.pending() if output_stem(p) == stem)
+    source = ws.source(stem)
     if source.suffix.lower() != ".pdf":
         lines.append("(a photo: its OCR reads aren't shown)")
         return "\n".join(lines)

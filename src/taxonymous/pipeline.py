@@ -1,7 +1,8 @@
 """Workspace pipeline: inbox/ -> work/ -> verify -> ready-to-upload/.
 
 <workspace>/
-  inbox/              originals (never modified): PDFs, scans, photos
+  inbox/              originals (never modified): PDFs, scans, photos, in folders if you like
+                      (inbox/2024/w2.pdf); work/ and ready-to-upload/ get the same folders
   work/               redacted outputs, box lists and verification reports, including failures
   ready-to-upload/    only files whose verification passed
   vault/              profile.json (your identifiers), placeholders.json, and overrides/
@@ -45,7 +46,25 @@ class Workspace:
             d.mkdir(parents=True, exist_ok=True)
 
     def pending(self) -> list[Path]:
-        return sorted(p for p in self.inbox.iterdir() if p.suffix.lower() in SUFFIXES)
+        """Every PDF and image in inbox/ and its folders, except hidden ones (an upload
+        still being written is `.name.part`)."""
+        if not self.inbox.is_dir():
+            return []
+        found = [p for p in self.inbox.rglob("*") if p.suffix.lower() in SUFFIXES and p.is_file()
+                 and not any(part.startswith(".") for part in p.relative_to(self.inbox).parts)]
+        return sorted(found, key=lambda p: [part.lower() for part in p.relative_to(self.inbox).parts])
+
+    def stem(self, src: Path) -> str:
+        """A document's id, and where its outputs go: inbox/2024/w2.pdf -> "2024/w2"
+        (a file from elsewhere: its name, "w2")."""
+        src = Path(src)
+        if not src.is_relative_to(self.inbox):
+            return output_stem(src)
+        rel = src.relative_to(self.inbox)
+        return (rel.parent / output_stem(rel)).as_posix()
+
+    def source(self, stem: str) -> Path | None:
+        return next((p for p in self.pending() if self.stem(p) == stem), None)
 
     def overrides_path(self, stem: str) -> Path:
         return self.vault_dir / "overrides" / f"{stem}.json"
@@ -58,7 +77,8 @@ class Workspace:
     def released(self, stem: str) -> list[Path]:
         """What export puts in ready-to-upload/: the redacted PDF only (the .txt stays in work/),
         under a name with your details taken out, as the pages have them: Claude sees it too."""
-        return [self.ready / f"{self.public_name(stem)}.redacted.pdf"]
+        public = "/".join(self.public_name(part) for part in stem.split("/"))  # a folder may be a name
+        return [self.ready / f"{public}.redacted.pdf"]
 
     def stale(self, stem: str) -> list[Path]:
         """Everything an export of this document may have left in ready-to-upload/, by any name."""
@@ -112,14 +132,15 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
             release: bool = True, progress: Progress = NONE) -> Outcome:
     """Redact and verify one file. `release` copies it to ready-to-upload/ when it passes;
     the review UI releases separately, on export."""
-    stem = output_stem(Path(src))
+    stem = ws.stem(Path(src))
     for old in ws.stale(stem):  # never leave a stale release behind if this run fails
         old.unlink(missing_ok=True)
     out = ws.outputs(stem)
     overrides = Overrides.load(ws.overrides_path(stem))
+    out["pdf"].parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        result = redact_file(src, ws.work, matcher, vault, overrides, progress=progress)
+        result = redact_file(src, out["pdf"].parent, matcher, vault, overrides, progress=progress, stem=stem)
     except Exception as e:  # one unreadable file (locked, corrupt) is held back; the rest still run
         result = None
         report = Report(pdf=str(src), issues=[Issue("error", type(e).__name__, detail=str(e)[:300])])
@@ -133,7 +154,8 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
         if retry:
             # what OCR sees on these pages isn't what their text layer says (a broken font
             # encoding, text drawn as outlines): redact them from what they show instead
-            result = redact_file(src, ws.work, matcher, vault, overrides, as_images=retry, progress=progress)
+            result = redact_file(src, out["pdf"].parent, matcher, vault, overrides, as_images=retry,
+                                 progress=progress, stem=stem)
             found = [Known(f.kind, f.text) for f in result.findings]
             report = _verify(ws, stem, matcher, vault, overrides, found, ocr, result, progress)
             pages = ", ".join(str(n + 1) for n in sorted(retry))
@@ -143,8 +165,8 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
         if missed:
             # verification's OCR read something the redactor's reads of the original didn't
             # (another resolution, the JPEG): read the built pages as verification does too
-            result = redact_file(src, ws.work, matcher, vault, overrides, as_images=retry, progress=progress,
-                                 as_verified=missed)
+            result = redact_file(src, out["pdf"].parent, matcher, vault, overrides, as_images=retry,
+                                 progress=progress, as_verified=missed, stem=stem)
             found = [Known(f.kind, f.text) for f in result.findings]
             report = _verify(ws, stem, matcher, vault, overrides, found, ocr, result, progress)
             pages = ", ".join(str(n + 1) for n in sorted(missed))
@@ -230,6 +252,7 @@ def export(ws: Workspace, stem: str) -> list[Path]:
         old.unlink(missing_ok=True)
     released = []
     for built, dest in zip((out["pdf"],), ws.released(stem), strict=True):
+        dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(built, dest)
         released.append(dest)
     return released

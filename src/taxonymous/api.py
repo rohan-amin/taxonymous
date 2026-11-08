@@ -9,12 +9,14 @@ the same browser can't drive it). It makes no outbound connections.
   PUT    /api/profile                           save them (validated; 422 names the fields to fix)
   POST   /api/profile/items                     {"kind": "person"|"address"|"account"|..., "item": {...}}
                                                 add one detail seen in a document (422 names the fields)
-  GET    /api/documents                         every document in inbox/, with its status
-  POST   /api/documents                         upload a file into inbox/ (multipart "file")
+  GET    /api/documents                         every document in inbox/ and its folders, with its status
+  POST   /api/documents                         upload a file into inbox/ (multipart "file", and
+                                                "folder" to put it in one: "2024")
   GET    /api/documents/{id}                    status, report, boxes, reviewer decisions, page sizes
   GET    /api/documents/{id}/pages/{n}/original.png | redacted.png   (?dpi=)
   GET    /api/documents/{id}/text               the redacted placeholder text
-  POST   /api/run                               redact + verify everything (queued)
+  POST   /api/run?folder=<F>                    redact + verify everything, or everything in one
+                                                folder and the folders inside it (queued)
   POST   /api/documents/{id}/run                redact + verify one document (queued)
   GET    /api/status                            what the worker is doing
   POST   /api/documents/{id}/redactions         {"boxes": [{"page": n, "rect": [x0, y0, x1, y1]}]}
@@ -32,9 +34,11 @@ the same browser can't drive it). It makes no outbound connections.
 The review UI (ui/, built into ui/dist) is served at /. Its files hold no data,
 so they need no token; every /api request does.
 
-Every change to a document re-runs it. Document ids are the output stem
-(`w2` for w2.pdf, `receipt.jpg` for receipt.jpg); real values never appear in
-any response except the original page images and /api/profile.
+Every change to a document re-runs it. Document ids are its path in inbox/ as an
+output stem (`w2` for w2.pdf, `receipt.jpg` for receipt.jpg, `2024/w2` for
+2024/w2.pdf), so they can hold slashes. Real values never appear in any response
+except the original page images, /api/profile, and the file and folder names you
+gave your documents.
 """
 
 import hmac
@@ -50,7 +54,7 @@ from pathlib import Path
 from typing import Annotated
 
 import pymupdf
-from fastapi import Body, FastAPI, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -60,7 +64,7 @@ from .pipeline import Workspace, export, process, reverify
 from .profile import Profile, add_item, clean
 from .profile import save as save_profile
 from .progress import Progress
-from .redact import IMAGE_SUFFIXES, SUFFIXES, Overrides, load_image, manual_key, output_stem
+from .redact import IMAGE_SUFFIXES, SUFFIXES, Overrides, load_image, manual_key
 from .vault import Vault
 
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -171,10 +175,18 @@ class Worker:
 # ---------------------------------------------------------------- helpers
 
 def _source(ws: Workspace, stem: str) -> Path:
-    for src in ws.pending():
-        if output_stem(src) == stem:
-            return src
-    raise HTTPException(404, f"no document {stem!r}")
+    src = ws.source(stem)
+    if src is None:
+        raise HTTPException(404, f"no document {stem!r}")
+    return src
+
+
+def _folder(folder: str) -> str:
+    """A folder inside inbox/ as the UI names it ("2024", "2024/brokerage"), checked."""
+    parts = folder.replace("\\", "/").strip("/").split("/") if folder.strip("/") else []
+    if any(not p or p.startswith(".") or p != p.strip() for p in parts):
+        raise HTTPException(400, f"not a folder name: {folder!r}")
+    return "/".join(parts)
 
 
 def _read_json(path: Path, default):
@@ -209,13 +221,14 @@ def _page_sizes(ws: Workspace, src: Path, stem: str) -> list[list[float]]:
 
 
 def _summary(ws: Workspace, worker: Worker, src: Path) -> dict:
-    stem = output_stem(src)
+    stem = ws.stem(src)
     regions = _read_json(ws.outputs(stem)["regions"], [])
     report = _read_json(ws.outputs(stem)["report"], None)
     pdf = ws.outputs(stem)["pdf"]
     return {
         "id": stem,
         "name": src.name,
+        "folder": src.parent.relative_to(ws.inbox).as_posix().removeprefix("."),  # "" for inbox/ itself
         "status": _status(ws, worker, stem),
         "version": pdf.stat().st_mtime_ns if pdf.exists() else 0,  # changes whenever the output does
         "exported": all(p.exists() for p in ws.released(stem)),
@@ -283,7 +296,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         if errors:
             raise HTTPException(422, {"message": "Some details need fixing.", "fields": errors})
         save_profile(profile, ws.profile_path)
-        stems = [output_stem(src) for src in ws.pending()]
+        stems = [ws.stem(src) for src in ws.pending()]
         processed = [stem for stem in stems if ws.outputs(stem)["report"].exists()]
         return {"exists": True, "profile": profile, "errors": {}, "path": str(ws.profile_path),
                 "processed": processed}
@@ -304,13 +317,15 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         return [_summary(ws, worker, src) for src in ws.pending()]
 
     @app.post("/api/documents", status_code=201)
-    async def upload(file: UploadFile):
+    async def upload(file: UploadFile, folder: Annotated[str, Form()] = ""):
         name = Path(file.filename or "").name
         if not name or name.startswith(".") or Path(name).suffix.lower() not in SUFFIXES:
             raise HTTPException(400, "only PDFs and images (JPG, PNG, HEIC, TIFF, WebP)")
-        dest = ws.inbox / name
+        folder = _folder(folder)
+        dest = ws.inbox / folder / name
         if dest.exists():
-            raise HTTPException(409, f"{name} is already in the inbox")
+            raise HTTPException(409, f"{name} is already in {folder or 'the inbox'}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
         data = await file.read(MAX_UPLOAD + 1)
         if len(data) > MAX_UPLOAD:
             raise HTTPException(413, "file too large")
@@ -319,20 +334,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         tmp.rename(dest)
         return _summary(ws, worker, dest)
 
-    @app.get("/api/documents/{stem}")
-    def document(stem: str):
-        src = _source(ws, stem)
-        o = overrides(stem)
-        out = ws.outputs(stem)
-        return {**_summary(ws, worker, src),
-                "pages": _page_sizes(ws, src, stem),
-                "regions": _read_json(out["regions"], []),
-                "report": _read_json(out["report"], None),
-                "kept": sorted(o.keep),
-                "shown": [{"page": n, "rect": list(r), "placeholder": ph} for n, r, ph in o.show],
-                "added": [{"page": n, "rect": list(r)} for n, r in o.add]}
-
-    @app.get("/api/documents/{stem}/pages/{n}/{which}.png")
+    @app.get("/api/documents/{stem:path}/pages/{n}/{which}.png")
     def page_image(stem: str, n: int, which: str, dpi: int = 110):
         src = _source(ws, stem)
         dpi = max(DPI_RANGE[0], min(DPI_RANGE[1], dpi))
@@ -360,8 +362,10 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
             raise HTTPException(404, "no such page")
         return Response(_png(doc[n], dpi), media_type="image/png", headers={"Cache-Control": "no-store"})
 
-    @app.get("/api/documents/{stem}/text", response_class=PlainTextResponse)
+    @app.get("/api/documents/{stem:path}/text", response_class=PlainTextResponse)
     def text(stem: str):
+        if ws.source(stem) is None and ws.source(f"{stem}/text") is not None:
+            return JSONResponse(document(f"{stem}/text"))  # a document named text, in a folder
         _source(ws, stem)
         txt = ws.outputs(stem)["txt"]
         if not txt.exists():
@@ -369,15 +373,17 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         return txt.read_text()
 
     @app.post("/api/run", status_code=202)
-    def run_all():
+    def run_all(folder: str = ""):
         need_profile()
-        stems = [output_stem(src) for src in ws.pending()]
+        folder = _folder(folder)
+        stems = [ws.stem(src) for src in ws.pending()]
+        stems = [s for s in stems if not folder or s.startswith(folder + "/")]
         for stem in stems:
             if not worker.busy(stem):
                 worker.submit(Job(stem, "process"))
         return {"queued": stems}
 
-    @app.post("/api/documents/{stem}/run", status_code=202)
+    @app.post("/api/documents/{stem:path}/run", status_code=202)
     def run_one(stem: str):
         _source(ws, stem)
         need_profile()
@@ -388,7 +394,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
     def status():
         return worker.status()
 
-    @app.post("/api/documents/{stem}/redactions", status_code=202)
+    @app.post("/api/documents/{stem:path}/redactions", status_code=202)
     def add_redactions(stem: str, body: Boxes):
         src = _source(ws, stem)
         sizes = _page_sizes(ws, src, stem)
@@ -404,7 +410,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         worker.submit(Job(stem, "process"))
         return {"queued": [stem]}
 
-    @app.delete("/api/documents/{stem}/redactions", status_code=202)
+    @app.delete("/api/documents/{stem:path}/redactions", status_code=202)
     def remove_redaction(stem: str, placeholder: str):
         _source(ws, stem)
         regions = _read_json(ws.outputs(stem)["regions"], [])
@@ -426,7 +432,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         worker.submit(Job(stem, "process", forget))
         return {"queued": [stem]}
 
-    @app.post("/api/documents/{stem}/shown", status_code=202)
+    @app.post("/api/documents/{stem:path}/shown", status_code=202)
     def show_one(stem: str, body: Box):
         _source(ws, stem)
         regions = _read_json(ws.outputs(stem)["regions"], [])
@@ -442,7 +448,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         worker.submit(Job(stem, "process"))
         return {"queued": [stem]}
 
-    @app.delete("/api/documents/{stem}/shown/{index}", status_code=202)
+    @app.delete("/api/documents/{stem:path}/shown/{index}", status_code=202)
     def unshow(stem: str, index: int):
         _source(ws, stem)
         o = overrides(stem)
@@ -453,7 +459,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         worker.submit(Job(stem, "process"))
         return {"queued": [stem]}
 
-    @app.delete("/api/documents/{stem}/kept", status_code=202)
+    @app.delete("/api/documents/{stem:path}/kept", status_code=202)
     def unkeep(stem: str, placeholder: str):
         _source(ws, stem)
         o = overrides(stem)
@@ -464,7 +470,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         worker.submit(Job(stem, "process"))
         return {"queued": [stem]}
 
-    @app.post("/api/documents/{stem}/verify", status_code=202)
+    @app.post("/api/documents/{stem:path}/verify", status_code=202)
     def verify_again(stem: str):
         _source(ws, stem)
         if not ws.outputs(stem)["pdf"].exists():
@@ -472,7 +478,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         worker.submit(Job(stem, "verify"))
         return {"queued": [stem]}
 
-    @app.post("/api/documents/{stem}/export")
+    @app.post("/api/documents/{stem:path}/export")
     def export_one(stem: str):
         _source(ws, stem)
         state = _status(ws, worker, stem)
@@ -482,6 +488,20 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         if not released:
             raise HTTPException(409, "cannot export: verification has not passed")
         return {"released": [p.name for p in released]}
+
+    # last: an id holds slashes, so this would take every /api/documents/... GET above
+    @app.get("/api/documents/{stem:path}")
+    def document(stem: str):
+        src = _source(ws, stem)
+        o = overrides(stem)
+        out = ws.outputs(stem)
+        return {**_summary(ws, worker, src),
+                "pages": _page_sizes(ws, src, stem),
+                "regions": _read_json(out["regions"], []),
+                "report": _read_json(out["report"], None),
+                "kept": sorted(o.keep),
+                "shown": [{"page": n, "rect": list(r), "placeholder": ph} for n, r, ph in o.show],
+                "added": [{"page": n, "rect": list(r)} for n, r in o.add]}
 
     if ui_dir is not None and (ui_dir / "index.html").exists():
         root = ui_dir.resolve()

@@ -398,3 +398,65 @@ def test_something_left_readable_is_added_to_your_details_and_redacted(fresh_pag
     pg.get_by_role("button", name="Add to my details").click()  # the fields follow the kind
     form.get_by_label("Kind").select_option("account")
     assert form.get_by_label("Institution").count() == form.get_by_label("Account name").count() == 1
+
+
+@pytest.fixture(scope="module")
+def folder_site(corpus, tmp_path_factory):
+    """A workspace whose inbox has a folder per year, each with a w2.pdf."""
+    import uvicorn
+    src, _, profile = corpus
+    ws = Workspace(tmp_path_factory.mktemp("uifolders"))
+    ws.init()
+    ws.profile_path.write_text(json.dumps(profile))
+    for year in ("2023", "2024"):
+        (ws.inbox / year).mkdir()
+        shutil.copyfile(src / "w2.pdf", ws.inbox / year / "w2.pdf")
+    shutil.copyfile(src / "k1_statement.pdf", ws.inbox / "k1_statement.pdf")
+    app = create_app(ws, TOKEN, ocr=False)
+    port = free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    threading.Thread(target=server.run, daemon=True).start()
+    while not server.started:
+        time.sleep(0.05)
+    yield f"http://127.0.0.1:{port}", app, ws
+    server.should_exit = True
+
+
+def test_the_sidebar_shows_folders_that_fold_run_and_pick(folder_site, browser):
+    url, app, ws = folder_site
+    pg = browser.new_page(viewport={"width": 1500, "height": 950}, base_url=url)
+    errors: list[str] = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    pg.goto(f"{url}/?token={TOKEN}")
+    folders = pg.locator("[data-testid=folder]")
+    folders.first.wait_for()
+    assert [folders.nth(i).get_attribute("data-folder") for i in range(folders.count())] == ["2023", "2024"]
+    docs = pg.locator("[data-testid=documents] li:not(.folder)")
+    assert [docs.nth(i).get_attribute("data-folder") for i in range(docs.count())] == ["2023", "2024", ""]
+
+    # Run on one folder runs that folder only
+    pg.get_by_role("button", name="Run 2024").click()
+    time.sleep(0.3)
+    app.state.worker.wait()
+    year = pg.locator("[data-testid=folder][data-folder='2024']")
+    year.locator(".tally .ok").wait_for(timeout=10_000)
+    statuses = {d["id"]: d["status"] for d in pg.request.get(
+        "/api/documents", headers={"X-Taxonymous-Token": TOKEN}).json()}
+    assert statuses == {"2023/w2": "new", "2024/w2": "passed", "k1_statement": "new"}
+
+    # opening a document shows its folder, and new files would go there
+    pg.locator("[data-testid=documents] li[data-folder='2024']:not(.folder) button").click()
+    pg.wait_for_function("document.querySelector('.viewer .title')?.innerText.includes('2024 /')")
+    assert "2024" in pg.locator("[data-testid=target]").inner_text()
+
+    # a folder's box picks everything in it that passed
+    year.locator("input.pick").check()
+    assert pg.get_by_role("button", name="Export selected (1)").is_enabled()
+
+    # folding a folder hides what is in it
+    pg.locator("[data-testid=folder][data-folder='2023'] .fold").click()
+    hidden = "[data-testid=documents] li[data-folder='2023']:not(.folder)"
+    pg.wait_for_function(f"!document.querySelector({hidden!r})")
+    assert docs.count() == 2
+    pg.close()
+    assert not errors

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DragEvent } from "react";
-import { api, busy, token } from "./api";
+import { api, busy, label, token } from "./api";
 import type { DocSummary, Profile } from "./api";
 import { Details } from "./Details";
-import { ProgressBar, Viewer } from "./Viewer";
+import { DocTree, tree } from "./DocTree";
+import { Viewer } from "./Viewer";
 
 const ACCEPT = ".pdf,.jpg,.jpeg,.png,.tif,.tiff,.heic,.heif,.webp";
 
@@ -12,6 +13,25 @@ const COUNTED: [keyof Profile, string, string][] = [
   ["people", "person", "people"], ["addresses", "address", "addresses"], ["accounts", "account", "accounts"],
   ["eins", "EIN", "EINs"], ["cards", "card", "cards"], ["phones", "phone", "phones"], ["emails", "email", "emails"],
 ];
+
+// which folders are folded: a convenience of this browser, so it may not be there
+const FOLDED = "taxonymous-folded";
+
+function loadFolded(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(FOLDED) ?? "[]") as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveFolded(s: Set<string>) {
+  try {
+    localStorage.setItem(FOLDED, JSON.stringify([...s]));
+  } catch {
+    /* not kept: fine */
+  }
+}
 
 function listed(p: Profile): string[] {
   return COUNTED.flatMap(([key, one, many]) => {
@@ -32,6 +52,8 @@ export function App() {
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState<string | null>(null);
   const [pendingMarks, setPendingMarks] = useState(0); // in the open document, not yet applied
+  const [folded, setFolded] = useState<Set<string>>(loadFolded);
+  const [target, setTarget] = useState(""); // the folder Add files puts new files in; "" is inbox/
 
   const loadProfile = useCallback(() => api.profile().then((p) => {
     setHasProfile(p.exists);
@@ -69,11 +91,11 @@ export function App() {
     return () => clearInterval(t);
   }, [working, refresh]);
 
-  const upload = async (files: FileList | File[]) => {
+  const upload = async (files: FileList | File[], folder = target) => {
     const errors: string[] = [];
     for (const f of Array.from(files)) {
       try {
-        await api.upload(f);
+        await api.upload(f, folder);
       } catch (err) {
         errors.push(`${f.name}: ${(err as Error).message}`);
       }
@@ -97,9 +119,9 @@ export function App() {
   }
 
   const current = docs?.find((d) => d.id === selected) ?? null;
-  const runAll = async () => {
+  const runAll = async (folder = "") => {
     try {
-      await api.runAll();
+      await api.runAll(folder);
       setView("documents");
     } catch (err) {
       setError((err as Error).message);
@@ -110,9 +132,17 @@ export function App() {
   const exportable = (d: DocSummary) => d.status === "passed";
   const passed = docs?.filter(exportable) ?? [];
   const chosen = passed.filter((d) => picked.has(d.id));
-  const toggle = (id: string) => setPicked((p) => {
+  const pick = (ids: string[], on: boolean) => setPicked((p) => {
     const next = new Set(p);
-    if (next.has(id)) next.delete(id); else next.add(id);
+    for (const id of ids) {
+      if (on) next.add(id); else next.delete(id);
+    }
+    return next;
+  });
+  const fold = (path: string) => setFolded((f) => {
+    const next = new Set(f);
+    if (next.has(path)) next.delete(path); else next.add(path);
+    saveFolded(next);
     return next;
   });
   const exportChosen = async () => {
@@ -121,23 +151,22 @@ export function App() {
     const failed: string[] = [];
     for (const d of chosen) {
       if (d.id === selected && view === "documents" && pendingMarks) {
-        failed.push(`${d.name}: apply your marks with Final scrub first`);
+        failed.push(`${label(d)}: apply your marks with Final scrub first`);
         continue;
       }
       try {
         await api.export(d.id);
-        done.push(d.name);
+        done.push(d.id);
       } catch (err) {
-        failed.push(`${d.name}: ${(err as Error).message}`);
+        failed.push(`${label(d)}: ${(err as Error).message}`);
       }
     }
     setExporting(false);
-    setPicked(new Set(failed.length ? chosen.filter((d) => !done.includes(d.name)).map((d) => d.id) : []));
+    setPicked(new Set(failed.length ? chosen.filter((d) => !done.includes(d.id)).map((d) => d.id) : []));
     setExported(done.length ? `Exported ${done.length} to ready-to-upload/` : null);
     setError(failed.length ? `Not exported: ${failed.join("; ")}` : null);
     refresh();
   };
-  const counts = (d: DocSummary) => Object.values(d.redactions).reduce((a, b) => a + b, 0);
 
   return (
     <div className={`app${dragging ? " dragging" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -163,9 +192,16 @@ export function App() {
             <input type="file" multiple accept={ACCEPT} hidden
                    onChange={(e) => e.target.files && upload(e.target.files)} />
           </label>
-          <button type="button" onClick={runAll} disabled={!docs?.length || !hasProfile}
+          <button type="button" onClick={() => runAll()} disabled={!docs?.length || !hasProfile}
                   title={hasProfile ? "Redact and verify every document" : "Add your details first"}>Run all</button>
         </div>
+        {target && (
+          <div className="side-target muted" data-testid="target">
+            New files go into <strong>{target.replaceAll("/", " / ")}</strong>
+            <button type="button" className="link" onClick={() => setTarget("")}
+                    title="Put new files in inbox/ itself">inbox instead</button>
+          </div>
+        )}
         {passed.length > 0 && (
           <div className="side-export">
             <label title="Pick every document that passed verification">
@@ -183,24 +219,11 @@ export function App() {
         {exported && <div className="side-ok">{exported}</div>}
         {error && <div className="side-error">{error}</div>}
         <ul className="docs" data-testid="documents">
-          {docs?.map((d) => (
-            <li key={d.id}>
-              <input type="checkbox" className="pick" aria-label={`Pick ${d.name} for export`}
-                     checked={exportable(d) && picked.has(d.id)} disabled={!exportable(d)}
-                     title={exportable(d) ? "Pick for Export selected" : "Only a document that passed can be exported"}
-                     onChange={() => toggle(d.id)} />
-              <button type="button" className={d.id === selected && view === "documents" ? "active" : ""}
-                      onClick={() => { setSelected(d.id); setView("documents"); }}>
-                <span className="name">{d.name}</span>
-                <span className="meta">
-                  <span className={`badge ${d.status}`}>{d.status}</span>
-                  {d.exported && <span className="badge exported">exported</span>}
-                  {d.version > 0 && <span className="muted">{counts(d)} redacted</span>}
-                </span>
-                {d.progress && <ProgressBar p={d.progress} compact />}
-              </button>
-            </li>
-          ))}
+          {docs && <DocTree root={tree(docs)} selected={selected} active={view === "documents"} picked={picked}
+                            collapsed={folded} target={target} canRun={!!hasProfile}
+                            onSelect={(d) => { setSelected(d.id); setTarget(d.folder); setView("documents"); }}
+                            onPick={pick} onFold={fold} onTarget={setTarget} onRun={runAll}
+                            onDropInto={(path, files) => { setDragging(false); upload(files, path); }} />}
           {docs && !docs.length && <li className="muted hint">Drop PDFs or photos here, or use Add files.</li>}
         </ul>
         <div className="foot muted">Everything stays on this computer.</div>

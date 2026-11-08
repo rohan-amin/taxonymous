@@ -378,6 +378,7 @@ export function Viewer({ summary, onChanged, onMarks, onDetails }: {
     <div className="viewer">
       <div className="toolbar">
         <div className="title">
+          {detail.folder && <span className="muted folder-path">{detail.folder.replaceAll("/", " / ")} /</span>}
           <strong>{detail.name}</strong>
           <span className={`badge ${detail.status}`} data-testid="status">{detail.status}</span>
           {detail.exported && <span className="badge exported">exported</span>}
