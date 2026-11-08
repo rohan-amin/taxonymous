@@ -67,6 +67,8 @@ uv run taxonymous serve --workspace ~/Taxes/taxonymous
 
 The review screen opens in your web browser. Keep the Terminal window open while you work; close it (or press Control-C) to stop.
 
+Your work is saved in the workspace. When you start it again, documents that passed stay passed and don't need to be run again. **Run all** (and a folder's **Run**) cleans every document in it again, so after adding a file or fixing one, run just that document.
+
 1. **Your details:** fill in everyone on your return and **Save**. Only the name is required for a person; add whatever else you have.
 2. **Add files** (or drag PDFs and photos onto the window), then **Run all**.
 3. **Review** each document. The original is on the left, the cleaned copy on the right, and they scroll together. If something of yours is still showing:
@@ -116,7 +118,7 @@ Keep the `vault` folder private. It holds your real details in plain text.
 
 ## When something is missed or a document fails
 
-A document **fails** when the check finds one of your details still in the cleaned copy. It stays in `work` and is not exported, and the review screen shows which kind of detail was found and on which page. Something is **missed** when you spot one of your details on the review screen that the check didn't flag.
+A document **fails** when the check finds one of your details still in the cleaned copy. It stays in `work` and is not exported, and the review screen shows which kind of detail was found and on which page. A document can also fail a **structure** check, when the cleaned file holds something its pages don't show (such as text past the page's edge). That is a fault in Taxonymous, not in your details: report it with `explain` output as below. Something is **missed** when you spot one of your details on the review screen that the check didn't flag.
 
 Either way, there are three fixes, from quickest to most involved:
 
