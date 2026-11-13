@@ -304,3 +304,39 @@
 .ws-dropping { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--w-accent) 18%, transparent); border: 3px dashed var(--w-accent); font-size: 18px; font-weight: 600; color: var(--w-ink); pointer-events: none; }
 .ws-toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 25; display: flex; align-items: center; gap: 10px; max-width: 560px; padding: 10px 14px; border-radius: 8px; background: var(--w-ink); color: var(--w-ground); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2); }
 .ws-profile-view { flex: 1; min-height: 0; overflow-y: auto; -webkit-user-select: text; user-select: text; }
+
+/* click a value */
+.ws-page.picking img { cursor: default; }
+.ws-word { position: absolute; margin: 0; padding: 0; border: 0; border-radius: 2px; background: transparent; cursor: pointer; outline-offset: 1px; }
+.ws-word:hover { background: rgba(31, 78, 67, 0.14); outline: 1.5px solid var(--w-accent); }
+.ws-word.on { background: rgba(31, 78, 67, 0.22); outline: 2px solid var(--w-accent); }
+.ws-word:focus-visible { outline: 2px solid var(--w-accent); }
+.ws-add {
+  position: absolute;
+  z-index: 5;
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--w-surface);
+  color: var(--w-ink);
+  border: 1px solid var(--w-line-strong);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  cursor: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.ws-add-head { display: flex; flex-direction: column; gap: 2px; }
+.ws-add-head span, .ws-add-tip, .ws-add-wait { color: var(--w-muted); font-size: 12px; }
+.ws-add-note { padding: 8px 10px; border-radius: 6px; background: var(--w-look-bg); color: var(--w-look); font-size: 12px; }
+.ws-add-error { color: var(--w-look); font-size: 12px; }
+.ws-add-fields { display: flex; flex-direction: column; gap: 8px; }
+.ws-add .field { width: auto; color: var(--w-muted); }
+.ws-add .field input, .ws-add .field select { font-size: 13px; color: var(--w-ink); background: var(--w-sunk); border-color: var(--w-line-strong); padding: 5px 8px; }
+.ws-add .field-error { color: var(--w-look); font-style: normal; font-size: 11px; }
+.ws-add-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ws-add-tip { flex-basis: 100%; }
+.ws .ws-add-more { align-self: flex-start; height: 24px; padding: 0 6px; margin: -4px 0 -2px -6px; font-size: 12px; }

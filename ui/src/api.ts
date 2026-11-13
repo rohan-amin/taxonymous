@@ -172,6 +172,22 @@ export interface Profile {
 export type DetailKind = "person" | "address" | "account" | "phone" | "email" | "ein" | "card" | "number"
   | "preparer";
 
+// a word on an original page, in page points (from its text layer, or OCR on a scan)
+export interface PageWord {
+  text: string;
+  rect: Rect;
+  line: number;
+}
+
+// what words the reviewer clicked probably are (taxonymous/suggest.py): a row to add
+export interface Suggestion {
+  words: number[]; // what the click grew to: the whole name, street or phone number
+  text: string;
+  kind: DetailKind;
+  item: Record<string, string>;
+  note: string | null; // a caution: an amount, a company, someone else's EIN
+}
+
 export interface ProfileState {
   exists: boolean;
   profile: Profile;
@@ -210,7 +226,11 @@ const doc = (id: string) => `/api/documents/${id.split("/").map(encodeURICompone
 export const api = {
   profile: () => call<ProfileState>("GET", "/api/profile"),
   saveProfile: (p: Profile) => call<ProfileState>("PUT", "/api/profile", p),
-  addDetail: (kind: DetailKind, item: Record<string, string>) => call("POST", "/api/profile/items", { kind, item }),
+  addDetail: (kind: DetailKind, item: Record<string, string>, rerun: string | null = null) =>
+    call<{ added: string; queued: string[] }>("POST", "/api/profile/items", { kind, item, rerun }),
+  words: (id: string, page: number) => call<{ words: PageWord[] }>("GET", `${doc(id)}/pages/${page}/words`),
+  suggest: (id: string, page: number, words: number[]) =>
+    call<Suggestion>("POST", `${doc(id)}/pages/${page}/suggest`, { words }),
   documents: () => call<DocSummary[]>("GET", "/api/documents"),
   document: (id: string) => call<DocDetail>("GET", doc(id)),
   text: (id: string) => call<string>("GET", `${doc(id)}/text`),

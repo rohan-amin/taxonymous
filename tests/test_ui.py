@@ -471,3 +471,50 @@ def test_the_sidebar_shows_folders_that_fold_run_and_pick(folder_site, browser):
     assert docs.count() == 2
     pg.close()
     assert not errors
+
+
+def test_workspace_click_a_value_to_add_it_to_my_profile(corpus, browser, tmp_path):
+    """The workspace on a first run: click your name on the W-2, check what it's taken for,
+    add it, and the W-2 is cleaned with it removed."""
+    import uvicorn
+    src, _, _ = corpus
+    ws = Workspace(tmp_path / "ws")
+    ws.init()
+    shutil.copyfile(src / "w2.pdf", ws.inbox / "w2.pdf")
+    app = create_app(ws, TOKEN)
+    port = free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    threading.Thread(target=server.run, daemon=True).start()
+    while not server.started:
+        time.sleep(0.05)
+    pg = browser.new_page(viewport={"width": 1400, "height": 900}, base_url=f"http://127.0.0.1:{port}")
+    errors: list[str] = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        pg.goto(f"/?token={TOKEN}&ui=workspace")
+        pg.get_by_role("button", name="Get started").click()
+        pg.get_by_role("button", name="Click a value").click()
+        pg.get_by_role("button", name="Add Avery to My profile").first.click()
+        form = pg.get_by_test_id("add-to-profile")
+        name = form.get_by_label("Full name")
+        pg.wait_for_function("document.querySelector('[data-testid=add-to-profile] input')?.value"
+                             " === 'Avery F Abernathy'", timeout=10_000)
+        assert form.get_by_label("What is it").input_value() == "person"
+        assert form.get_by_label("Who").input_value() == "taxpayer"  # the first person is you
+        assert pg.locator(".ws-word.on").count() == 3  # the click grew to the whole name
+        pg.screenshot(path=str(tmp_path / "click-to-add.png"))
+        name.fill("Avery F Abernathy")
+        form.get_by_role("button", name="Add and clean again").click()
+        pg.get_by_text("Added to My profile").wait_for()
+        assert json.loads(ws.profile_path.read_text())["people"][0]["name"] == "Avery F Abernathy"
+        app.state.worker.wait()
+        pg.get_by_text("Safe to share").first.wait_for(timeout=20_000)
+        # removed now: no longer offered to click
+        pg.get_by_role("button", name="Click a value").click()
+        pg.get_by_role("button", name="Click a value").click()
+        pg.locator(".ws-word").first.wait_for()
+        assert pg.get_by_role("button", name="Add Avery to My profile").count() == 0
+    finally:
+        pg.close()
+        server.should_exit = True
+    assert not errors

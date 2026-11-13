@@ -7,13 +7,21 @@ the same browser can't drive it). It makes no outbound connections.
 
   GET    /api/profile                           your identifiers (vault/profile.json), as a form edits them
   PUT    /api/profile                           save them (validated; 422 names the fields to fix)
-  POST   /api/profile/items                     {"kind": "person"|"address"|"account"|..., "item": {...}}
-                                                add one detail seen in a document (422 names the fields)
+  POST   /api/profile/items                     {"kind": "person"|"address"|"account"|..., "item": {...},
+                                                 "rerun": id | null} add one detail seen in a document
+                                                (422 names the fields); with rerun, that document is
+                                                cleaned again first, then every other cleaned one.
+                                                A person can be the first detail (it is you)
   GET    /api/documents                         every document in inbox/ and its folders, with its status
   POST   /api/documents                         upload a file into inbox/ (multipart "file", and
                                                 "folder" to put it in one: "2024")
   GET    /api/documents/{id}                    status, report, boxes, reviewer decisions, page sizes
   GET    /api/documents/{id}/pages/{n}/original.png | redacted.png   (?dpi=)
+  GET    /api/documents/{id}/pages/{n}/words    the words on the original page, with their boxes
+                                                (page points), read by OCR on a scan; kept in memory
+  POST   /api/documents/{id}/pages/{n}/suggest  {"words": [i, ...]} what those words probably are:
+                                                {"words", "text", "kind", "item", "note"} to add to your
+                                                details (one word grows to the whole name or phone)
   GET    /api/documents/{id}/text               the redacted placeholder text
   POST   /api/run?folder=<F>                    redact + verify everything, or everything in one
                                                 folder and the folders inside it (queued)
@@ -41,8 +49,8 @@ so they need no token; every /api request does.
 Every change to a document re-runs it. Document ids are its path in inbox/ as an
 output stem (`w2` for w2.pdf, `receipt.jpg` for receipt.jpg, `2024/w2` for
 2024/w2.pdf), so they can hold slashes. Real values never appear in any response
-except the original page images, /api/profile, and the file and folder names you
-gave your documents.
+except the original page images and words, a suggestion for words you chose,
+/api/profile, and the file and folder names you gave your documents.
 """
 
 import hmac
@@ -71,7 +79,9 @@ from .profile import Profile, add_item, clean
 from .profile import save as save_profile
 from .progress import Progress
 from .redact import IMAGE_SUFFIXES, SUFFIXES, Overrides, load_image, manual_key
+from .suggest import grow, label_for, suggest
 from .vault import Vault
+from .words import page_words
 
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 TOKEN_HEADER = "X-Taxonymous-Token"
@@ -336,6 +346,11 @@ class MergeOptions(BaseModel):
 class Detail(BaseModel):
     kind: str  # one of profile.ITEMS
     item: dict[str, str | bool]  # the fields of one row of that list, as Your details has them
+    rerun: str | None = None  # the document it was seen in: cleaned again first, then the others
+
+
+class Chosen(BaseModel):
+    words: list[int]  # indices into the page's words
 
 
 # ---------------------------------------------------------------- app
@@ -385,14 +400,28 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
 
     @app.post("/api/profile/items")
     def add_to_profile(body: Detail):
-        """One detail the reviewer saw left readable in a document, added to their details."""
-        need_profile()
-        profile, errors = add_item(json.loads(ws.profile_path.read_text()), body.kind, body.item)
+        """One detail the reviewer saw left readable in a document, added to their details.
+        With no details yet, the first can be a person (clicked on a W-2): it is you."""
+        first = not ws.profile_path.exists()
+        if first and body.kind != "person":
+            need_profile()
+        profile, errors = add_item({} if first else json.loads(ws.profile_path.read_text()),
+                                   body.kind, {"role": "taxpayer", **body.item} if first else body.item)
         if errors:
             message = errors.pop("", "Some details need fixing.")
             raise HTTPException(422, {"message": message, "fields": errors})
         save_profile(profile, ws.profile_path)
-        return {"added": body.kind}
+        queued = []
+        if body.rerun is not None:
+            _source(ws, body.rerun)
+            stems = [ws.stem(src) for src in ws.pending()]
+            # everything, the first time (nothing could be cleaned before); else what was cleaned
+            again = [s for s in stems if s != body.rerun and (first or ws.outputs(s)["report"].exists())]
+            for stem in [body.rerun, *again]:
+                if not worker.busy(stem):
+                    worker.submit(Job(stem, "process"))
+                    queued.append(stem)
+        return {"added": body.kind, "queued": queued}
 
     @app.get("/api/documents")
     def documents():
@@ -443,6 +472,35 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         if not 0 <= n < doc.page_count:
             raise HTTPException(404, "no such page")
         return Response(_png(doc[n], dpi), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    def words_of(stem: str, n: int):
+        src = _source(ws, stem)
+        size = None
+        if src.suffix.lower() in IMAGE_SUFFIXES:
+            sizes = _page_sizes(ws, src, stem)
+            size = tuple(sizes[0]) if sizes else None
+        try:
+            return page_words(src, n, size)
+        except IndexError as e:
+            raise HTTPException(404, str(e)) from None
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from None
+
+    @app.get("/api/documents/{stem:path}/pages/{n}/words")
+    def words(stem: str, n: int):
+        return {"words": [w.json() for w in words_of(stem, n)]}
+
+    @app.post("/api/documents/{stem:path}/pages/{n}/suggest")
+    def suggestion(stem: str, n: int, body: Chosen):
+        found = words_of(stem, n)
+        chosen = sorted({i for i in body.words if 0 <= i < len(found)})
+        if not chosen:
+            raise HTTPException(422, "Choose a word first.")
+        chosen = grow(found, chosen)
+        text = " ".join(found[i].text for i in chosen)
+        people = ws.profile_path.exists() and bool(json.loads(ws.profile_path.read_text()).get("people"))
+        kind, item, note = suggest(text, label_for(found, chosen), has_people=people)
+        return {"words": chosen, "text": text, "kind": kind, "item": item, "note": note}
 
     @app.get("/api/documents/{stem:path}/text", response_class=PlainTextResponse)
     def text(stem: str):

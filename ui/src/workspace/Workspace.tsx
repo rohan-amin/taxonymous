@@ -5,6 +5,8 @@ import type { CSSProperties, DragEvent, KeyboardEvent, PointerEvent as RPointerE
 import { api, pageImage } from "../api";
 import type { Box, DocDetail, DocSummary, Profile } from "../api";
 import { Details } from "../Details";
+import { AddForm, WordLayer, popoverPlace, usePageWords } from "./ClickToAdd";
+import type { Picked } from "./ClickToAdd";
 import { DOT, plain, timeLeft } from "./messages";
 import type { Tone } from "./messages";
 import "./workspace.css";
@@ -166,13 +168,15 @@ function ProfileDrawer({ profile, onOpen }: { profile: Profile | null; onOpen: (
   );
 }
 
-function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, nextName, onChanged }: {
+function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, nextName, onChanged, onAdded }: {
   summary: DocSummary; hasProfile: boolean; zoom: number; setZoom: (z: number) => void;
   side: "redacted" | "original"; setSide: (s: "redacted" | "original") => void;
-  onNext: () => void; nextName: string | null; onChanged: () => void;
+  onNext: () => void; nextName: string | null; onChanged: () => void; onAdded: (queued: string[]) => void;
 }) {
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [drawing, setDrawing] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<Picked | null>(null);
   const [pending, setPending] = useState<Box[]>([]);
   const [drag, setDrag] = useState<{ page: number; x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -183,7 +187,28 @@ function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, ne
     api.document(id).then((d) => live && setDetail(d)).catch((e) => live && setError((e as Error).message));
     return () => { live = false; };
   }, [id, summary.version, summary.status]);
-  useEffect(() => { setPending([]); setDrawing(false); }, [id]);
+  useEffect(() => { setPending([]); setDrawing(false); setPicking(false); setPicked(null); }, [id]);
+  const { words, reading, failed } = usePageWords(id, detail?.pages.length ?? 0, picking);
+  useEffect(() => { if (failed) setError(failed); }, [failed]);
+
+  // a click picks a word (the engine grows it to the whole value); shift-click adds the words up to it
+  const pick = async (page: number, i: number, extend: boolean) => {
+    let chosen = [i];
+    if (extend && picked && picked.page === page) {
+      const all = [...picked.words, i];
+      const lo = Math.min(...all), hi = Math.max(...all);
+      chosen = Array.from({ length: hi - lo + 1 }, (_, k) => lo + k);
+    }
+    setPicked({ page, words: chosen, suggestion: null });
+    try {
+      const s = await api.suggest(id, page, chosen);
+      setPicked((p) => (p && p.page === page && p.words.join() === chosen.join()
+        ? { page, words: s.words, suggestion: s } : p));
+    } catch (e) {
+      setPicked(null);
+      setError((e as Error).message);
+    }
+  };
 
   const msg = plain(summary, hasProfile);
   const processed = summary.version > 0;
@@ -239,10 +264,13 @@ function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, ne
           </div>
         </div>
         <div className="ws-tools">
-          <button type="button" className="wbtn ws-tool" disabled title="Needs word positions from the engine: the next step">
-            <span>Click a value <span className="ws-soon">SOON</span></span><small>Removes it from all documents</small>
+          <button type="button" className={`wbtn ws-tool${picking ? " on" : ""}`} aria-pressed={picking}
+                  disabled={!detail?.pages.length}
+                  onClick={() => { setPicking(!picking); setPicked(null); setDrawing(false); }}>
+            <span>Click a value</span><small>Removes it from all documents</small>
           </button>
-          <button type="button" className={`wbtn ws-tool${drawing ? " on" : ""}`} onClick={() => setDrawing(!drawing)}
+          <button type="button" className={`wbtn ws-tool${drawing ? " on" : ""}`}
+                  onClick={() => { setDrawing(!drawing); setPicking(false); setPicked(null); }}
                   disabled={!processed} aria-pressed={drawing}>
             <span>Draw a box</span><small>This document only</small>
           </button>
@@ -250,7 +278,10 @@ function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, ne
             <button type="button" className="wbtn primary" onClick={apply}>Apply {pending.length} box{pending.length === 1 ? "" : "es"} and check again</button>
             <button type="button" className="wbtn quiet" onClick={() => setPending(pending.slice(0, -1))}>Undo</button>
           </>}
-          <span className="hint">{drawing ? "Drag over anything. It's blacked out on this document only." : ""}</span>
+          <span className="hint">{drawing ? "Drag over anything. It's blacked out on this document only."
+            : picking ? (reading !== null && !words.has(reading)
+              ? `Reading page ${reading + 1}…`
+              : "Click your name, an account number, or anything else of yours.") : ""}</span>
           <div className="seg" role="group" aria-label="Show">
             <button type="button" className={showing === "original" ? "on" : ""} onClick={() => setSide("original")}>Original</button>
             <button type="button" className={showing === "redacted" ? "on" : ""} onClick={() => setSide("redacted")} disabled={!processed}>Safe copy</button>
@@ -274,7 +305,8 @@ function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, ne
             width: `${((rect[2] - rect[0]) / w) * 100}%`, height: `${((rect[3] - rect[1]) / h) * 100}%`,
           });
           return (
-            <div key={n} className={`ws-page${drawing ? " drawing" : ""}`} style={{ width: w * zoom, height: h * zoom }}
+            <div key={n} className={`ws-page${drawing ? " drawing" : ""}${picking ? " picking" : ""}`}
+                 style={{ width: w * zoom, height: h * zoom }}
                  onPointerDown={(e) => {
                    if (!drawing) return;
                    e.currentTarget.setPointerCapture(e.pointerId);
@@ -299,6 +331,14 @@ function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, ne
               {pending.filter((b) => b.page === n).map((b, i) => <div key={`p${i}`} className="ws-local pending" style={box(b.rect)}>THIS DOC ONLY</div>)}
               {drag && drag.page === n && <div className="ws-drag" style={box([Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1),
                 Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)])} />}
+              {picking && words.has(n) && <WordLayer words={words.get(n)!} size={[w, h]}
+                regions={detail.regions.filter((r) => r.page === n)}
+                picked={picked?.page === n ? picked.words : []} onPick={(i, extend) => pick(n, i, extend)} />}
+              {picking && picked?.page === n && words.has(n) &&
+                <AddForm key={picked.words.join()} picked={picked} docId={id}
+                         style={popoverPlace(words.get(n)!, picked.words, [w, h])}
+                         onCancel={() => setPicked(null)}
+                         onAdded={(queued) => { setPicked(null); onAdded(queued); }} />}
             </div>
           );
         })}
@@ -541,7 +581,14 @@ export function Workspace() {
           {current ? (
             <DocView key={current.id} summary={current} hasProfile={hasProfile} zoom={zoom} setZoom={setZoom}
                      side={side} setSide={setSide} onNext={() => next && setSel(next.id)} nextName={next?.name ?? null}
-                     onChanged={refresh} />
+                     onChanged={refresh}
+                     onAdded={(queued) => {
+                       loadProfile();
+                       refresh();
+                       const others = queued.length - 1;
+                       setToast(`Added to My profile. Cleaning this document again${others > 0
+                         ? `, then ${others} other${others === 1 ? "" : "s"}` : ""}.`);
+                     }} />
           ) : (
             <section className="ws-doc" style={{ justifyContent: "center" }}>
               <div className="ws-empty">

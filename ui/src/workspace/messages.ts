@@ -87,7 +87,7 @@ export function plain(d: DocSummary, hasProfile: boolean): Plain {
     default:
       return hasProfile
         ? { tone: "new", title: "Not cleaned yet", body: "Choose Clean this document, or it's cleaned when you add your details." }
-        : { tone: "new", title: "Not cleaned yet", body: "Open My profile and add your details. Then every document is cleaned and checked." };
+        : { tone: "new", title: "Not cleaned yet", body: "Choose Click a value and click your name on the page, or open My profile to type your details. Then every document is cleaned and checked." };
   }
 }
 

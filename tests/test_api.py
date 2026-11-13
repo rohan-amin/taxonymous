@@ -462,8 +462,8 @@ def test_a_detail_seen_in_a_document_is_added_to_your_details(fresh):
     def add(kind, **item):
         return client.post("/api/profile/items", json={"kind": kind, "item": item})
 
-    morgan = {"kind": "person", "item": {"name": "Morgan Delacroix"}}
-    assert client.post("/api/profile/items", json=morgan).status_code == 409  # no details yet
+    phone = {"kind": "phone", "item": {"value": "5555550199"}}
+    assert client.post("/api/profile/items", json=phone).status_code == 409  # no details yet: yourself first
     assert client.put("/api/profile", json=FORM).status_code == 200
     person = {"name": " Morgan  Delacroix ", "ssn": "987654325", "dob": "", "role": "spouse"}
     r = add("person", **person)
@@ -511,3 +511,40 @@ def test_documents_cleaned_in_several_lanes_share_one_set_of_placeholders(corpus
     used = {r["placeholder"] for name in names
             for r in json.loads(ws.outputs(ws.stem(ws.inbox / name))["regions"].read_text())}
     assert used <= entries.keys()  # every box's placeholder is in the vault
+
+
+def test_click_a_value_on_a_document_to_add_it_to_your_details(corpus, network_attempts, tmp_path):
+    """No details yet: the reviewer clicks their name on a W-2, adds it (it's them), and the
+    W-2 is cleaned; on a scan and a photo the words come from OCR."""
+    src, _, _ = corpus
+    ws = Workspace(tmp_path)
+    ws.init()
+    for name in ("w2.pdf", "1099_int_scan.pdf", "receipt_photo.jpg"):
+        shutil.copy(src / name, ws.inbox / name)
+    app = create_app(ws, TOKEN)
+    client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: TOKEN})
+
+    words = client.get(f"{W2}/pages/0/words").json()["words"]
+    w, h = client.get(W2).json()["pages"][0]
+    assert all(0 <= r[0] < r[2] <= w + 1 and 0 <= r[1] < r[3] <= h + 1 for r in (x["rect"] for x in words))
+    avery = next(i for i, x in enumerate(words) if x["text"] == "Avery")
+    s = client.post(f"{W2}/pages/0/suggest", json={"words": [avery]}).json()
+    assert s["text"] == "Avery F Abernathy" and s["kind"] == "person" and s["item"]["role"] == "taxpayer"
+    assert client.post(f"{W2}/pages/0/suggest", json={"words": []}).status_code == 422
+
+    phone = {"kind": "phone", "item": {"value": "(555) 555-0100"}, "rerun": "w2"}
+    assert client.post("/api/profile/items", json=phone).status_code == 409  # yourself first
+    r = client.post("/api/profile/items", json={"kind": "person", "item": s["item"], "rerun": "w2"})
+    assert r.status_code == 200
+    # the W-2 first; the others had never been cleaned (no details), so they are now
+    assert r.json()["queued"] == ["w2", "1099_int_scan", "receipt_photo.jpg"]
+    assert json.loads(ws.profile_path.read_text())["people"][0]["role"] == "taxpayer"
+    app.state.worker.wait()
+    assert client.get(W2).json()["status"] == "passed"
+
+    for doc, value in (("1099_int_scan", "555-0128"), ("receipt_photo.jpg", "555-0162")):
+        words = client.get(f"/api/documents/{doc}/pages/0/words").json()["words"]
+        i = next(i for i, x in enumerate(words) if x["text"] == value)
+        s = client.post(f"/api/documents/{doc}/pages/0/suggest", json={"words": [i]}).json()
+        assert s["kind"] == "phone" and s["text"] == f"(555) {value}"
+    assert client.get(f"{W2}/pages/9/words").status_code == 404
