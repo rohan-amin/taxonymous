@@ -151,7 +151,8 @@ class ToolbarButtons(AppKit.NSObject):
 
     def pressed_(self, item):
         command = next(c for key, _, c in TOOLBAR if key == item.itemIdentifier())
-        self.send(command)()
+        # off the main thread: evaluate_js waits for an answer the main thread delivers
+        threading.Thread(target=self.send(command), daemon=True).start()
 
 
 def mac_title_bar(window: webview.Window, send) -> None:
