@@ -752,7 +752,7 @@ export function Workspace() {
       )}
 
       {safeOpen && (
-        <div className="ws-scrim" onClick={(e) => e.currentTarget === e.target && setSafeOpen(false)}>
+        <div className={`ws-scrim${NATIVE ? " native" : ""}`} onClick={(e) => e.currentTarget === e.target && setSafeOpen(false)}>
           <div className="ws-sheet" role="dialog" aria-label="Safe copies">
             <div className="ws-drawer-head" style={{ padding: "14px 10px 10px 16px", borderBottom: "1px solid var(--w-line)" }}>
               <div><strong style={{ fontSize: 15 }}>{allDone ? `All ${total} documents checked` : "Safe copies"}</strong>

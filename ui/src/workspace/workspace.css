@@ -379,3 +379,5 @@
 .ws-psummary > div span { color: var(--w-muted); flex: none; }
 .ws-psummary > div strong { font-weight: 500; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-psummary .wbtn { align-self: flex-start; margin: 4px 0 0 -8px; height: 24px; font-size: 12px; }
+/* in the Mac window, sheets open below the toolbar band (its buttons stay usable) */
+.ws-scrim.native { top: 52px; }
