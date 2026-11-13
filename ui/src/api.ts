@@ -199,6 +199,13 @@ export interface Suggestion {
   note: string | null; // a caution: an amount, a company, someone else's EIN
 }
 
+// where each profile entry was removed (GET /api/profile/found), by entry: "person:0", "acct:1"
+export type FoundEntries = Record<string, {
+  total: number;
+  placeholders: string[];
+  documents: { id: string; name: string; places: number; pages: number[] }[];
+}>;
+
 export interface ProfileState {
   exists: boolean;
   profile: Profile;
@@ -242,6 +249,7 @@ export const api = {
   words: (id: string, page: number) => call<{ words: PageWord[] }>("GET", `${doc(id)}/pages/${page}/words`),
   suggest: (id: string, page: number, words: number[]) =>
     call<Suggestion>("POST", `${doc(id)}/pages/${page}/suggest`, { words }),
+  found: () => call<{ entries: FoundEntries }>("GET", "/api/profile/found"),
   documents: () => call<DocSummary[]>("GET", "/api/documents"),
   document: (id: string) => call<DocDetail>("GET", doc(id)),
   text: (id: string) => call<string>("GET", `${doc(id)}/text`),

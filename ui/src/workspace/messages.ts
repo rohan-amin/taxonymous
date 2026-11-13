@@ -84,11 +84,11 @@ function broken(error: string): Plain {
 }
 
 export function plain(d: DocSummary, hasProfile: boolean): Plain {
-  const removed = removedList(d.redactions ?? {});
+  const removed = Object.values(d.redactions ?? {}).reduce((a, n) => a + n, 0);
   switch (d.status) {
     case "passed":
-      return { tone: "ok", title: "Checked: none of your details were found",
-               body: `${removed ? `Removed ${removed}. ` : "Nothing of yours was on it. "}Then the copy was read again from scratch, and nothing from My profile turned up.` };
+      return { tone: "ok", title: "Checked: none of your details found",
+               body: `${removed ? `${removed} removed` : "Nothing of yours on it"} · every page read again` };
     case "queued":
       return { tone: "work", title: "Waiting its turn…", body: "It's cleaned and checked as soon as the documents ahead of it are done." };
     case "running": {
@@ -111,8 +111,10 @@ const pages = (n: number) => `${n} page${n === 1 ? "" : "s"}`;
 const both = (xs: string[]) => xs.join(" and ");
 
 // what checking a passed document did, for "What was checked": every claim is one the report backs
-export function checked(r: Report): string[] {
-  const out = [`The text of all ${pages(r.pages)} was read again: none of your details were in it.`];
+export function checked(r: Report, redactions: Record<string, number> = {}): string[] {
+  const removed = removedList(redactions);
+  const out = [removed ? `Removed ${removed}.` : "Nothing from My profile was on it."];
+  out.push(`Then the copy was read again from scratch. Its text, all ${pages(r.pages)}: none of your details were in it.`);
   const engines = r.engines ?? [];
   const read = engines.filter((e) => e.length > 0);
   if (r.ocr === false || !read.length) {

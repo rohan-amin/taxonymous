@@ -268,6 +268,9 @@ def test_a_shown_box_does_not_excuse_the_same_value_elsewhere(server):
         client.post(f"{W2}/shown", json={"page": r["page"], "rect": r["rect"]})
         settle(app)
     assert client.get(W2).json()["status"] == "passed"
+    found = client.get("/api/profile/found").json()["entries"]  # where each profile entry was removed
+    assert set(found) == {"person:0"}  # the W-2's SSN is SSN-shaped, not in the profile: no one's entry
+    assert [d["id"] for d in found["person:0"]["documents"]] == ["w2"] and found["person:0"]["total"] > 0
     report = client.get(W2).json()["report"]  # what was checked, for "What was checked"
     assert len(report["engines"]) == report["pages"] and all(report["engines"])
     o = Overrides.load(ws.overrides_path("w2"))

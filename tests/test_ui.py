@@ -508,14 +508,24 @@ def test_workspace_click_a_value_to_add_it_to_my_profile(corpus, browser, tmp_pa
         pg.get_by_text("Added to My profile").wait_for()
         assert json.loads(ws.profile_path.read_text())["people"][0]["name"] == "Avery F Abernathy"
         app.state.worker.wait()
-        pg.get_by_text("Checked: none of your details were found").wait_for(timeout=20_000)
+        pg.get_by_text("Checked: none of your details found").wait_for(timeout=20_000)
         pg.get_by_text("What was checked").click()
         listed = pg.get_by_test_id("checked").inner_text()
         assert "read again" in listed and "as a picture" in listed and "barcodes" in listed
         # all checked: the next step is saving the safe copies, then Finder
-        pg.get_by_role("button", name="Save safe copies…").first.click()
+        # My profile: click yourself to see where you were removed, outlined in the document
+        pg.get_by_test_id("profile-summary").get_by_role("button", name="You").click()
+        where = pg.get_by_test_id("where")
+        where.get_by_text("Removed from 1 document").wait_for()
+        where.get_by_role("button", name="w2.pdf").click()
+        pg.get_by_test_id("highlight").wait_for()
+        assert pg.locator(".ws-mark").count() > 0
+        pg.get_by_test_id("highlight").get_by_role("button", name="Clear").click()
+        assert pg.locator(".ws-mark").count() == 0
+        pg.get_by_role("button", name="Save 1 safe copy…").first.click()
         pg.get_by_test_id("save-all").click()
         pg.get_by_text("All saved").wait_for()
+        pg.get_by_role("button", name="1 saved · Show in Finder").first.wait_for()
         assert (ws.ready / "w2.redacted.pdf").exists() or any(ws.ready.iterdir())
         pg.get_by_role("button", name="Close").click()
         # pinch (ctrl + wheel) zooms the document; Fit width puts it back
@@ -528,7 +538,6 @@ def test_workspace_click_a_value_to_add_it_to_my_profile(corpus, browser, tmp_pa
         pg.get_by_role("button", name="Fit width").click()
         pg.wait_for_function(f"document.querySelector('[aria-label=Zoom]').innerText === {before!r}")
         # removed now: no longer offered to click
-        pg.get_by_role("button", name="Click a value").click()
         pg.get_by_role("button", name="Click a value").click()
         pg.locator(".ws-word").first.wait_for()
         assert pg.get_by_role("button", name="Add Avery to My profile").count() == 0

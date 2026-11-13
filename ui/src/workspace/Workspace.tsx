@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, KeyboardEvent, PointerEvent as RPointerEvent } from "react";
 import { api, pageImage } from "../api";
-import type { Box, DocDetail, DocSummary, Profile } from "../api";
+import type { Box, DocDetail, DocSummary, FoundEntries, Profile } from "../api";
 import { Details } from "../Details";
 import { AddForm, WordLayer, popoverPlace, usePageWords } from "./ClickToAdd";
 import type { Picked } from "./ClickToAdd";
@@ -37,7 +37,7 @@ const store = {
 };
 
 const GROUPS: { tone: Tone[]; title: string }[] = [
-  { tone: ["look", "stop"], title: "Needs you" },
+  { tone: ["look", "stop"], title: "Needs review" },
   { tone: ["work"], title: "Working" },
   { tone: ["new"], title: "Not cleaned yet" },
   { tone: ["ok"], title: "Checked" },
@@ -137,47 +137,102 @@ function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
   );
 }
 
-function ProfileDrawer({ profile, onOpen }: { profile: Profile | null; onOpen: () => void }) {
-  const groups: { title: string; items: [string, string][]; person?: boolean }[] = [];
+// where one profile entry was removed: chosen in My profile, outlined in the document
+export interface Highlight {
+  entry: string;
+  label: string;
+  placeholders: string[];
+}
+
+type Entry = [string, string, string]; // label, value (masked), entry id ("person:0", "acct:1")
+
+function Where({ entry, label, found, onShow }: {
+  entry: string; label: string; found: FoundEntries | null; onShow: (h: Highlight, doc: string) => void;
+}) {
+  const f = found?.[entry];
+  if (!found) return <div className="ws-where">Looking…</div>;
+  if (!f || !f.total) return <div className="ws-where">Not removed from any document yet.</div>;
+  const docs = f.documents.length;
+  return (
+    <div className="ws-where" data-testid="where">
+      <span>Removed from {docs} document{docs === 1 ? "" : "s"} · {f.total} place{f.total === 1 ? "" : "s"}</span>
+      {f.documents.map((d) => (
+        <button type="button" key={d.id} className="ws-where-doc"
+                onClick={() => onShow({ entry, label, placeholders: f.placeholders }, d.id)}>
+          <span className="name">{d.name}</span>
+          <small>{d.places} · page{d.pages.length === 1 ? "" : "s"} {pageList(d.pages)}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const pageList = (ps: number[]) => {
+  const out: string[] = [];
+  for (let i = 0; i < ps.length; i++) {
+    let j = i;
+    while (j + 1 < ps.length && ps[j + 1] === ps[j] + 1) j++;
+    out.push(j > i ? `${ps[i]}–${ps[j]}` : `${ps[i]}`);
+    i = j;
+  }
+  return out.join(", ");
+};
+
+function ProfileDrawer({ profile, found, onOpen, onShow }: {
+  profile: Profile | null; found: FoundEntries | null; onOpen: () => void; onShow: (h: Highlight, doc: string) => void;
+}) {
+  const groups: { title: string; items: Entry[]; person?: boolean }[] = [];
   if (profile) {
-    for (const p of profile.people) {
-      const items: [string, string][] = [["Name", p.name]];
-      if (p.ssn) items.push(["SSN", mask(p.ssn)]);
-      if (p.dob) items.push(["Born", mask(p.dob)]);
-      if (p.employer) items.push(["Employer", p.employer]);
+    profile.people.forEach((p, i) => {
+      const e = `person:${i}`;
+      const items: Entry[] = [["Name", p.name, e]];
+      if (p.ssn) items.push(["SSN", mask(p.ssn), e]);
+      if (p.dob) items.push(["Born", mask(p.dob), e]);
+      if (p.employer) items.push(["Employer", p.employer, e]);
       groups.push({ title: ({ taxpayer: "You", spouse: "Spouse", dependent: "Dependent" } as Record<string, string>)[p.role] ?? "Person", items, person: true });
-    }
+    });
     if (profile.addresses.length) {
-      groups.push({ title: "Addresses", items: profile.addresses.map((a) => ["Address", [a.street, a.city, a.state, a.zip].filter(Boolean).join(", ")]) });
+      groups.push({ title: "Addresses", items: profile.addresses.map((a, i) => ["Address", [a.street, a.city, a.state, a.zip].filter(Boolean).join(", "), `addr:${i}`]) });
     }
     if (profile.accounts.length) {
-      groups.push({ title: "Accounts", items: profile.accounts.map((a) => [a.institution || "Account", mask(a.number)]) });
+      groups.push({ title: "Accounts", items: profile.accounts.map((a, i) => [a.institution || "Account", mask(a.number), `acct:${i}`]) });
     }
-    const simple: [keyof Profile, string, string][] = [["phones", "Phones", "Phone"], ["emails", "Emails", "Email"]];
-    for (const [k, title, one] of simple) {
-      const xs = profile[k] as string[];
-      if (xs.length) groups.push({ title, items: xs.map((x) => [one, x]) });
-    }
-    if (profile.cards.length) groups.push({ title: "Cards", items: profile.cards.map((c) => [c.description || "Card", mask(c.number)]) });
-    if (profile.eins.length) groups.push({ title: "Your EINs", items: profile.eins.map((e) => [e.description || "EIN", mask(e.ein)]) });
-    if (profile.numbers.length) groups.push({ title: "Other numbers", items: profile.numbers.map((n) => [n.description || "Number", mask(n.number)]) });
-    if (profile.preparers.length) groups.push({ title: "Tax preparer", items: profile.preparers.map((p) => ["Preparer", p.name || p.firm]) });
+    if (profile.phones.length) groups.push({ title: "Phones", items: profile.phones.map((x, i) => ["Phone", x, `phone:${i}`]) });
+    if (profile.emails.length) groups.push({ title: "Emails", items: profile.emails.map((x, i) => ["Email", x, `email:${i}`]) });
+    if (profile.cards.length) groups.push({ title: "Cards", items: profile.cards.map((c, i) => [c.description || "Card", mask(c.number), `card:${i}`]) });
+    if (profile.eins.length) groups.push({ title: "Your EINs", items: profile.eins.map((e, i) => [e.description || "EIN", mask(e.ein), `ein:${i}`]) });
+    if (profile.numbers.length) groups.push({ title: "Other numbers", items: profile.numbers.map((x, i) => [x.description || "Number", mask(x.number), `id:${i}`]) });
+    if (profile.preparers.length) groups.push({ title: "Tax preparer", items: profile.preparers.map((x, i) => ["Preparer", x.name || x.firm, `preparer:${i}`]) });
   }
   const n = groups.reduce((a, g) => a + g.items.length, 0);
   const [all, setAll] = useState(() => store.get("profile-all", false));
+  const [open, setOpen] = useState<string | null>(null);
   useEffect(() => store.set("profile-all", all), [all]);
+  const places = (entry: string) => found?.[entry]?.total ?? 0;
+  const toggle = (entry: string) => setOpen(open === entry ? null : entry);
   return (
     <>
       <div className="ws-drawer-scroll" style={{ padding: "4px 8px 16px" }}>
-        <p className="ws-note">Removed from <strong>all documents</strong>, in any format it's printed: XXX-XX-4323, ABERNATHY, AVERY.</p>
+        <p className="ws-note">Removed from <strong>all documents</strong>, in any format it's printed. Click one to see where.</p>
         {!n && <p className="ws-note" style={{ border: "1px dashed var(--w-line-strong)", borderRadius: 8, padding: 12, margin: "8px 6px" }}>
           Nothing yet. Choose Click a value and click your name on a document, or open My profile to type it.</p>}
         {n > 0 && !all && (
           <div className="ws-psummary" data-testid="profile-summary">
-            {groups.map((g, i) => (
-              <div key={`${g.title}${i}`}><span>{g.title}</span><strong>{g.person || g.items.length === 1
-                ? g.items[0][1] : `${g.items.length} ${g.title.toLowerCase()}`}</strong></div>
-            ))}
+            {groups.map((g, i) => {
+              const one = g.person || g.items.length === 1;
+              const entry = g.items[0][2];
+              return (
+                <div key={`${g.title}${i}`}>
+                  <button type="button" className={`ws-prow${one && open === entry ? " on" : ""}`}
+                          onClick={() => (one ? toggle(entry) : setAll(true))} aria-expanded={one ? open === entry : undefined}>
+                    <span>{g.title}</span>
+                    <strong>{one ? g.items[0][1] : `${g.items.length} ${g.title.toLowerCase()}`}</strong>
+                    {one && found && <em>{places(entry)}</em>}
+                  </button>
+                  {one && open === entry && <Where entry={entry} label={g.items[0][1]} found={found} onShow={onShow} />}
+                </div>
+              );
+            })}
             <button type="button" className="wbtn quiet" onClick={() => setAll(true)}>Show all {n} details</button>
           </div>
         )}
@@ -185,7 +240,19 @@ function ProfileDrawer({ profile, onOpen }: { profile: Profile | null; onOpen: (
         {all && groups.map((g, i) => (
           <div className="ws-pgroup" key={`${g.title}${i}`}>
             <span>{g.title}</span>
-            {g.items.map(([k, v], j) => <div className="ws-entry" key={j}><span className="k">{k}</span><span className="v">{v}</span></div>)}
+            {(g.person ? [g.items] : g.items.map((x) => [x])).map((rows, j) => {
+              const entry = rows[0][2];
+              return (
+                <div key={j}>
+                  <button type="button" className={`ws-entry${open === entry ? " on" : ""}`} onClick={() => toggle(entry)}
+                          aria-expanded={open === entry}>
+                    <span className="rows">{rows.map(([k, v]) => <span key={k} className="row"><span className="k">{k}</span><span className="v">{v}</span></span>)}</span>
+                    {found && <em>{places(entry)}</em>}
+                  </button>
+                  {open === entry && <Where entry={entry} label={rows[0][1]} found={found} onShow={onShow} />}
+                </div>
+              );
+            })}
           </div>
         ))}
         <p className="ws-note" style={{ marginTop: 8 }}>Boxes you draw aren't listed here. They stay on their own document.</p>
@@ -198,12 +265,13 @@ function ProfileDrawer({ profile, onOpen }: { profile: Profile | null; onOpen: (
 }
 
 function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, onNext, nextName, onChanged, onAdded,
-                   allDone, onFinish }: {
+                   allDone, onFinish, finishLabel, highlight, onClearHighlight }: {
   summary: DocSummary; hasProfile: boolean; zoom: Zoom; setZoom: (z: Zoom) => void;
   scaleNow: { current: number };
   side: "redacted" | "original"; setSide: (s: "redacted" | "original") => void;
   onNext: () => void; nextName: string | null; onChanged: () => void; onAdded: (queued: string[]) => void;
-  allDone: boolean; onFinish: () => void; // every document checked: the next step is saving the safe copies
+  allDone: boolean; onFinish: () => void; finishLabel: string; // all checked: the next step is saving them
+  highlight: Highlight | null; onClearHighlight: () => void; // a profile entry's boxes, outlined
 }) {
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [drawing, setDrawing] = useState(false);
@@ -308,6 +376,21 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
     };
   }, [setZoom]);
 
+  // the highlighted entry's boxes in this document, and stepping through them
+  const marks = useMemo(() => (highlight && detail ? detail.regions.filter((r) => highlight.placeholders.includes(r.placeholder))
+    .sort((a, b) => a.page - b.page || a.rect[1] - b.rect[1]) : []), [highlight, detail]);
+  const at = useRef(-1);
+  const jump = useCallback((step: number) => {
+    const el = viewer.current;
+    if (!el || !marks.length) return;
+    at.current = (at.current + step + marks.length) % marks.length;
+    const m = marks[at.current];
+    const page = el.querySelector<HTMLElement>(`[data-page="${m.page}"]`);
+    if (page) el.scrollTo({ top: page.offsetTop + m.rect[1] * scaleRef.current - el.clientHeight / 3, behavior: "smooth" });
+  }, [marks]);
+  useEffect(() => { at.current = -1; if (marks.length) requestAnimationFrame(() => jump(1)); }, [marks, jump]);
+  useEffect(() => { if (highlight) { setPicking(false); setDrawing(false); setPicked(null); } }, [highlight]);
+
   const toPoint = (e: RPointerEvent<HTMLDivElement>, w: number) => {
     const r = e.currentTarget.getBoundingClientRect();
     const k = r.width / w;
@@ -336,15 +419,17 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
     <section className="ws-doc" aria-label="Document">
       <div className="ws-doc-head">
         <div className="ws-doc-title">
-          <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
             <span className="file">{summary.folder ? `${summary.folder.replaceAll("/", " / ")} / ` : ""}{summary.name}</span>
-            <div className={`ws-banner ${msg.tone}`} role="status" style={{ marginTop: 6 }}>
-              <span className={`ws-dot ${DOT[msg.tone]}`} style={{ marginTop: 5 }} aria-hidden="true" />
-              <div style={{ flex: 1 }}><strong>{msg.title}</strong><span>{msg.body}</span>
+            <div className={`ws-banner compact ${msg.tone}`} role="status" data-testid="status">
+              <span className={`ws-dot ${DOT[msg.tone]}`} aria-hidden="true" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <strong>{msg.title}</strong>
+                <span className="sub">{msg.body}</span>
                 {summary.status === "passed" && detail?.report && (
                   <details className="ws-checked" data-testid="checked">
                     <summary>What was checked</summary>
-                    <ul>{checked(detail.report).map((c) => <li key={c}>{c}</li>)}</ul>
+                    <ul>{checked(detail.report, detail.redactions).map((c) => <li key={c}>{c}</li>)}</ul>
                     <p>Taxonymous looks for what's in My profile, and anything shaped like an SSN. Anything else stays
                       readable, so look the copy over before you share it.</p>
                   </details>
@@ -362,14 +447,13 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
               <button type="button" className="wbtn" onClick={clean}>Clean this document</button>}
             {allDone ? <>
               {nextName && <button type="button" className="wbtn" onClick={onNext} title={nextName}>Next document ›</button>}
-              <button type="button" className="wbtn primary" onClick={onFinish}>Save safe copies…</button>
+              <button type="button" className="wbtn primary" onClick={onFinish}>{finishLabel}</button>
             </> : <button type="button" className="wbtn primary" onClick={onNext} disabled={!nextName}
                           title={nextName ?? "No other documents"}>Next document ›</button>}
           </div>
         </div>
         <div className="ws-tools">
           <div className="ws-modes" role="group" aria-label="Remove more">
-            <span className="ws-modes-label">Remove more</span>
             <button type="button" className={`ws-mode${picking ? " on" : ""}`} aria-pressed={picking}
                     disabled={!detail?.pages.length}
                     onClick={() => { setPicking(!picking); setPicked(null); setDrawing(false); }}>
@@ -383,14 +467,7 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
               <span><strong>Draw a box</strong><small>This document only</small></span>
             </button>
           </div>
-          {pending.length > 0 && <>
-            <button type="button" className="wbtn primary" onClick={apply}>Apply {pending.length} box{pending.length === 1 ? "" : "es"} and check again</button>
-            <button type="button" className="wbtn quiet" onClick={() => setPending(pending.slice(0, -1))}>Undo</button>
-          </>}
-          <span className="hint">{drawing ? "Drag over anything. It's blacked out on this document only."
-            : picking ? (reading !== null && !words.has(reading)
-              ? `Reading page ${reading + 1}…`
-              : "Click your name, an account number, or anything else of yours.") : ""}</span>
+          <span style={{ flex: 1 }} />
           <div className="seg" role="group" aria-label="Show">
             <button type="button" className={showing === "original" ? "on" : ""} onClick={() => setSide("original")}>Original</button>
             <button type="button" className={showing === "redacted" ? "on" : ""} onClick={() => setSide("redacted")} disabled={!processed}>Safe copy</button>
@@ -401,13 +478,32 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
           </div>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
             <button type="button" className="wbtn icon" aria-label="Zoom out" onClick={() => setZoom(zoomStep(scale, false))}>−</button>
-            <span style={{ minWidth: 44, textAlign: "center", fontSize: 12, fontWeight: 600 }} aria-label="Zoom">{Math.round(scale * 100)}%</span>
+            <span style={{ minWidth: 40, textAlign: "center", fontSize: 12, fontWeight: 600 }} aria-label="Zoom">{Math.round(scale * 100)}%</span>
             <button type="button" className="wbtn icon" aria-label="Zoom in" onClick={() => setZoom(zoomStep(scale, true))}>+</button>
           </div>
         </div>
         {error && <div className="ws-banner stop" role="alert"><div><strong>That didn't work</strong><span>{error}</span></div>
           <button type="button" className="wbtn quiet" onClick={() => setError(null)} style={{ marginLeft: "auto" }}>OK</button></div>}
       </div>
+      {marks.length > 0 && highlight && (
+        <div className="ws-hintbar where" role="status" data-testid="highlight">
+          <span>Outlined: where <strong>{highlight.label}</strong> was removed in this document, {marks.length} box{marks.length === 1 ? "" : "es"}.</span>
+          <button type="button" className="wbtn quiet" onClick={() => jump(1)}>Next ›</button>
+          <button type="button" className="wbtn quiet" onClick={onClearHighlight}>Clear</button>
+        </div>
+      )}
+      {(drawing || picking) && (
+        <div className="ws-hintbar" role="status">
+          <span>{drawing ? "Drag over anything. It's blacked out on this document only."
+            : reading !== null && !words.has(reading) ? `Reading page ${reading + 1}…`
+              : "Click your name, an account number, or anything else of yours. Shift-click adds the next word."}</span>
+          {pending.length > 0 && <>
+            <button type="button" className="wbtn primary" onClick={apply}>Apply {pending.length} box{pending.length === 1 ? "" : "es"} and check again</button>
+            <button type="button" className="wbtn quiet" onClick={() => setPending(pending.slice(0, -1))}>Undo</button>
+          </>}
+          <button type="button" className="wbtn quiet" onClick={() => { setDrawing(false); setPicking(false); setPicked(null); }}>Done</button>
+        </div>
+      )}
       <div className="ws-viewer" ref={viewer}>
         {!detail && <div className="ws-empty">Loading…</div>}
         {detail?.pages.map(([w, h], n) => {
@@ -418,7 +514,7 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
             width: `${((rect[2] - rect[0]) / w) * 100}%`, height: `${((rect[3] - rect[1]) / h) * 100}%`,
           });
           return (
-            <div key={n} className={`ws-page${drawing ? " drawing" : ""}${picking ? " picking" : ""}`}
+            <div key={n} data-page={n} className={`ws-page${drawing ? " drawing" : ""}${picking ? " picking" : ""}`}
                  style={{ width: w * scale, height: h * scale }}
                  onPointerDown={(e) => {
                    if (!drawing) return;
@@ -441,6 +537,7 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
               <img src={pageImage(id, n, showing, dpi, detail.version)} alt={`${showing === "original" ? "Original" : "Safe copy"}, page ${n + 1}`} draggable={false} />
               {others.map((r, i) => <div key={`o${i}`} className="ws-region mine" style={box(r.rect)} title={`Removed: ${r.kind}`} />)}
               {local.map((r, i) => <div key={`l${i}`} className="ws-local" style={box(r.rect)}>THIS DOC ONLY</div>)}
+              {marks.filter((r) => r.page === n).map((r, i) => <div key={`h${i}`} className="ws-mark" style={box(r.rect)} />)}
               {pending.filter((b) => b.page === n).map((b, i) => <div key={`p${i}`} className="ws-local pending" style={box(b.rect)}>THIS DOC ONLY</div>)}
               {drag && drag.page === n && <div className="ws-drag" style={box([Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1),
                 Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)])} />}
@@ -460,6 +557,8 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
             <span><span className="ws-swatch" style={{ background: "#1d1d1b" }} />From My profile: removed from all documents</span>
             <span><span className="ws-swatch" style={{ background: "repeating-linear-gradient(135deg,#1f4f80 0 3px,#3a7bc0 3px 6px)" }} />Drawn: this document only</span>
             <span style={{ flexBasis: "100%" }}>In the safe copy both are solid black. The stripes are only here, so you can tell them apart.</span>
+            <span style={{ flexBasis: "100%" }}>Each box in the safe copy carries a label like &lt;NAME_A&gt;. It tells your AI which
+              details belong to the same person or account, across all your documents. Your real details aren't in it.</span>
           </div>
         )}
       </div>
@@ -486,6 +585,8 @@ export function Workspace() {
   const [welcome, setWelcome] = useState(() => !store.get("welcome-hidden", false));
   const [dropping, setDropping] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [found, setFound] = useState<FoundEntries | null>(null);
+  const [highlight, setHighlight] = useState<Highlight | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => store.set("left-w", leftW), [leftW]);
@@ -509,6 +610,11 @@ export function Workspace() {
   }, []);
   useEffect(() => { loadProfile(); refresh(); }, [loadProfile, refresh]);
   const working = !!docs?.some((d) => d.status === "queued" || d.status === "running");
+  // where each profile entry was removed: read again whenever a document's output changes
+  const outputs = (docs ?? []).map((d) => `${d.id}:${d.version}:${d.status}`).join("|");
+  useEffect(() => {
+    api.found().then((f) => setFound(f.entries)).catch(() => undefined);
+  }, [outputs, profile]);
   useEffect(() => {
     const t = setInterval(refresh, working ? 1000 : 4000);
     return () => clearInterval(t);
@@ -610,6 +716,12 @@ export function Workspace() {
   const total = docs?.length ?? 0;
   const nChecked = ready.length;
   const allDone = total > 0 && nChecked === total;
+  // the finish, in one place: save the checked copies (after a look at the summary), then find them
+  const unsaved = ready.filter((d) => !d.exported).length;
+  const copies = (n: number) => `${n} safe cop${n === 1 ? "y" : "ies"}`;
+  const finishLabel = unsaved ? `Save ${copies(unsaved)}…` : `${nChecked} saved · Show in Finder`;
+  const finish = () => (unsaved ? setSafeOpen(true)
+    : api.reveal().catch(() => setToast("Choose File › Show Safe Copies in Finder.")));
   const removedAll = removedList(ready.reduce((acc, d) => {
     for (const [k, n] of Object.entries(d.redactions ?? {})) acc[k] = (acc[k] ?? 0) + n;
     return acc;
@@ -672,8 +784,7 @@ export function Workspace() {
                     </div>
                   </div> : allDone ? <div className="ws-done" data-testid="done">
                     <span><span className="ws-dot ok" aria-hidden="true" /> All {total} checked</span>
-                    <button type="button" className="wbtn primary" onClick={() => setSafeOpen(true)}>
-                      {ready.every((d) => d.exported) ? "Safe copies saved · Show" : "Save safe copies…"}</button>
+                    <button type="button" className="wbtn primary" onClick={finish}>{finishLabel}</button>
                   </div> : total > 0 && <div className="ws-progress">
                     <span>{ready.length} of {total} checked</span>
                     <div className="ws-bar"><div style={{ width: `${(nChecked / total) * 100}%` }} /></div>
@@ -690,6 +801,7 @@ export function Workspace() {
                                   title={d.folder ? `${d.folder} / ${d.name}` : d.name} aria-current={d.id === sel}>
                             <span className={`ws-dot ${DOT[tones.get(d.id)!]}`} aria-hidden="true" />
                             <span className="name">{d.folder && <span className="folder">{d.folder} / </span>}{d.name}</span>
+                            {d.exported && <span className="ws-tag">Saved</span>}
                           </button>
                         ))}
                       </div>
@@ -711,7 +823,8 @@ export function Workspace() {
             <DocView key={current.id} summary={current} hasProfile={hasProfile} zoom={zoom} setZoom={setZoom}
                      scaleNow={scaleNow}
                      side={side} setSide={setSide} onNext={() => next && setSel(next.id)} nextName={next?.name ?? null}
-                     allDone={allDone} onFinish={() => setSafeOpen(true)}
+                     allDone={allDone} onFinish={finish} finishLabel={finishLabel}
+                     highlight={highlight} onClearHighlight={() => setHighlight(null)}
                      onChanged={refresh}
                      onAdded={(queued) => {
                        loadProfile();
@@ -739,7 +852,8 @@ export function Workspace() {
                   <strong>My profile</strong>
                   <button type="button" className="wbtn quiet" onClick={() => setRightOpen(false)} aria-label="Hide My profile">Hide ›</button>
                 </div>
-                <ProfileDrawer profile={profile} onOpen={() => setView("profile")} />
+                <ProfileDrawer profile={profile} found={found} onOpen={() => setView("profile")}
+                               onShow={(h, doc) => { setHighlight(h); setSel(doc); setSide("original"); }} />
               </aside>
             </>
           ) : (

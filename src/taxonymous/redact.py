@@ -57,6 +57,7 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif", ".
 SUFFIXES = IMAGE_SUFFIXES | {".pdf"}
 PHOTO_TEXT_HEIGHT = 6.5  # points: OCR word boxes in a photo are scaled so text is about this tall
 JPEG_QUALITY = 80
+LABEL_GREY = (0.66, 0.66, 0.66)  # a placeholder's label, on its black box
 OCR_BATCH = 8  # scanned pages rendered and read at a time
 # points kept around a picture on a text page when only the pictures are read: a value
 # printed half on it is still read whole
@@ -204,7 +205,9 @@ def _label(page: pymupdf.Page, rect: pymupdf.Rect, ph: str) -> None:
         width = pymupdf.get_text_length(ph, fontname="helv", fontsize=fs)
         x = max(bounds.x0 + 0.5, min(x, bounds.x1 - width - 0.5))
         y = max(bounds.y0 + fs, min(y, bounds.y1 - 0.3 * fs))  # the ascent above, descent below
-    page.insert_text((x, y), ph, fontname="helv", fontsize=fs, color=(1, 1, 1))
+    # quiet grey on the black: readable (it's what the AI reads, and the reviewer can check
+    # it), without looking like the page's own text
+    page.insert_text((x, y), ph, fontname="helv", fontsize=fs, color=LABEL_GREY)
 
 
 def _add_label(labels: list[tuple[pymupdf.Rect, str]], rect: pymupdf.Rect, ph: str) -> None:

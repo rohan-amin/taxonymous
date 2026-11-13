@@ -381,3 +381,37 @@
 .ws-psummary .wbtn { align-self: flex-start; margin: 4px 0 0 -8px; height: 24px; font-size: 12px; }
 /* in the Mac window, sheets open below the toolbar band (its buttons stay usable) */
 .ws-scrim.native { top: 52px; }
+
+/* compact status: one line, details on request */
+.ws-banner.compact { padding: 8px 12px; align-items: flex-start; }
+.ws-banner.compact .ws-dot { margin-top: 5px; }
+.ws-banner.compact strong { display: inline; margin-right: 8px; }
+.ws-banner.compact .sub { opacity: 0.9; }
+/* what to do in a mode, over the document; Done leaves it */
+.ws-hintbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 16px; background: var(--w-accent-soft); color: var(--w-ink); border-bottom: 1px solid var(--w-line); font-size: 12px; }
+.ws-hintbar > span { flex: 1 1 200px; }
+.ws-hintbar .wbtn { height: 24px; }
+.ws-modes .ws-mode { height: 38px; }
+.ws-tag { flex: none; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 8px; background: var(--w-ok-bg); color: var(--w-ok); }
+.ws-file.sel .ws-tag { background: rgba(255, 255, 255, 0.2); color: inherit; }
+
+/* My profile: each entry shows where it was removed */
+.ws-prow, .ws-psummary .ws-prow { width: 100%; display: flex; align-items: baseline; gap: 10px; padding: 4px 6px; margin: 0 -6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.ws-prow:hover, .ws-prow.on { background: var(--w-accent-soft); }
+.ws-prow span { color: var(--w-muted); flex: none; }
+.ws-prow strong { flex: 1; min-width: 0; font-weight: 500; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-prow em, .ws-entry em { flex: none; font-style: normal; font-size: 11px; color: var(--w-muted); min-width: 18px; text-align: right; }
+.ws-psummary > div { display: block; padding: 0; }
+.ws-entry { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; align-items: flex-start; }
+.ws-entry.on, .ws-entry:hover { border-color: var(--w-accent); }
+.ws-entry .rows { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ws-entry .row { display: flex; gap: 8px; }
+.ws-where { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 6px; padding: 6px 8px; border-left: 2px solid var(--w-accent); font-size: 12px; color: var(--w-muted); }
+.ws-where-doc { display: flex; justify-content: space-between; gap: 8px; padding: 3px 6px; margin: 0 -6px; border: 0; border-radius: 5px; background: transparent; color: var(--w-ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.ws-where-doc:hover { background: var(--w-accent-soft); }
+.ws-where-doc .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-where-doc small { flex: none; color: var(--w-muted); }
+.ws-mark { position: absolute; border-radius: 2px; outline: 2.5px solid #e8a317; outline-offset: 1px; box-shadow: 0 0 0 5px rgba(232, 163, 23, 0.25); animation: ws-pulse 1.6s ease-in-out 2; pointer-events: none; }
+@keyframes ws-pulse { 50% { box-shadow: 0 0 0 9px rgba(232, 163, 23, 0.1); } }
+.ws-hintbar.where { background: #fbefd5; color: #5a3d00; }
+@media (prefers-color-scheme: dark) { .ws-hintbar.where { background: #3a2c10; color: #f2d79a; } }

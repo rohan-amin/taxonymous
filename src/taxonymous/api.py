@@ -12,6 +12,9 @@ the same browser can't drive it). It makes no outbound connections.
                                                 (422 names the fields); with rerun, that document is
                                                 cleaned again first, then every other cleaned one.
                                                 A person can be the first detail (it is you)
+  GET    /api/profile/found                     where each detail in your profile was removed:
+                                                {"entries": {"person:0": {"total", "placeholders",
+                                                "documents": [{"id", "name", "places", "pages"}]}}}
   GET    /api/documents                         every document in inbox/ and its folders, with its status
   POST   /api/documents                         upload a file into inbox/ (multipart "file", and
                                                 "folder" to put it in one: "2024")
@@ -57,6 +60,7 @@ except the original page images and words, a suggestion for words you chose,
 import hmac
 import io
 import json
+import re
 import secrets
 import subprocess
 import sys
@@ -296,6 +300,59 @@ def _status(ws: Workspace, worker: Worker, stem: str) -> str:
     return "passed" if report["passed"] else "failed"
 
 
+# a vault key -> the profile entry it comes from: a person's SSN, birth date, job and
+# employer are that person's ("ssn:0" -> "person:0"); a preparer's parts are the preparer's.
+# The number is a row of the profile; an SSN-shaped number not in it is keyed by its own
+# digits ("ssn:987654323") and is no entry's.
+_ENTRY = [(re.compile(r"(?:person|ssn|dob|occupation|employer):(\d{1,3})$"), "person:{}"),
+          (re.compile(r"preparer:(\d{1,3})(?::.*)?$"), "preparer:{}"),
+          (re.compile(r"((?:addr|email|phone|acct|card|ein|id|routing):\d{1,3})$"), "{}")]
+
+
+def _entry(key: str) -> str | None:
+    for rx, entry in _ENTRY:
+        if m := rx.match(key):
+            return entry.format(m.group(1))
+    return None
+
+
+def _found(ws: Workspace) -> dict:
+    """Where each profile entry was removed, from the vault (placeholder -> its identity)
+    and each document's boxes (placeholder per box). Nothing is read again."""
+    vault = _read_json(ws.vault_dir / "placeholders.json", {}).get("placeholders", {})
+    entry_of = {ph: _entry(e["key"]) for ph, e in vault.items()}
+    out: dict[str, dict] = {}
+    for src in ws.pending():
+        stem = ws.stem(src)
+        regions = _read_json(ws.outputs(stem)["regions"], [])
+        per: dict[str, dict] = {}
+        spots: dict[tuple, list[list[float]]] = {}  # (page, placeholder) -> its spots so far
+        for r in regions:
+            entry = entry_of.get(r["placeholder"])
+            if entry is None or r.get("source") == "manual":
+                continue
+            e = out.setdefault(entry, {"total": 0, "placeholders": set(), "documents": []})
+            d = per.setdefault(entry, {"id": stem, "name": src.name, "places": 0, "pages": set()})
+            e["placeholders"].add(r["placeholder"])
+            d["pages"].add(r["page"] + 1)
+            # one spot however many boxes cover it (a value's words, several OCR reads)
+            seen = spots.setdefault((r["page"], r["placeholder"]), [])
+            x0, y0, x1, y1 = r["rect"]
+            near = next((b for b in seen
+                         if x0 <= b[2] + 4 and b[0] <= x1 + 4 and y0 <= b[3] + 2 and b[1] <= y1 + 2), None)
+            if near:
+                near[:] = [min(near[0], x0), min(near[1], y0), max(near[2], x1), max(near[3], y1)]
+            else:
+                seen.append([x0, y0, x1, y1])
+                d["places"] += 1
+        for entry, d in per.items():
+            out[entry]["total"] += d["places"]
+            out[entry]["documents"].append({**d, "pages": sorted(d["pages"])})
+    for e in out.values():
+        e["placeholders"] = sorted(e["placeholders"])
+    return {"entries": out}
+
+
 def _page_sizes(ws: Workspace, src: Path, stem: str) -> list[list[float]]:
     pdf = ws.outputs(stem)["pdf"]
     if pdf.exists():
@@ -425,6 +482,10 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
                     worker.submit(Job(stem, "process"))
                     queued.append(stem)
         return {"added": body.kind, "queued": queued}
+
+    @app.get("/api/profile/found")
+    def found():
+        return _found(ws)
 
     @app.get("/api/documents")
     def documents():
