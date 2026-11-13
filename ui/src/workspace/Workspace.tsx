@@ -276,6 +276,7 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [drawing, setDrawing] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [labelsKnown, setLabelsKnown] = useState(() => store.get("labels-known", false));
   const [picked, setPicked] = useState<Picked | null>(null);
   const [pending, setPending] = useState<Box[]>([]);
   const [drag, setDrag] = useState<{ page: number; x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -557,8 +558,11 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
             <span><span className="ws-swatch" style={{ background: "#1d1d1b" }} />From My profile: removed from all documents</span>
             <span><span className="ws-swatch" style={{ background: "repeating-linear-gradient(135deg,#1f4f80 0 3px,#3a7bc0 3px 6px)" }} />Drawn: this document only</span>
             <span style={{ flexBasis: "100%" }}>In the safe copy both are solid black. The stripes are only here, so you can tell them apart.</span>
-            <span style={{ flexBasis: "100%" }}>Each box in the safe copy carries a label like &lt;NAME_A&gt;. It tells your AI which
-              details belong to the same person or account, across all your documents. Your real details aren't in it.</span>
+            {!labelsKnown && <span className="ws-labels-note" style={{ flexBasis: "100%" }}>
+              Each box in the safe copy carries a label like &lt;NAME_A&gt;. It tells your AI which details belong to the
+              same person or account, across all your documents. Your real details aren't in it.
+              <button type="button" className="wbtn quiet" onClick={() => { store.set("labels-known", true); setLabelsKnown(true); }}>Got it</button>
+            </span>}
           </div>
         )}
       </div>

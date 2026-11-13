@@ -1,13 +1,16 @@
 """Placeholder assignment and the placeholder -> real value map.
 
 The same identity always gets the same placeholder, across pages, documents
-and runs, so Claude can still tell that two documents mention the same
-account. The map is the only place real values are stored; it lives in the
-vault folder and is never uploaded.
+and runs, so the AI can still tell that two documents mention the same
+account. A person's letter is theirs in every kind: the profile's first person is
+<NAME_A> and <SSN_A>, the second <NAME_B> and <SSN_B>, whichever is seen first, so
+the AI never pairs one person's name with another's SSN. The map is the only place
+real values are stored; it lives in the vault folder and is never uploaded.
 """
 
 import fcntl
 import json
+import re
 import string
 import threading
 from contextlib import contextmanager
@@ -16,6 +19,7 @@ from pathlib import Path
 from .files import write_json
 
 LETTER_KINDS = {"SSN", "NAME"}  # <SSN_A>, <NAME_B>; everything else is numbered: <ACCT_1>
+PERSON_KEY = re.compile(r"(?:person|ssn):(\d{1,3})")  # the profile's person n (an SSN not in it: its digits)
 _threads = threading.Lock()  # flock is per process: threads in one also take turns
 
 
@@ -32,6 +36,7 @@ class Vault:
         self.by_key: dict[str, str] = {}
         self.entries: dict[str, dict] = {}
         self._seen: dict[str, list[str]] = {}  # values added here since the last write
+        self.people = 0  # the profile's people: letters A.. are theirs; anyone else's come after
         if self.path and self.path.exists():
             self._use(self._read())
 
@@ -71,11 +76,7 @@ class Vault:
             with self._locked():
                 ph = self.by_key.get(key)  # another process may have named it meanwhile
                 if ph is None:
-                    n = sum(1 for p in self.entries if p.startswith(f"<{kind}_"))
-                    ph = _name(kind, n)
-                    while ph in self.entries:  # a forgotten entry left a gap: never reuse a name still taken
-                        n += 1
-                        ph = _name(kind, n)
+                    ph = self._new_name(kind, key)
                     self.by_key[key] = ph
                     self.entries[ph] = {"kind": kind, "key": key, "values": []}
                 if value and value not in self.entries[ph]["values"]:
@@ -87,6 +88,21 @@ class Vault:
             if self.path:
                 self._seen.setdefault(ph, []).append(value)  # written by save()
         return ph
+
+    def _new_name(self, kind: str, key: str) -> str:
+        """A name not taken: for a person's name or SSN, their letter (A for the profile's
+        first person), unless an older vault already gave it away; for anyone else, the
+        first letter after the profile's people. Numbered kinds count on."""
+        if kind in LETTER_KINDS:
+            m = PERSON_KEY.fullmatch(key)
+            if m and _name(kind, int(m.group(1))) not in self.entries:
+                return _name(kind, int(m.group(1)))
+            n = self.people
+        else:
+            n = sum(1 for p in self.entries if p.startswith(f"<{kind}_"))
+        while _name(kind, n) in self.entries:  # never reuse a name still taken
+            n += 1
+        return _name(kind, n)
 
     def forget(self, key: str) -> None:
         """Drop an identity (a reviewer removed the box they drew), so its value is no

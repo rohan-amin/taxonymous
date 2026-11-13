@@ -415,3 +415,4 @@
 @keyframes ws-pulse { 50% { box-shadow: 0 0 0 9px rgba(232, 163, 23, 0.1); } }
 .ws-hintbar.where { background: #fbefd5; color: #5a3d00; }
 @media (prefers-color-scheme: dark) { .ws-hintbar.where { background: #3a2c10; color: #f2d79a; } }
+.ws-labels-note .wbtn { height: 22px; margin-left: 6px; font-size: 12px; }

@@ -473,6 +473,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     stem = stem or output_stem(src)
     name = output_stem(src)
     result = Result(src, out_dir / f"{name}.redacted.pdf", out_dir / f"{name}.redacted.txt")
+    vault.people = max(vault.people, matcher.people)
     texts: dict[int, str] = {}
     overrides = overrides or Overrides()
     manual: dict[int, list[pymupdf.Rect]] = {}

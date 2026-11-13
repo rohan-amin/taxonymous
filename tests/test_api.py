@@ -268,11 +268,6 @@ def test_a_shown_box_does_not_excuse_the_same_value_elsewhere(server):
         client.post(f"{W2}/shown", json={"page": r["page"], "rect": r["rect"]})
         settle(app)
     assert client.get(W2).json()["status"] == "passed"
-    found = client.get("/api/profile/found").json()["entries"]  # where each profile entry was removed
-    assert set(found) == {"person:0"}  # the W-2's SSN is SSN-shaped, not in the profile: no one's entry
-    assert [d["id"] for d in found["person:0"]["documents"]] == ["w2"] and found["person:0"]["total"] > 0
-    report = client.get(W2).json()["report"]  # what was checked, for "What was checked"
-    assert len(report["engines"]) == report["pages"] and all(report["engines"])
     o = Overrides.load(ws.overrides_path("w2"))
     o.show = o.show[:1]
     o.save(ws.overrides_path("w2"))
@@ -546,6 +541,11 @@ def test_click_a_value_on_a_document_to_add_it_to_your_details(corpus, network_a
     assert json.loads(ws.profile_path.read_text())["people"][0]["role"] == "taxpayer"
     app.state.worker.wait()
     assert client.get(W2).json()["status"] == "passed"
+    found = client.get("/api/profile/found").json()["entries"]  # where each profile entry was removed
+    assert set(found) == {"person:0"}  # the W-2's SSN is SSN-shaped, not in the profile: no one's entry
+    assert "w2" in [d["id"] for d in found["person:0"]["documents"]] and found["person:0"]["total"] > 0
+    report = client.get(W2).json()["report"]  # what was checked, for "What was checked"
+    assert len(report["engines"]) == report["pages"] and all(report["engines"])
 
     for doc, value in (("1099_int_scan", "555-0128"), ("receipt_photo.jpg", "555-0162")):
         words = client.get(f"/api/documents/{doc}/pages/0/words").json()["words"]

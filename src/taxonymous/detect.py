@@ -139,6 +139,7 @@ class ProfileMatcher:
         self.by_last4: dict[str, tuple[str, str]] = {}
         self.by_name: dict[str, tuple[str, str]] = {}
         self.surname_of: dict[str, str] = {}  # a person's key -> the key their surname alone has
+        self.people = len(profile.people)  # their letters: the first is A (<NAME_A>, <SSN_A>), and so on
 
         def add(pattern: str | None, kind: str, key: str, flags: int = IC, raw: bool = True) -> None:
             if pattern:
@@ -233,7 +234,9 @@ class ProfileMatcher:
             first, _, last = p.parts
             f, initial, mid, last_ = name_rules(p.name)
             add(rf"\b{f}{mid}\s*(?<=[\s.,]){last_}\b", "NAME", key)
-            add(rf"\b{last_}(?:,\s*|\s+){f}{mid}", "NAME", key)
+            # surname first: on one line unless a comma says so ("ABERNATHY,⏎AVERY"); a
+            # name ending one line and another starting the next is two people, not one
+            add(rf"\b{last_}(?:,\s*|[ \t]+){f}{mid}", "NAME", key)
             # a joint name gives the surname once: "Avery F. & Jordan K. Abernathy"; the first
             # name and an initial with a dot, or before "&" / "and", are this person
             add(rf"\b(?:{f}|{re.escape(first.upper())})(?:\s+[A-Z]\.){{1,2}}", "NAME", key, 0)
@@ -274,7 +277,7 @@ class ProfileMatcher:
             if len(pr.name.split()) > 1:  # the whole name only: a first name alone is too common
                 f, _, mid, last_ = name_rules(pr.name)
                 add(rf"\b{f}{mid}\s*(?<=[\s.,]){last_}\b", "NAME", f"{key}:name")
-                add(rf"\b{last_}(?:,\s*|\s+){f}{mid}", "NAME", f"{key}:name")
+                add(rf"\b{last_}(?:,\s*|[ \t]+){f}{mid}", "NAME", f"{key}:name")
             for v in (pr.firm, pr.name if len(pr.name.split()) == 1 else ""):
                 add(phrase(v), "ORG", f"{key}:firm")  # "Doe & Co., CPAs" as "DOE & CO CPAS" too
             add_address(Address(pr.street, pr.city, pr.state, pr.zip), f"{key}:addr")
@@ -440,6 +443,8 @@ def merge(findings: list[Finding], pt: PageText) -> list[Finding]:
     for f in kept:
         if merged and f.start < merged[-1].end:
             last = merged[-1]
+            if _two_people(last, f, pt) and _split(merged, last, f, pt):
+                continue  # one ran onto the other's line: each keeps its own person
             if PRIORITY[f.source] > PRIORITY[last.source]:
                 last.kind, last.key, last.source = f.kind, f.key, f.source
             last.end = max(last.end, f.end)
@@ -447,6 +452,48 @@ def merge(findings: list[Finding], pt: PageText) -> list[Finding]:
             continue
         merged.append(Finding(f.page, f.start, f.end, f.kind, f.key, f.source, f.text))
     return merged
+
+
+def _two_people(a: Finding, b: Finding, pt: PageText) -> bool:
+    """Two findings of different people (or other identities) of one kind. A surname on its
+    own is anyone in the family, never a person of its own."""
+    return (a.kind == b.kind and a.key != b.key and a.source == b.source == "profile"
+            and not a.key.startswith("surname:") and not b.key.startswith("surname:"))
+
+
+def _split(merged: list[Finding], last: Finding, f: Finding, pt: PageText) -> bool:
+    """Instead of merging two people's overlapping findings, cut the one that crosses a line
+    break the other doesn't at that break, so each keeps its own label. Only when the two
+    still cover every character the merge would have: redaction comes first."""
+    cut = _line_cut(last, f, pt)
+    if cut is last:
+        nl = pt.text.index("\n", last.start, last.end)
+        if last.end > f.end or f.start < nl or pt.text[nl:f.start].strip():
+            return False
+        last.end, last.text = nl, pt.text[last.start:nl]
+        merged.append(Finding(f.page, f.start, f.end, f.kind, f.key, f.source, f.text))
+        return True
+    if cut is f:
+        nl = pt.text.index("\n", f.start, f.end)
+        if last.end < nl:
+            return False
+        start = max(nl + 1, last.end)
+        if start < f.end:
+            merged.append(Finding(f.page, start, f.end, f.kind, f.key, f.source, pt.text[start:f.end]))
+        return True
+    return False
+
+
+def _line_cut(a: Finding, b: Finding, pt: PageText) -> Finding | None:
+    """Of two overlapping findings, the one that crosses a line break the other doesn't:
+    a name that ran on into the next line's name ("Avery⏎Abernathy, Quinn")."""
+    a_crosses = "\n" in pt.text[a.start:a.end]
+    b_crosses = "\n" in pt.text[b.start:b.end]
+    if a_crosses and not b_crosses:
+        return a
+    if b_crosses and not a_crosses:
+        return b
+    return None
 
 
 CHECK_DIGITS_RE = re.compile(r"[ /](\d{1,3})(?=\s|$)")  # "185-2732 5", NJ's "<EIN>/000"
