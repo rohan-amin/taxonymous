@@ -340,3 +340,6 @@
 .ws-add-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ws-add-tip { flex-basis: 100%; }
 .ws .ws-add-more { align-self: flex-start; height: 24px; padding: 0 6px; margin: -4px 0 -2px -6px; font-size: 12px; }
+/* the Mac window's toolbar band: its buttons are native, over this; the window buttons sit at its left */
+.ws-top.native { height: 52px; padding: 0; }
+.ws-welcome.native { padding-top: 84px; }

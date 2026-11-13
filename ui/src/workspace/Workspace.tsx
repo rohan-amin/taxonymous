@@ -38,6 +38,18 @@ const GROUPS: { tone: Tone[]; title: string }[] = [
   { tone: ["ok"], title: "Safe to share" },
 ];
 
+// in the Mac app's window (tools/native_window.py): its toolbar has the buttons and drags
+// the window, so the page's top band holds nothing clickable. Kept for this tab, like the token.
+const NATIVE = (() => {
+  const asked = new URL(window.location.href).searchParams.get("native") === "1";
+  try {
+    if (asked) sessionStorage.setItem("taxonymous-native", "1");
+    return asked || sessionStorage.getItem("taxonymous-native") === "1";
+  } catch {
+    return asked;
+  }
+})();
+
 const mask = (v: string) => v.replace(/[A-Za-z0-9](?=(?:[^A-Za-z0-9]*[A-Za-z0-9]){4})/g, "•");
 
 // a drawer edge you drag (or move with the arrow keys) to set its width
@@ -82,7 +94,7 @@ function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
     ["Share the safe copies", "Drag them into your AI assistant. Your originals never change."],
   ];
   return (
-    <div className="ws-welcome" role="dialog" aria-label="Welcome to Taxonymous">
+    <div className={`ws-welcome${NATIVE ? " native" : ""}`} role="dialog" aria-label="Welcome to Taxonymous">
       <div className="ws-welcome-inner">
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 720 }}>
           <h1>Share your tax documents with AI, without sharing who you are.</h1>
@@ -449,6 +461,7 @@ export function Workspace() {
       case "safe": setSide("redacted"); break;
       case "safe-copies": setSafeOpen(true); break;
       case "profile": setView("profile"); break;
+      case "profile-toggle": setView((v) => (v === "profile" ? "work" : "profile")); loadProfile(); break;
       case "welcome": setWelcome(true); break;
       case "added": // files the native File menu copied into the inbox: clean the new ones
         api.documents().then(async (list) => {
@@ -458,7 +471,7 @@ export function Workspace() {
         }).catch(() => undefined);
         break;
     }
-  }, [zoom, next, prev, hasProfile, refresh]);
+  }, [zoom, next, prev, hasProfile, refresh, loadProfile]);
   useEffect(() => {
     const onToast = (e: Event) => setToast((e as CustomEvent<string>).detail || null);
     window.addEventListener("tx-toast", onToast);
@@ -505,16 +518,18 @@ export function Workspace() {
   return (
     <div className="ws" onDragOver={(e) => { e.preventDefault(); setDropping(true); }}
          onDragLeave={(e) => e.currentTarget === e.target && setDropping(false)} onDrop={onDrop}>
-      <header className="ws-top">
-        <div className="ws-brand">
-          <svg width="18" height="18" viewBox="0 0 28 28" aria-hidden="true"><rect x="3" y="2" width="22" height="24" rx="4" fill="none" stroke="currentColor" strokeWidth="2.4" /><rect x="8" y="9" width="12" height="4" rx="1" fill="currentColor" /></svg>
-          Taxonymous
-        </div>
-        <nav aria-label="App">
-          <button type="button" className="wbtn quiet" onClick={() => setWelcome(true)}>How it works</button>
-          <button type="button" className={`wbtn${view === "profile" ? " on" : ""}`} onClick={() => setView(view === "profile" ? "work" : "profile")}>My profile</button>
-        </nav>
-      </header>
+      {NATIVE ? <header className="ws-top native" aria-hidden="true" /> : (
+        <header className="ws-top">
+          <div className="ws-brand">
+            <svg width="18" height="18" viewBox="0 0 28 28" aria-hidden="true"><rect x="3" y="2" width="22" height="24" rx="4" fill="none" stroke="currentColor" strokeWidth="2.4" /><rect x="8" y="9" width="12" height="4" rx="1" fill="currentColor" /></svg>
+            Taxonymous
+          </div>
+          <nav aria-label="App">
+            <button type="button" className="wbtn quiet" onClick={() => setWelcome(true)}>How it works</button>
+            <button type="button" className={`wbtn${view === "profile" ? " on" : ""}`} onClick={() => setView(view === "profile" ? "work" : "profile")}>My profile</button>
+          </nav>
+        </header>
+      )}
       <input ref={fileInput} type="file" multiple accept={ACCEPT} hidden onChange={(e) => { if (e.target.files) upload(e.target.files); e.target.value = ""; }} />
 
       {view === "profile" ? (

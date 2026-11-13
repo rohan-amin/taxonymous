@@ -10,7 +10,12 @@ three-panel workspace (`?ui=workspace`); `--classic` opens the old screen.
 `--dev` serves the API on 127.0.0.1:8765 and loads the UI from Vite
 (`cd ui && npm run dev`), so UI edits show in the window as you save them.
 
-No JavaScript bridge is exposed to the page: the menu bar runs Python, which
+The window has no title bar of its own: like a Mac app's, it is transparent over the
+page's top band (`&native=1` tells the page to leave room for the window buttons), with
+"How It Works" and "My Profile" as toolbar buttons. The toolbar is also what drags the
+window, so the page puts nothing clickable under it.
+
+No JavaScript bridge is exposed to the page: the menu bar and toolbar run Python, which
 only ever sends the page a command name (`tx-command`) or a message to show.
 See docs/NATIVE.md.
 """
@@ -25,8 +30,11 @@ import threading
 import time
 from pathlib import Path
 
+import AppKit
+import objc
 import uvicorn
 import webview
+from PyObjCTools import AppHelper
 from webview.menu import Menu, MenuAction, MenuSeparator
 
 from taxonymous.api import UI_DIR, create_app
@@ -86,7 +94,7 @@ def main() -> None:
         time.sleep(0.05)
 
     base = DEV_UI if args.dev else f"http://127.0.0.1:{port}/"
-    url = f"{base}?token={token}" + ("" if args.classic else "&ui=workspace")
+    url = f"{base}?token={token}" + ("" if args.classic else "&ui=workspace&native=1")
     frame = load_frame()
     window = webview.create_window(
         "Taxonymous", url, width=frame.get("width", 1440), height=frame.get("height", 900),
@@ -94,6 +102,9 @@ def main() -> None:
         background_color="#1B1C1A" if dark_mode() else "#F6F5F1",
         menu=menus(lambda: window, ws),
     )
+    send = commander(lambda: window)
+    if not args.classic:
+        window.events.before_show += lambda: AppHelper.callAfter(mac_title_bar, window, send)
     # shown only once the page has drawn, so it opens without a white flash
     window.events.loaded += lambda: window.show()
     window.events.closing += lambda: save_frame(window)
@@ -101,10 +112,68 @@ def main() -> None:
     server.should_exit = True
 
 
-def menus(get_window, ws: Workspace) -> list[Menu]:
+def commander(get_window):
+    """send(command)() tells the page to do something (a `tx-command` event)."""
     def send(command: str):
         return lambda: get_window().evaluate_js(
             f"window.dispatchEvent(new CustomEvent('tx-command', {{detail: {json.dumps(command)}}}))")
+    return send
+
+
+TOOLBAR = [("welcome", "How It Works", "welcome"), ("profile", "My Profile", "profile-toggle")]
+
+
+class ToolbarButtons(AppKit.NSObject):
+    """The toolbar's buttons, at its right end; each sends the page a command."""
+
+    def initWithSend_(self, send):
+        self = objc.super(ToolbarButtons, self).init()
+        self.send = send
+        return self
+
+    def toolbarDefaultItemIdentifiers_(self, toolbar):
+        return [AppKit.NSToolbarFlexibleSpaceItemIdentifier, *(i for i, _, _ in TOOLBAR)]
+
+    def toolbarAllowedItemIdentifiers_(self, toolbar):
+        return self.toolbarDefaultItemIdentifiers_(toolbar)
+
+    def toolbar_itemForItemIdentifier_willBeInsertedIntoToolbar_(self, toolbar, ident, insert):
+        for key, title, _ in TOOLBAR:
+            if key == ident:
+                item = AppKit.NSToolbarItem.alloc().initWithItemIdentifier_(ident)
+                item.setTitle_(title)
+                item.setLabel_(title)
+                item.setBordered_(True)
+                item.setTarget_(self)
+                item.setAction_("pressed:")
+                return item
+        return None
+
+    def pressed_(self, item):
+        command = next(c for key, _, c in TOOLBAR if key == item.itemIdentifier())
+        self.send(command)()
+
+
+def mac_title_bar(window: webview.Window, send) -> None:
+    """No title, and the bar transparent over the page; the window buttons sit in a
+    toolbar-height band at the top-left, the page's own top band under them."""
+    win = window.native
+    win.setStyleMask_(win.styleMask() | AppKit.NSWindowStyleMaskFullSizeContentView)
+    win.setTitlebarAppearsTransparent_(True)
+    win.setTitleVisibility_(AppKit.NSWindowTitleHidden)
+    # pywebview paints the title bar the window's colour; clear, so the page shows through
+    win.contentView().superview().subviews().lastObject().setBackgroundColor_(AppKit.NSColor.clearColor())
+    toolbar = AppKit.NSToolbar.alloc().initWithIdentifier_("taxonymous")
+    window.toolbar_buttons = ToolbarButtons.alloc().initWithSend_(send)  # kept: the toolbar doesn't retain it
+    toolbar.setDelegate_(window.toolbar_buttons)
+    toolbar.setDisplayMode_(AppKit.NSToolbarDisplayModeIconOnly)
+    toolbar.setShowsBaselineSeparator_(False)
+    win.setToolbar_(toolbar)
+    win.setToolbarStyle_(AppKit.NSWindowToolbarStyleUnified)
+
+
+def menus(get_window, ws: Workspace) -> list[Menu]:
+    send = commander(get_window)
 
     def toast(message: str) -> None:
         get_window().evaluate_js(
