@@ -38,6 +38,7 @@ the same browser can't drive it). It makes no outbound connections.
   DELETE /api/documents/{id}/shown/{i}          redact a shown box again (its index in `shown`)
   POST   /api/documents/{id}/verify             verify the current output again (queued)
   POST   /api/documents/{id}/export             copy to ready-to-upload/, only if it passed
+  POST   /api/reveal                            show the safe copies folder (ready-to-upload/) in Finder
   POST   /api/merge?folder=<F>                  {"max_mb": n | null} merge the folder's passed documents
                                                 into one PDF in ready-to-upload/ (or parts under n MB),
                                                 checked again first (queued)
@@ -57,6 +58,8 @@ import hmac
 import io
 import json
 import secrets
+import subprocess
+import sys
 import threading
 import time
 from collections import Counter
@@ -628,6 +631,14 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         if not released:
             raise HTTPException(409, "cannot export: verification has not passed")
         return {"released": [p.name for p in released]}
+
+    @app.post("/api/reveal", status_code=204)
+    def reveal():
+        """Open the safe copies folder (ready-to-upload/) in Finder."""
+        if sys.platform != "darwin":
+            raise HTTPException(501, "only on a Mac")
+        ws.ready.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["open", str(ws.ready)], check=False)
 
     @app.post("/api/merge", status_code=202)
     def merge_folder(body: MergeOptions, folder: str = ""):

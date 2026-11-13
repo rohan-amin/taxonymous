@@ -50,10 +50,21 @@ export interface Shown {
   placeholder: string;
 }
 
+// what verification found and did (taxonymous/verify.py Report)
+export interface Report {
+  passed: boolean;
+  issues: Issue[];
+  pages: number;
+  ocr?: boolean;
+  notes?: string[];
+  engines?: string[][]; // each page's OCR engines: "Vision", "Tesseract"
+  pictures?: number[]; // pages that are pictures: scans, photos, rebuilt pages
+}
+
 export interface DocDetail extends DocSummary {
   pages: [number, number][];
   regions: Region[];
-  report: { passed: boolean; issues: Issue[]; pages: number; notes?: string[] } | null;
+  report: Report | null;
   kept: string[];
   shown: Shown[]; // single boxes left in the clear
   added: { page: number; rect: Rect }[];
@@ -250,6 +261,7 @@ export const api = {
   unkeep: (id: string, placeholder: string) =>
     call("DELETE", `${doc(id)}/kept?placeholder=${encodeURIComponent(placeholder)}`),
   verify: (id: string) => call("POST", `${doc(id)}/verify`),
+  reveal: () => call("POST", "/api/reveal"),
   export: (id: string) => call<{ released: string[] }>("POST", `${doc(id)}/export`),
   merge: (folder: string, maxMb: number | null) =>
     call("POST", `/api/merge?folder=${encodeURIComponent(folder)}`, { max_mb: maxMb }),

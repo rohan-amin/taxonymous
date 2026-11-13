@@ -74,6 +74,10 @@ class Report:
     pages: int = 0
     ocr: bool = True
     notes: list[str] = field(default_factory=list)  # what was done to make it pass, for the reviewer
+    # what was checked, for the reviewer: each page's OCR engines ("Vision", "Tesseract"; none
+    # when OCR is off), and the pages that are pictures (a scan, a photo, a rebuilt page)
+    engines: list[list[str]] = field(default_factory=list)
+    pictures: list[int] = field(default_factory=list)
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -314,6 +318,13 @@ def _passes(page: pymupdf.Page, text: str | None = None) -> tuple[str, ...]:
     return ocr_mod.PASSES
 
 
+def _engines(psms: Iterable[str]) -> list[str]:
+    """The engines behind a page's reads, by name."""
+    psms = list(psms)
+    vision = ["Vision"] if ocr_mod.VISION in psms else []
+    return vision + (["Tesseract"] if any(p != ocr_mod.VISION for p in psms) else [])
+
+
 def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | None = None,
            ocr: bool = True, allowed: Iterable[str] = (), shown: list[Shown] = (),
            progress: Progress = NONE, allowed_keys: Iterable[str] = ()) -> Report:
@@ -349,10 +360,14 @@ def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | N
                 pix = page.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY, alpha=False)
                 if barcode.in_pixmap(page, pix):  # one that still reads: whatever it holds is in the file
                     report.issues.append(Issue("structure", "barcode", page.number + 1))
+                if page.get_images():
+                    report.pictures.append(page.number + 1)
                 if not ocr:
+                    report.engines.append([])
                     progress.step()
                     continue
                 passes.append(_passes(page, text))
+                report.engines.append(_engines(passes[-1]))
                 pic = ocr_mod.pixmap_picture(pix)
                 for psm in passes[-1]:
                     yield pic, psm

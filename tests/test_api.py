@@ -268,6 +268,8 @@ def test_a_shown_box_does_not_excuse_the_same_value_elsewhere(server):
         client.post(f"{W2}/shown", json={"page": r["page"], "rect": r["rect"]})
         settle(app)
     assert client.get(W2).json()["status"] == "passed"
+    report = client.get(W2).json()["report"]  # what was checked, for "What was checked"
+    assert len(report["engines"]) == report["pages"] and all(report["engines"])
     o = Overrides.load(ws.overrides_path("w2"))
     o.show = o.show[:1]
     o.save(ws.overrides_path("w2"))

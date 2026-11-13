@@ -7,12 +7,17 @@ import type { Box, DocDetail, DocSummary, Profile } from "../api";
 import { Details } from "../Details";
 import { AddForm, WordLayer, popoverPlace, usePageWords } from "./ClickToAdd";
 import type { Picked } from "./ClickToAdd";
-import { DOT, plain, timeLeft } from "./messages";
+import { DOT, checked, plain, removedList, timeLeft } from "./messages";
 import type { Tone } from "./messages";
 import "./workspace.css";
 
 const ACCEPT = ".pdf,.jpg,.jpeg,.png,.tif,.tiff,.heic,.heif,.webp";
-const ZOOMS = [0.75, 1, 1.25, 1.5, 2];
+// zoom: a scale, or fit the page's width or the whole page to the window
+export type Zoom = number | "width" | "page";
+const STEPS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
+const clampScale = (k: number) => Math.max(0.25, Math.min(4, k));
+export const zoomStep = (k: number, up: boolean) =>
+  up ? STEPS.find((s) => s > k * 1.01) ?? 4 : [...STEPS].reverse().find((s) => s < k * 0.99) ?? 0.25;
 const store = {
   get<T>(k: string, d: T): T {
     try {
@@ -35,7 +40,7 @@ const GROUPS: { tone: Tone[]; title: string }[] = [
   { tone: ["look", "stop"], title: "Needs you" },
   { tone: ["work"], title: "Working" },
   { tone: ["new"], title: "Not cleaned yet" },
-  { tone: ["ok"], title: "Safe to share" },
+  { tone: ["ok"], title: "Checked" },
 ];
 
 // in the Mac app's window (tools/native_window.py): its toolbar has the buttons and drags
@@ -87,11 +92,11 @@ function Grip({ label, width, setWidth, side }: { label: string; width: number; 
 function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
   const [hide, setHide] = useState(store.get("welcome-hidden", false));
   const steps: [string, string][] = [
-    ["Add one document", "Any document works. Your W-2 or 1040 is a good start: most of your details are at the top."],
-    ["Add your details", "Your name, SSN, address and account numbers go into My profile, and are removed from all documents."],
-    ["Add the rest", "Your details are removed from each new document automatically. Draw a box over anything else, on that document only."],
-    ["We double-check", "Every safe copy is read again, scans included. A copy is only ready when none of your details can be found."],
-    ["Share the safe copies", "Drag them into your AI assistant. Your originals never change."],
+    ["Tell it what to protect, once", "Add a document and click your name, SSN and account numbers on it. Or type them into My profile."],
+    ["Found in every document", "Each document you add is cleaned of them automatically, however they're printed, scans and photos included."],
+    ["Review", "Spot something else of yours? Click it to remove it everywhere, or draw a box over it on that document only."],
+    ["Checked again", "Every copy is read again from scratch, the way a person or an AI would. It's only ready when none of your details turn up."],
+    ["Share the safe copies", "Save them and drag them into your AI assistant. Your originals never change."],
   ];
   return (
     <div className={`ws-welcome${NATIVE ? " native" : ""}`} role="dialog" aria-label="Welcome to Taxonymous">
@@ -133,14 +138,14 @@ function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
 }
 
 function ProfileDrawer({ profile, onOpen }: { profile: Profile | null; onOpen: () => void }) {
-  const groups: { title: string; items: [string, string][] }[] = [];
+  const groups: { title: string; items: [string, string][]; person?: boolean }[] = [];
   if (profile) {
     for (const p of profile.people) {
       const items: [string, string][] = [["Name", p.name]];
       if (p.ssn) items.push(["SSN", mask(p.ssn)]);
       if (p.dob) items.push(["Born", mask(p.dob)]);
       if (p.employer) items.push(["Employer", p.employer]);
-      groups.push({ title: ({ taxpayer: "You", spouse: "Spouse", dependent: "Dependent" } as Record<string, string>)[p.role] ?? "Person", items });
+      groups.push({ title: ({ taxpayer: "You", spouse: "Spouse", dependent: "Dependent" } as Record<string, string>)[p.role] ?? "Person", items, person: true });
     }
     if (profile.addresses.length) {
       groups.push({ title: "Addresses", items: profile.addresses.map((a) => ["Address", [a.street, a.city, a.state, a.zip].filter(Boolean).join(", ")]) });
@@ -159,13 +164,25 @@ function ProfileDrawer({ profile, onOpen }: { profile: Profile | null; onOpen: (
     if (profile.preparers.length) groups.push({ title: "Tax preparer", items: profile.preparers.map((p) => ["Preparer", p.name || p.firm]) });
   }
   const n = groups.reduce((a, g) => a + g.items.length, 0);
+  const [all, setAll] = useState(() => store.get("profile-all", false));
+  useEffect(() => store.set("profile-all", all), [all]);
   return (
     <>
       <div className="ws-drawer-scroll" style={{ padding: "4px 8px 16px" }}>
         <p className="ws-note">Removed from <strong>all documents</strong>, in any format it's printed: XXX-XX-4323, ABERNATHY, AVERY.</p>
         {!n && <p className="ws-note" style={{ border: "1px dashed var(--w-line-strong)", borderRadius: 8, padding: 12, margin: "8px 6px" }}>
-          Nothing yet. Open My profile to add your name, SSN and address.</p>}
-        {groups.map((g, i) => (
+          Nothing yet. Choose Click a value and click your name on a document, or open My profile to type it.</p>}
+        {n > 0 && !all && (
+          <div className="ws-psummary" data-testid="profile-summary">
+            {groups.map((g, i) => (
+              <div key={`${g.title}${i}`}><span>{g.title}</span><strong>{g.person || g.items.length === 1
+                ? g.items[0][1] : `${g.items.length} ${g.title.toLowerCase()}`}</strong></div>
+            ))}
+            <button type="button" className="wbtn quiet" onClick={() => setAll(true)}>Show all {n} details</button>
+          </div>
+        )}
+        {n > 0 && all && <button type="button" className="wbtn quiet" style={{ margin: "2px 0 0" }} onClick={() => setAll(false)}>Show less</button>}
+        {all && groups.map((g, i) => (
           <div className="ws-pgroup" key={`${g.title}${i}`}>
             <span>{g.title}</span>
             {g.items.map(([k, v], j) => <div className="ws-entry" key={j}><span className="k">{k}</span><span className="v">{v}</span></div>)}
@@ -180,10 +197,13 @@ function ProfileDrawer({ profile, onOpen }: { profile: Profile | null; onOpen: (
   );
 }
 
-function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, nextName, onChanged, onAdded }: {
-  summary: DocSummary; hasProfile: boolean; zoom: number; setZoom: (z: number) => void;
+function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, onNext, nextName, onChanged, onAdded,
+                   allDone, onFinish }: {
+  summary: DocSummary; hasProfile: boolean; zoom: Zoom; setZoom: (z: Zoom) => void;
+  scaleNow: { current: number };
   side: "redacted" | "original"; setSide: (s: "redacted" | "original") => void;
   onNext: () => void; nextName: string | null; onChanged: () => void; onAdded: (queued: string[]) => void;
+  allDone: boolean; onFinish: () => void; // every document checked: the next step is saving the safe copies
 }) {
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [drawing, setDrawing] = useState(false);
@@ -225,7 +245,68 @@ function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, ne
   const msg = plain(summary, hasProfile);
   const processed = summary.version > 0;
   const showing = processed ? side : "original";
-  const dpi = Math.min(288, Math.max(72, Math.round((72 * zoom * (window.devicePixelRatio || 1)) / 24) * 24));
+  // the scale pages are drawn at: fitted to the viewer's size, or as chosen
+  const viewer = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState<[number, number]>([0, 0]);
+  useEffect(() => {
+    const el = viewer.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setRoom([el.clientWidth, el.clientHeight]));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const widest = Math.max(1, ...(detail?.pages ?? []).map(([w]) => w));
+  const tallest = Math.max(1, ...(detail?.pages ?? []).map(([, h]) => h));
+  const fitWidth = room[0] ? Math.min(2, (room[0] - 48) / widest) : 1;
+  const fitPage = room[1] ? Math.min(fitWidth, (room[1] - 40) / tallest) : 1;
+  const scale = clampScale(zoom === "width" ? fitWidth : zoom === "page" ? fitPage : zoom);
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
+  scaleNow.current = scale;
+  // page images follow the scale once it settles (a pinch changes it many times a second)
+  const [settled, setSettled] = useState(scale);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(scale), 250);
+    return () => clearTimeout(t);
+  }, [scale]);
+  const dpi = Math.min(288, Math.max(72, Math.round((72 * settled * (window.devicePixelRatio || 1)) / 24) * 24));
+
+  // trackpad pinch (and ⌘ or ctrl with the scroll wheel) zooms the document, around the pointer
+  useEffect(() => {
+    const el = viewer.current;
+    if (!el) return;
+    const zoomAt = (k: number, x: number, y: number) => {
+      const before = scaleRef.current, after = clampScale(k);
+      const r = el.getBoundingClientRect();
+      const px = x - r.left, py = y - r.top;
+      const cx = (el.scrollLeft + px) / before, cy = (el.scrollTop + py) / before;
+      scaleRef.current = after;
+      setZoom(after);
+      requestAnimationFrame(() => { el.scrollLeft = cx * after - px; el.scrollTop = cy * after - py; });
+    };
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      zoomAt(scaleRef.current * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+    };
+    // Safari and the Mac app's web view report a pinch as gesture events
+    let start = 1;
+    type Gesture = Event & { scale: number; clientX: number; clientY: number };
+    const gstart = (e: Event) => { e.preventDefault(); start = scaleRef.current; };
+    const gchange = (e: Event) => {
+      e.preventDefault();
+      const g = e as Gesture;
+      zoomAt(start * g.scale, g.clientX, g.clientY);
+    };
+    el.addEventListener("wheel", wheel, { passive: false });
+    el.addEventListener("gesturestart", gstart);
+    el.addEventListener("gesturechange", gchange);
+    return () => {
+      el.removeEventListener("wheel", wheel);
+      el.removeEventListener("gesturestart", gstart);
+      el.removeEventListener("gesturechange", gchange);
+    };
+  }, [setZoom]);
 
   const toPoint = (e: RPointerEvent<HTMLDivElement>, w: number) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -260,6 +341,14 @@ function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, ne
             <div className={`ws-banner ${msg.tone}`} role="status" style={{ marginTop: 6 }}>
               <span className={`ws-dot ${DOT[msg.tone]}`} style={{ marginTop: 5 }} aria-hidden="true" />
               <div style={{ flex: 1 }}><strong>{msg.title}</strong><span>{msg.body}</span>
+                {summary.status === "passed" && detail?.report && (
+                  <details className="ws-checked" data-testid="checked">
+                    <summary>What was checked</summary>
+                    <ul>{checked(detail.report).map((c) => <li key={c}>{c}</li>)}</ul>
+                    <p>Taxonymous looks for what's in My profile, and anything shaped like an SSN. Anything else stays
+                      readable, so look the copy over before you share it.</p>
+                  </details>
+                )}
                 {summary.status === "running" && summary.progress?.fraction != null &&
                   <div className="ws-bar work" role="progressbar" aria-label="How far cleaning has got"
                        aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(summary.progress.fraction * 100)}>
@@ -271,21 +360,29 @@ function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, ne
           <div style={{ display: "flex", gap: 6, flex: "none" }}>
             {!processed && hasProfile && summary.status === "new" &&
               <button type="button" className="wbtn" onClick={clean}>Clean this document</button>}
-            <button type="button" className="wbtn primary" onClick={onNext} disabled={!nextName}
-                    title={nextName ?? "No other documents"}>Next document ›</button>
+            {allDone ? <>
+              {nextName && <button type="button" className="wbtn" onClick={onNext} title={nextName}>Next document ›</button>}
+              <button type="button" className="wbtn primary" onClick={onFinish}>Save safe copies…</button>
+            </> : <button type="button" className="wbtn primary" onClick={onNext} disabled={!nextName}
+                          title={nextName ?? "No other documents"}>Next document ›</button>}
           </div>
         </div>
         <div className="ws-tools">
-          <button type="button" className={`wbtn ws-tool${picking ? " on" : ""}`} aria-pressed={picking}
-                  disabled={!detail?.pages.length}
-                  onClick={() => { setPicking(!picking); setPicked(null); setDrawing(false); }}>
-            <span>Click a value</span><small>Removes it from all documents</small>
-          </button>
-          <button type="button" className={`wbtn ws-tool${drawing ? " on" : ""}`}
-                  onClick={() => { setDrawing(!drawing); setPicking(false); setPicked(null); }}
-                  disabled={!processed} aria-pressed={drawing}>
-            <span>Draw a box</span><small>This document only</small>
-          </button>
+          <div className="ws-modes" role="group" aria-label="Remove more">
+            <span className="ws-modes-label">Remove more</span>
+            <button type="button" className={`ws-mode${picking ? " on" : ""}`} aria-pressed={picking}
+                    disabled={!detail?.pages.length}
+                    onClick={() => { setPicking(!picking); setPicked(null); setDrawing(false); }}>
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2l8 6-3.5.8L10.5 13l-1.8.8-2-4.2L4 12z" fill="currentColor" /></svg>
+              <span><strong>Click a value</strong><small>From all documents</small></span>
+            </button>
+            <button type="button" className={`ws-mode${drawing ? " on" : ""}`}
+                    onClick={() => { setDrawing(!drawing); setPicking(false); setPicked(null); }}
+                    disabled={!processed} aria-pressed={drawing}>
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="4" width="11" height="8" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2.5 1.5" /></svg>
+              <span><strong>Draw a box</strong><small>This document only</small></span>
+            </button>
+          </div>
           {pending.length > 0 && <>
             <button type="button" className="wbtn primary" onClick={apply}>Apply {pending.length} box{pending.length === 1 ? "" : "es"} and check again</button>
             <button type="button" className="wbtn quiet" onClick={() => setPending(pending.slice(0, -1))}>Undo</button>
@@ -298,16 +395,20 @@ function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, ne
             <button type="button" className={showing === "original" ? "on" : ""} onClick={() => setSide("original")}>Original</button>
             <button type="button" className={showing === "redacted" ? "on" : ""} onClick={() => setSide("redacted")} disabled={!processed}>Safe copy</button>
           </div>
+          <div className="seg" role="group" aria-label="Fit">
+            <button type="button" className={zoom === "width" ? "on" : ""} onClick={() => setZoom("width")}>Fit width</button>
+            <button type="button" className={zoom === "page" ? "on" : ""} onClick={() => setZoom("page")}>Fit page</button>
+          </div>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-            <button type="button" className="wbtn icon" aria-label="Zoom out" onClick={() => setZoom(ZOOMS[Math.max(0, ZOOMS.indexOf(zoom) - 1)])}>−</button>
-            <span style={{ minWidth: 44, textAlign: "center", fontSize: 12, fontWeight: 600 }}>{Math.round(zoom * 100)}%</span>
-            <button type="button" className="wbtn icon" aria-label="Zoom in" onClick={() => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(zoom) + 1)])}>+</button>
+            <button type="button" className="wbtn icon" aria-label="Zoom out" onClick={() => setZoom(zoomStep(scale, false))}>−</button>
+            <span style={{ minWidth: 44, textAlign: "center", fontSize: 12, fontWeight: 600 }} aria-label="Zoom">{Math.round(scale * 100)}%</span>
+            <button type="button" className="wbtn icon" aria-label="Zoom in" onClick={() => setZoom(zoomStep(scale, true))}>+</button>
           </div>
         </div>
         {error && <div className="ws-banner stop" role="alert"><div><strong>That didn't work</strong><span>{error}</span></div>
           <button type="button" className="wbtn quiet" onClick={() => setError(null)} style={{ marginLeft: "auto" }}>OK</button></div>}
       </div>
-      <div className="ws-viewer">
+      <div className="ws-viewer" ref={viewer}>
         {!detail && <div className="ws-empty">Loading…</div>}
         {detail?.pages.map(([w, h], n) => {
           const local = detail.regions.filter((r) => r.page === n && r.source === "manual");
@@ -318,7 +419,7 @@ function DocView({ summary, hasProfile, zoom, setZoom, side, setSide, onNext, ne
           });
           return (
             <div key={n} className={`ws-page${drawing ? " drawing" : ""}${picking ? " picking" : ""}`}
-                 style={{ width: w * zoom, height: h * zoom }}
+                 style={{ width: w * scale, height: h * scale }}
                  onPointerDown={(e) => {
                    if (!drawing) return;
                    e.currentTarget.setPointerCapture(e.pointerId);
@@ -373,10 +474,12 @@ export function Workspace() {
   const [hasProfile, setHasProfile] = useState(false);
   const [view, setView] = useState<"work" | "profile">("work");
   const [leftW, setLeftW] = useState(() => store.get("left-w", 280));
-  const [rightW, setRightW] = useState(() => store.get("right-w", 300));
+  const [rightW, setRightW] = useState(() => store.get("right-w", 260));
   const [leftOpen, setLeftOpen] = useState(() => store.get("left-open", true));
-  const [rightOpen, setRightOpen] = useState(() => store.get("right-open", true));
-  const [zoom, setZoom] = useState(() => store.get("zoom", 1.25));
+  // My profile starts hidden on a narrower window, so the document has the room; the edge shows its count
+  const [rightOpen, setRightOpen] = useState(() => store.get("right-open", window.innerWidth >= 1280));
+  const [zoom, setZoom] = useState<Zoom>(() => store.get<Zoom>("zoom-v2", "width"));
+  const scaleNow = useRef(1); // the open document's scale, for the menu's zoom in and out
   const [side, setSide] = useState<"redacted" | "original">("redacted");
   const [q, setQ] = useState("");
   const [safeOpen, setSafeOpen] = useState(false);
@@ -389,7 +492,7 @@ export function Workspace() {
   useEffect(() => store.set("right-w", rightW), [rightW]);
   useEffect(() => store.set("left-open", leftOpen), [leftOpen]);
   useEffect(() => store.set("right-open", rightOpen), [rightOpen]);
-  useEffect(() => store.set("zoom", zoom), [zoom]);
+  useEffect(() => store.set("zoom-v2", zoom), [zoom]);
 
   const loadProfile = useCallback(() => api.profile().then((p) => {
     setProfile(p.profile);
@@ -447,14 +550,13 @@ export function Workspace() {
 
   // commands from the native menu bar (tools/native_window.py) and the keyboard
   const command = useCallback((c: string) => {
-    const zi = ZOOMS.indexOf(zoom);
     switch (c) {
       case "add": fileInput.current?.click(); break;
       case "toggle-files": setLeftOpen((o) => !o); break;
       case "toggle-profile": setRightOpen((o) => !o); break;
-      case "zoom-in": setZoom(ZOOMS[Math.min(ZOOMS.length - 1, zi + 1)]); break;
-      case "zoom-out": setZoom(ZOOMS[Math.max(0, zi - 1)]); break;
-      case "zoom-reset": setZoom(1.25); break;
+      case "zoom-in": setZoom(zoomStep(scaleNow.current, true)); break;
+      case "zoom-out": setZoom(zoomStep(scaleNow.current, false)); break;
+      case "zoom-reset": setZoom("width"); break;
       case "next": if (next) setSel(next.id); break;
       case "prev": if (prev) setSel(prev.id); break;
       case "original": setSide("original"); break;
@@ -471,7 +573,7 @@ export function Workspace() {
         }).catch(() => undefined);
         break;
     }
-  }, [zoom, next, prev, hasProfile, refresh, loadProfile]);
+  }, [next, prev, hasProfile, refresh, loadProfile]);
   useEffect(() => {
     const onToast = (e: Event) => setToast((e as CustomEvent<string>).detail || null);
     window.addEventListener("tx-toast", onToast);
@@ -502,8 +604,16 @@ export function Workspace() {
     if (e.dataTransfer.files.length) upload(e.dataTransfer.files);
   };
   const shown = (docs ?? []).filter((d) => !q.trim() || d.name.toLowerCase().includes(q.trim().toLowerCase()));
-  const checked = ready.length;
+  const profileCount = profile ? profile.people.length + profile.addresses.length + profile.accounts.length
+    + profile.phones.length + profile.emails.length + profile.cards.length + profile.eins.length
+    + profile.numbers.length + profile.preparers.length : 0;
   const total = docs?.length ?? 0;
+  const nChecked = ready.length;
+  const allDone = total > 0 && nChecked === total;
+  const removedAll = removedList(ready.reduce((acc, d) => {
+    for (const [k, n] of Object.entries(d.redactions ?? {})) acc[k] = (acc[k] ?? 0) + n;
+    return acc;
+  }, {} as Record<string, number>));
   // a Run all in progress: the jobs in it, how far they have got together, and the time left
   const running = (docs ?? []).filter((d) => d.status === "running" && d.progress);
   const batch = running.length ? (() => {
@@ -551,7 +661,7 @@ export function Workspace() {
                 <div className="ws-drawer-tools">
                   <div style={{ display: "flex", gap: 6 }}>
                     <button type="button" className="wbtn primary" style={{ flex: 1 }} onClick={() => fileInput.current?.click()}>Add documents…</button>
-                    <button type="button" className="wbtn" style={{ flex: 1 }} onClick={() => setSafeOpen(true)}>Safe copies · {checked}</button>
+                    <button type="button" className="wbtn" style={{ flex: 1 }} onClick={() => setSafeOpen(true)}>Safe copies · {nChecked}</button>
                   </div>
                   <input className="search" type="search" placeholder="Find a document" aria-label="Find a document" value={q} onChange={(e) => setQ(e.target.value)} />
                   {batch ? <div className="ws-progress" data-testid="batch">
@@ -560,9 +670,13 @@ export function Workspace() {
                          aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(batch.fraction * 100)}>
                       <div style={{ width: `${batch.fraction * 100}%` }} />
                     </div>
+                  </div> : allDone ? <div className="ws-done" data-testid="done">
+                    <span><span className="ws-dot ok" aria-hidden="true" /> All {total} checked</span>
+                    <button type="button" className="wbtn primary" onClick={() => setSafeOpen(true)}>
+                      {ready.every((d) => d.exported) ? "Safe copies saved · Show" : "Save safe copies…"}</button>
                   </div> : total > 0 && <div className="ws-progress">
-                    <span>{checked} of {total} safe to share</span>
-                    <div className="ws-bar"><div style={{ width: `${(checked / total) * 100}%` }} /></div>
+                    <span>{ready.length} of {total} checked</span>
+                    <div className="ws-bar"><div style={{ width: `${(nChecked / total) * 100}%` }} /></div>
                   </div>}
                 </div>
                 <div className="ws-drawer-scroll">
@@ -595,7 +709,9 @@ export function Workspace() {
 
           {current ? (
             <DocView key={current.id} summary={current} hasProfile={hasProfile} zoom={zoom} setZoom={setZoom}
+                     scaleNow={scaleNow}
                      side={side} setSide={setSide} onNext={() => next && setSel(next.id)} nextName={next?.name ?? null}
+                     allDone={allDone} onFinish={() => setSafeOpen(true)}
                      onChanged={refresh}
                      onAdded={(queued) => {
                        loadProfile();
@@ -629,7 +745,7 @@ export function Workspace() {
           ) : (
             <div className="ws-rail right">
               <button type="button" className="wbtn quiet icon" onClick={() => setRightOpen(true)} aria-label="Show My profile">‹</button>
-              <span>My<br />profile</span>
+              <span>My<br />profile{profileCount > 0 && <><br /><strong>{profileCount}</strong></>}</span>
             </div>
           )}
         </div>
@@ -639,24 +755,42 @@ export function Workspace() {
         <div className="ws-scrim" onClick={(e) => e.currentTarget === e.target && setSafeOpen(false)}>
           <div className="ws-sheet" role="dialog" aria-label="Safe copies">
             <div className="ws-drawer-head" style={{ padding: "14px 10px 10px 16px", borderBottom: "1px solid var(--w-line)" }}>
-              <div><strong style={{ fontSize: 15 }}>Safe copies</strong><div style={{ color: "var(--w-muted)", fontSize: 12 }}>{checked} of {total} documents are checked and safe to share</div></div>
+              <div><strong style={{ fontSize: 15 }}>{allDone ? `All ${total} documents checked` : "Safe copies"}</strong>
+                <div style={{ color: "var(--w-muted)", fontSize: 12 }}>{allDone
+                  ? "Every copy was read again from scratch: none of your details were found."
+                  : `${ready.length} of ${total} documents checked: none of your details found`}</div></div>
               <button type="button" className="wbtn quiet" onClick={() => setSafeOpen(false)}>Close</button>
             </div>
-            <div style={{ display: "flex", gap: 6, padding: "10px 16px", borderBottom: "1px solid var(--w-line)" }}>
-              <button type="button" className="wbtn primary" disabled={!ready.some((d) => !d.exported)}
-                      onClick={async () => {
-                        for (const d of ready.filter((x) => !x.exported)) await api.export(d.id).catch(() => undefined);
-                        setToast("Saved to your Safe copies folder. File › Show Safe Copies in Finder opens it.");
-                        refresh();
-                      }}>Save all to the Safe copies folder</button>
+            <div className="ws-finish">
+              {removedAll && <p>Removed across them: {removedAll}.</p>}
+              <p className="small">Only what's in My profile, and anything shaped like an SSN, is removed. Have a quick look
+                at each copy before you share it.</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {ready.some((d) => !d.exported) ? (
+                  <button type="button" className="wbtn primary" data-testid="save-all"
+                          onClick={async () => {
+                            const todo = ready.filter((x) => !x.exported);
+                            let failed = 0;
+                            for (const d of todo) await api.export(d.id).catch(() => { failed += 1; });
+                            setToast(failed ? `${failed} couldn't be saved. Open them to see why.`
+                              : `Saved ${todo.length} safe cop${todo.length === 1 ? "y" : "ies"}.`);
+                            refresh();
+                          }}>Save {ready.filter((d) => !d.exported).length} safe
+                    cop{ready.filter((d) => !d.exported).length === 1 ? "y" : "ies"}</button>
+                ) : ready.length > 0 && <span className="ws-saved"><span className="ws-dot ok" aria-hidden="true" /> All saved</span>}
+                <button type="button" className={`wbtn${ready.length && ready.every((d) => d.exported) ? " primary" : ""}`}
+                        onClick={() => api.reveal().catch(() => setToast("Choose File › Show Safe Copies in Finder."))}>
+                  Show in Finder</button>
+              </div>
             </div>
             <div className="ws-drawer-scroll" style={{ padding: "4px 10px 20px" }}>
-              <span className="ws-group-title">Ready to share · {ready.length}</span>
+              <span className="ws-group-title">Checked · {ready.length}</span>
               {ready.map((d) => (
-                <div key={d.id} className="ws-file" style={{ height: 32 }}>
-                  <span className="ws-dot ok" aria-hidden="true" /><span className="name">{d.name}</span>
+                <button type="button" key={d.id} className="ws-file ws-ready" onClick={() => { setSel(d.id); setSafeOpen(false); }}>
+                  <span className="ws-dot ok" aria-hidden="true" />
+                  <span className="name">{d.name}<small>{removedList(d.redactions) ? `Removed ${removedList(d.redactions)}` : "Nothing of yours on it"}</small></span>
                   <span style={{ fontSize: 11, color: "var(--w-muted)" }}>{d.exported ? "Saved" : "Not saved yet"}</span>
-                </div>
+                </button>
               ))}
               {(docs ?? []).length > ready.length && <>
                 <span className="ws-group-title">Not ready yet · {(docs ?? []).length - ready.length}</span>

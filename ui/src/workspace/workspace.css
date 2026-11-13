@@ -343,3 +343,39 @@
 /* the Mac window's toolbar band: its buttons are native, over this; the window buttons sit at its left */
 .ws-top.native { height: 52px; padding: 0; }
 .ws-welcome.native { padding-top: 84px; }
+.ws-checked { margin-top: 6px; }
+.ws-checked summary { cursor: pointer; font-weight: 600; font-size: 12px; width: max-content; }
+.ws-checked ul { margin: 6px 0 4px; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.ws-checked p { font-size: 12px; opacity: 0.85; }
+
+/* the review modes: one at a time, the active one plainly on */
+.ws-modes { display: inline-flex; align-items: stretch; gap: 0; border: 1px solid var(--w-line-strong); border-radius: 8px; overflow: hidden; background: var(--w-surface); }
+.ws-modes-label { display: flex; align-items: center; padding: 0 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--w-muted); border-right: 1px solid var(--w-line); background: var(--w-sunk); }
+.ws-mode { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 14px 0 12px; border: 0; background: transparent; color: var(--w-ink); font: inherit; text-align: left; cursor: default; }
+.ws-mode + .ws-mode { border-left: 1px solid var(--w-line); }
+.ws-mode span { display: flex; flex-direction: column; line-height: 1.2; }
+.ws-mode strong { font-size: 13px; font-weight: 600; }
+.ws-mode small { font-size: 11px; color: var(--w-muted); }
+.ws-mode:hover:not(:disabled) { background: var(--w-sunk); }
+.ws-mode.on, .ws-mode.on:hover:not(:disabled) { background: var(--w-accent); color: var(--w-accent-ink); }
+.ws-mode.on small { color: inherit; opacity: 0.85; }
+.ws-mode:disabled { opacity: 0.45; }
+.ws-mode:focus-visible { outline: 3px solid color-mix(in srgb, var(--w-accent) 45%, transparent); outline-offset: -3px; }
+
+/* the finish: everything checked, save the safe copies */
+.ws-done { display: flex; flex-direction: column; gap: 8px; }
+.ws-done > span { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--w-ok); font-size: 12px; }
+.ws-finish { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--w-line); }
+.ws-finish .small { color: var(--w-muted); font-size: 12px; }
+.ws-saved { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; color: var(--w-ok); font-weight: 600; }
+.ws-file.ws-ready { height: auto; padding-top: 6px; padding-bottom: 6px; align-items: flex-start; text-align: left; }
+.ws-file.ws-ready .ws-dot { margin-top: 5px; }
+.ws-file.ws-ready .name { white-space: normal; }
+.ws-file.ws-ready small { display: block; color: var(--w-muted); font-size: 11px; }
+
+/* My profile, in short */
+.ws-psummary { display: flex; flex-direction: column; gap: 2px; margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--w-sunk); border: 1px solid var(--w-line); }
+.ws-psummary > div { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 12px; }
+.ws-psummary > div span { color: var(--w-muted); flex: none; }
+.ws-psummary > div strong { font-weight: 500; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-psummary .wbtn { align-self: flex-start; margin: 4px 0 0 -8px; height: 24px; font-size: 12px; }
