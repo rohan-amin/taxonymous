@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .detect import ProfileMatcher, pattern_hits
+from .files import write_json
 from .pagetext import PageText
 from .profile import Profile
 from .progress import NONE, Progress
@@ -178,9 +179,9 @@ def process(src: Path, ws: Workspace, matcher: ProfileMatcher, vault: Vault, ocr
             report.notes.append(f"Page(s) {pages}: removing text moved the text around it (this file "
                                 "draws text in a way the PDF library rewrites wrongly), so the page was "
                                 "rebuilt as an image from OCR.")
-        out["regions"].write_text(json.dumps(result.regions_json(), indent=2) + "\n")
-        out["shown"].write_text(json.dumps(result.shown_json(), indent=2) + "\n")
-    out["report"].write_text(json.dumps(report.to_json(), indent=2) + "\n")
+        write_json(out["regions"], result.regions_json())
+        write_json(out["shown"], result.shown_json())
+    write_json(out["report"], report.to_json())
     outcome = Outcome(Path(src), report, [], result)
     if release:
         outcome.released = export(ws, stem)
@@ -247,7 +248,7 @@ def reverify(ws: Workspace, stem: str, matcher: ProfileMatcher, vault: Vault, oc
         old.unlink(missing_ok=True)
     overrides = Overrides.load(ws.overrides_path(stem))
     report = _verify(ws, stem, matcher, vault, overrides, [], ocr, None, progress)
-    ws.outputs(stem)["report"].write_text(json.dumps(report.to_json(), indent=2) + "\n")
+    write_json(ws.outputs(stem)["report"], report.to_json())
     return report
 
 

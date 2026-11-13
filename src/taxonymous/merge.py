@@ -22,6 +22,7 @@ from pathlib import Path
 import pymupdf
 
 from .detect import ProfileMatcher
+from .files import replace_with, write_json
 from .pipeline import Workspace, readable
 from .progress import NONE, Progress
 from .redact import Overrides
@@ -122,7 +123,7 @@ def merge(ws: Workspace, folder: str, matcher: ProfileMatcher, vault: Vault, max
         "too_big": too_big,  # parts over the limit: one document that is bigger on its own
         "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
-    record_path(ws, folder).write_text(json.dumps(record, indent=2) + "\n")
+    write_json(record_path(ws, folder), record)
     return record
 
 
@@ -162,7 +163,7 @@ def _build(ws: Workspace, folder: str, part: Part, path: Path, number: int, tota
     out.del_xml_metadata()
     allow_list(out)
     part.pages = out.page_count
-    out.save(path, garbage=4, deflate=True, clean=True, no_new_id=True)
+    replace_with(path, lambda tmp: out.save(tmp, garbage=4, deflate=True, clean=True, no_new_id=True))
     out.close()
 
 

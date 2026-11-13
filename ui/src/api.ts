@@ -18,6 +18,9 @@ export interface Progress {
   total: number;
   job: number;
   jobs: number;
+  fraction?: number; // the whole job, 0-1; only grows
+  eta?: number | null; // seconds this document has left, once there is a pace to go by
+  batch_eta?: number | null; // seconds until everything queued is done
 }
 
 export interface DocSummary {

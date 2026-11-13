@@ -54,6 +54,7 @@ MASK_RE = re.compile(r"[*Xx•#]{2,}")
 # letters OCR swaps for each other in words ("Iyer" read as "lyer")
 LETTER_FOLD = str.maketrans({"l": "i", "1": "i", "|": "i", "!": "i", "0": "o", "5": "s", "8": "b"})
 OCR_DPI = ocr_mod.VERIFY_DPI
+assert OCR_DPI == barcode.DPI  # one render per page serves both checks
 DENSE_CHARS = 1500  # a page with more text than this and no images is read with one OCR pass
 
 
@@ -297,8 +298,18 @@ def _txt_without_shown(text: str, shown: list[Shown]) -> str:
     return out
 
 
-def _passes(page: pymupdf.Page) -> tuple[str, ...]:
-    if not page.get_images() and len(page.get_text()) > DENSE_CHARS:
+def _passes(page: pymupdf.Page, text: str | None = None) -> tuple[str, ...]:
+    """The reads of one output page. A page with a picture on it (a scan, a photo, a page
+    rebuilt from OCR) is read by Tesseract in both layout modes, and by Vision too when it
+    is on. A text page's text was taken out of its text layer, which the text check reads;
+    one OCR read checks what it shows: Vision's when on (another engine than the text
+    layer and than redaction's reads), else Tesseract's (both modes on a sparse page)."""
+    vision = (ocr_mod.VISION,) if ocr_mod.vision_on() else ()
+    if page.get_images():
+        return ocr_mod.PASSES + vision
+    if vision:
+        return vision
+    if len(page.get_text() if text is None else text) > DENSE_CHARS:
         return ocr_mod.PASSES[:1]
     return ocr_mod.PASSES
 
@@ -322,23 +333,35 @@ def verify(pdf: Path, matcher: ProfileMatcher, known: list[Known], txt: Path | N
                                            [*allowed_keys, *(s.key for s in shown if s.key)]))
         if shown:
             doc = _without_shown(doc, list(shown))
-        progress.start("checking", doc.page_count)
-        for page in doc:
-            report.issues += [Issue("text", k, page.number + 1) for k in scanner.scan(page.get_text())]
-            if barcode.on_page(page):  # one that still reads: whatever it holds is in the file
-                report.issues.append(Issue("structure", "barcode", page.number + 1))
-            if not ocr:
-                progress.step()
         if txt is not None:
             # text from scanned pages is OCR output, so it gets OCR tolerance too
             text = _txt_without_shown(Path(txt).read_text(), list(shown))
             report.issues += [Issue("txt", k) for k in scanner.scan(text, fuzzy=True)]
-        if ocr:
+        progress.start("checking", doc.page_count)
+        passes = []
+
+        def pages():
+            """Each page's text and barcode checks, then its picture for OCR: one render
+            (barcodes are found at OCR's resolution), made as OCR is ready for it."""
+            for page in doc:
+                text = page.get_text()
+                report.issues += [Issue("text", k, page.number + 1) for k in scanner.scan(text)]
+                pix = page.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY, alpha=False)
+                if barcode.in_pixmap(page, pix):  # one that still reads: whatever it holds is in the file
+                    report.issues.append(Issue("structure", "barcode", page.number + 1))
+                if not ocr:
+                    progress.step()
+                    continue
+                passes.append(_passes(page, text))
+                pic = ocr_mod.pixmap_picture(pix)
+                for psm in passes[-1]:
+                    yield pic, psm
+        if not ocr:
+            for _ in pages():
+                pass
+        else:
             ocr_mod.require()
-            passes = [_passes(p) for p in doc]
-            jobs = [(p.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY).tobytes("png"), psm)
-                    for p, psms in zip(doc, passes, strict=True) for psm in psms]
-            texts = iter(ocr_mod.run_all(jobs, done=progress.per_page([len(p) for p in passes])))
+            texts = iter(ocr_mod.run_all(pages(), done=progress.per_page(passes)))
             for n, psms in enumerate(passes, 1):
                 found = set()
                 for _ in psms:

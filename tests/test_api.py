@@ -106,7 +106,7 @@ def test_uploaded_documents_are_processed(server):
     assert sorted(d["name"] for d in docs) == sorted(FILES)
     assert {d["status"] for d in docs} == {"passed"}, docs
     assert not any(d["exported"] for d in docs)  # nothing is released until export
-    assert client.get("/api/status").json() == {"running": None, "queued": [], "idle": True}
+    assert client.get("/api/status").json() == {"running": [], "queued": [], "idle": True, "lanes": 1}
 
 
 def test_upload_rules(server, tmp_path):
@@ -329,7 +329,7 @@ def test_a_change_is_not_exportable_until_it_has_run(server, monkeypatch):
     client, app, *_ = server
     hold = api_mod.threading.Event()
     real = app.state.worker._run
-    monkeypatch.setattr(app.state.worker, "_run", lambda job: (hold.wait(30), real(job)))
+    monkeypatch.setattr(app.state.worker, "_run", lambda *job: (hold.wait(30), real(*job)))
     client.post(f"{W2}/run")
     assert client.post(f"{W2}/export").status_code == 409  # queued or running
     hold.set()
@@ -486,3 +486,28 @@ def test_a_detail_seen_in_a_document_is_added_to_your_details(fresh):
     assert r.status_code == 422 and r.json()["detail"]["message"] == "Fill in the details first."
     assert add("shoe size", v="9").status_code == 422
     assert len(json.loads(ws.profile_path.read_text())["eins"]) == 1  # nothing saved
+
+
+def test_documents_cleaned_in_several_lanes_share_one_set_of_placeholders(corpus, tmp_path):
+    """Two lanes, each its own process, clean documents at the same time: every document
+    passes, and a value has one placeholder whichever lane named it first."""
+    src, _, profile = corpus
+    ws = Workspace(tmp_path)
+    ws.init()
+    ws.profile_path.write_text(json.dumps(profile))
+    names = ["w2.pdf", "1099_int.pdf", "k1_statement.pdf", "1099_r_scan.pdf", "receipt_photo.jpg"]
+    for name in names:
+        shutil.copy(src / name, ws.inbox / name)
+    app = create_app(ws, TOKEN, lanes=2)
+    client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: TOKEN})
+    assert client.get("/api/status").json()["lanes"] == 2
+    assert client.post("/api/run").status_code == 202
+    app.state.worker.wait()
+    docs = client.get("/api/documents").json()
+    assert {d["name"]: d["status"] for d in docs} == {name: "passed" for name in names}, docs
+    entries = json.loads((ws.vault_dir / "placeholders.json").read_text())["placeholders"]
+    keys = [e["key"] for e in entries.values()]
+    assert len(keys) == len(set(keys))  # one placeholder per identity
+    used = {r["placeholder"] for name in names
+            for r in json.loads(ws.outputs(ws.stem(ws.inbox / name))["regions"].read_text())}
+    assert used <= entries.keys()  # every box's placeholder is in the vault

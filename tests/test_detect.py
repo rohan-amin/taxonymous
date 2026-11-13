@@ -5,7 +5,7 @@ doesn't flag this file."""
 import pymupdf
 import pytest
 
-from taxonymous.detect import ProfileMatcher, detect
+from taxonymous.detect import ProfileMatcher, detect, pattern_hits
 from taxonymous.pagetext import PageText, extract
 from taxonymous.profile import Profile
 
@@ -235,3 +235,12 @@ def test_a_form_s_letter_after_a_name_is_not_its_initial():
     profile = Profile.from_dict({"people": [{"name": "Avery F Abernathy"}]})
     assert texts_of(["ABERNATHY AVERY W-2", "Abernathy, Avery F. W-2", "AVERY F ABERNATHY"], profile) == [
         "ABERNATHY AVERY", "Abernathy, Avery F.", "AVERY F ABERNATHY"]
+
+
+def test_masked_ssn_read_with_an_underscore_for_a_dash():
+    """OCR can read the dash between a mask's marks as an underscore."""
+    profile = {"people": [{"name": "Avery F Abernathy", "ssn": "987-65-4323"}]}
+    matcher = ProfileMatcher(Profile.from_dict(profile))
+    found = matcher.find(PageText(0, "Recipient's TIN: ***_**-4323"))
+    assert [f.kind for f in found] == ["SSN"]
+    assert [kind for _, kind in pattern_hits("TIN: XXX_XX_1234")] == ["SSN"]

@@ -48,7 +48,6 @@ gave your documents.
 import hmac
 import io
 import json
-import queue
 import secrets
 import threading
 import time
@@ -63,10 +62,11 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from . import lanes as lanes_mod
 from .detect import ProfileMatcher
 from .merge import last as last_merge
 from .merge import merge
-from .pipeline import Workspace, export, process, reverify
+from .pipeline import Workspace, export
 from .profile import Profile, add_item, clean
 from .profile import save as save_profile
 from .progress import Progress
@@ -103,89 +103,149 @@ def merge_id(folder: str) -> str:
 
 
 class Worker:
-    """Runs one job at a time, so the vault and outputs are only ever written by one thread."""
+    """Runs jobs in lanes (see `lanes`), as many at once as the computer has room for. A
+    document is only ever in one lane at a time, and a merge runs alone, once everything
+    queued before it is done (it joins their outputs); nothing queued after it starts first."""
 
-    def __init__(self, ws: Workspace, ocr: bool = True):
+    def __init__(self, ws: Workspace, ocr: bool = True, lanes: int | None = None):
         self.ws, self.ocr = ws, ocr
-        self.jobs: queue.Queue[Job] = queue.Queue()
-        self.lock = threading.Lock()
-        self.queued: list[str] = []
-        self.running: str | None = None
+        self.lanes = lanes or lanes_mod.count()
+        self.cv = threading.Condition()
+        self.pending: list[Job] = []
+        self.running: dict[str, Progress] = {}  # in the order they started
         self.errors: dict[str, str] = {}
-        self.progress = Progress()  # the running job's
         self.batch = [0, 0]  # jobs done and submitted since the worker was last idle
-        threading.Thread(target=self._loop, daemon=True, name="taxonymous-worker").start()
+        self.pages: dict[str, int] = {}  # each waiting or running job's pages, for the time left
+        self.per_page: float | None = None  # seconds a page takes a lane on this computer, as measured
+        self.unfinished = 0
+        helpers = [None] if self.lanes == 1 else [lanes_mod.Lane(lanes_mod.ocr_share(self.lanes))
+                                                  for _ in range(self.lanes)]
+        for n, helper in enumerate(helpers):
+            threading.Thread(target=self._loop, args=(helper,), daemon=True,
+                             name=f"taxonymous-lane-{n}").start()
 
     def submit(self, job: Job) -> None:
-        with self.lock:
+        pages = _pages(self.ws, job.stem) if job.action != "merge" else 0
+        with self.cv:
             if self.idle():
                 self.batch = [0, 0]
             self.batch[1] += 1
-            self.queued.append(job.stem)
-        self.jobs.put(job)
+            self.unfinished += 1
+            self.pages[job.stem] = max(self.pages.get(job.stem, 0), pages)
+            self.pending.append(job)
+            self.cv.notify_all()
 
     def busy(self, stem: str) -> bool:
-        with self.lock:
-            return stem in self.queued or self.running == stem
+        with self.cv:
+            return stem in self.running or any(j.stem == stem for j in self.pending)
+
+    def state(self, stem: str) -> str | None:
+        """Whether the job is "running" or "queued", or None."""
+        with self.cv:
+            if stem in self.running:
+                return "running"
+            return "queued" if any(j.stem == stem for j in self.pending) else None
 
     def status(self) -> dict:
-        with self.lock:
-            return {"running": self.running, "queued": list(self.queued), "idle": self.idle()}
+        with self.cv:
+            return {"running": list(self.running), "queued": [j.stem for j in self.pending],
+                    "idle": self.idle(), "lanes": self.lanes}
 
     def progress_of(self, stem: str) -> dict | None:
-        """The running job's stage and pages done, and its place in the batch ("2 of 5")."""
-        with self.lock:
-            if self.running != stem:
+        """A running job's stage, pages done, fraction and time left; its place in the batch
+        ("2 of 5"), and the time the whole batch has left."""
+        with self.cv:
+            progress = self.running.get(stem)
+            if progress is None:
                 return None
             done, total = self.batch
-        snap = self.progress.snapshot() or {"stage": None, "label": "Starting", "done": 0, "total": 0}
-        return {**snap, "job": done + 1, "jobs": total}
+            place = done + 1 + list(self.running).index(stem)
+            left = self._batch_left()
+        snap = progress.snapshot() or {"stage": None, "label": "Starting", "done": 0, "total": 0,
+                                       "fraction": 0, "eta": None}
+        return {**snap, "job": place, "jobs": total, "batch_eta": left}
+
+    def _batch_left(self) -> int | None:
+        """Seconds until everything submitted is done: the running jobs' own estimates, then
+        the waiting pages at this computer's measured pace, shared between the lanes."""
+        if self.per_page is None:
+            return None
+        running = [p.snapshot() for p in self.running.values()]
+        if any(s is None or s["eta"] is None for s in running):
+            return None
+        now = max((s["eta"] for s in running), default=0)
+        waiting = sum(self.pages.get(j.stem, 1) for j in self.pending) * self.per_page / self.lanes
+        return round(now + waiting)
 
     def idle(self) -> bool:
-        return self.running is None and not self.queued
+        return not self.running and not self.pending
 
     def wait(self, timeout: float = 600) -> None:
         """Block until every submitted job is done (tests and scripts)."""
-        end = time.monotonic() + timeout
-        while self.jobs.unfinished_tasks:
-            if time.monotonic() > end:
+        with self.cv:
+            if not self.cv.wait_for(lambda: self.unfinished == 0, timeout):
                 raise TimeoutError("worker still busy")
-            time.sleep(0.05)
 
-    def _loop(self) -> None:
+    def _next(self) -> Job | None:
+        if any(stem.startswith(".merge:") for stem in self.running):
+            return None
+        for i, job in enumerate(self.pending):
+            if job.action == "merge":
+                return self.pending.pop(0) if i == 0 and not self.running else None
+            if job.stem not in self.running:
+                return self.pending.pop(i)
+        return None
+
+    def _loop(self, helper: lanes_mod.Lane | None) -> None:
         while True:
-            job = self.jobs.get()
-            with self.lock:
-                self.queued.remove(job.stem)
-                self.running = job.stem
-                self.progress = Progress()
+            with self.cv:
+                job = self.cv.wait_for(self._next)
+                progress = Progress()
+                self.running[job.stem] = progress
+            started = time.monotonic()
             try:
-                self._run(job)
+                self._run(job, helper, progress)
                 self.errors.pop(job.stem, None)
-            except Exception as e:  # reported on the document, never kills the worker
+            except Exception as e:  # reported on the document, never stops the lane
                 self.errors[job.stem] = f"{type(e).__name__}: {str(e)[:300]}"
             finally:
-                with self.lock:
-                    self.running = None
+                with self.cv:
+                    del self.running[job.stem]
+                    pages = self.pages.pop(job.stem, 0) if not self.busy_unlocked(job.stem) else 0
+                    if job.action == "process" and pages:
+                        took = (time.monotonic() - started) / pages
+                        self.per_page = took if self.per_page is None else 0.7 * self.per_page + 0.3 * took
                     self.batch[0] += 1
-                self.jobs.task_done()
+                    self.unfinished -= 1
+                    self.cv.notify_all()
 
-    def _run(self, job: Job) -> None:
-        if not self.ws.profile_path.exists():
-            raise FileNotFoundError(f"no profile at {self.ws.profile_path}")
-        matcher = ProfileMatcher(Profile.load(self.ws.profile_path))
-        vault = Vault(self.ws.vault_dir / "placeholders.json")
-        for key in job.forget:
-            vault.forget(key)
-        vault.save()
+    def busy_unlocked(self, stem: str) -> bool:
+        return stem in self.running or any(j.stem == stem for j in self.pending)
+
+    def _run(self, job: Job, helper: lanes_mod.Lane | None, progress: Progress) -> None:
         if job.action == "merge":
-            merge(self.ws, job.folder, matcher, vault, job.max_mb, ocr=self.ocr, progress=self.progress)
-            return
-        src = _source(self.ws, job.stem)
-        if job.action == "verify":
-            reverify(self.ws, job.stem, matcher, vault, ocr=self.ocr, progress=self.progress)
+            if not self.ws.profile_path.exists():
+                raise FileNotFoundError(f"no profile at {self.ws.profile_path}")
+            matcher = ProfileMatcher(Profile.load(self.ws.profile_path))
+            vault = Vault(self.ws.vault_dir / "placeholders.json")
+            for key in job.forget:
+                vault.forget(key)
+            merge(self.ws, job.folder, matcher, vault, job.max_mb, ocr=self.ocr, progress=progress)
+        elif helper is None:
+            lanes_mod.run_job(self.ws, job.action, job.stem, job.forget, self.ocr, progress)
         else:
-            process(src, self.ws, matcher, vault, ocr=self.ocr, release=False, progress=self.progress)
+            helper.run(self.ws, job.action, job.stem, job.forget, self.ocr, progress.show)
+
+
+def _pages(ws: Workspace, stem: str) -> int:
+    src = ws.source(stem)
+    if src is None or src.suffix.lower() != ".pdf":
+        return 1
+    try:
+        with pymupdf.open(src) as doc:
+            return doc.page_count
+    except Exception:  # an unreadable file: its own job says so
+        return 1
 
 
 # ---------------------------------------------------------------- helpers
@@ -210,8 +270,9 @@ def _read_json(path: Path, default):
 
 
 def _status(ws: Workspace, worker: Worker, stem: str) -> str:
-    if worker.busy(stem):
-        return "queued" if worker.running != stem else "running"
+    state = worker.state(stem)
+    if state:
+        return state
     if stem in worker.errors:
         return "error"
     report = _read_json(ws.outputs(stem)["report"], None)
@@ -279,9 +340,10 @@ class Detail(BaseModel):
 
 # ---------------------------------------------------------------- app
 
-def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None = UI_DIR) -> FastAPI:
+def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None = UI_DIR,
+               lanes: int | None = None) -> FastAPI:
     ws.init()
-    worker = Worker(ws, ocr)
+    worker = Worker(ws, ocr, lanes)
     app = FastAPI(title="taxonymous", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.worker = worker
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]", "::1"])
@@ -525,7 +587,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
     def merge_status(folder: str = ""):
         folder = _folder(folder)
         job = merge_id(folder)
-        state = ("running" if worker.running == job else "queued") if worker.busy(job) else None
+        state = worker.state(job)
         return {"folder": folder, "state": state, "error": worker.errors.get(job),
                 "progress": worker.progress_of(job), "last": last_merge(ws, folder)}
 

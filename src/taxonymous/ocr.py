@@ -13,7 +13,8 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,18 @@ from PIL import Image, ImageOps
 from .pagetext import Line, PageText
 
 PASSES = ("3", "11")  # tesseract --psm: automatic layout, sparse text
+VISION = "vision"  # a read by macOS's Vision instead of Tesseract
+
+
+def vision_on() -> bool:
+    """Whether pages are also read by Vision: on a Mac that has it, unless
+    TAXONYMOUS_OCR=tesseract. Two engines misread differently (Tesseract reads a receipt's
+    "1111" as "4444" every time; Vision drops digits in a crowded table cell), so a value
+    survives only if both miss it."""
+    if os.environ.get("TAXONYMOUS_OCR") == "tesseract":
+        return False
+    from . import vision
+    return vision.available()
 RENDER_DPI = 300  # for pages with no embedded scan to take the resolution from
 VERIFY_DPI = 200  # what verification reads each output page at
 MIN_DPI, MAX_DPI = 150, 400
@@ -50,29 +63,100 @@ def require() -> None:
         raise RuntimeError("tesseract is not installed; cannot read scans (brew install tesseract)")
 
 
-def tesseract(png: bytes, psm: str, tsv: bool = False) -> str:
+@dataclass(frozen=True)
+class Picture:
+    """An image for Tesseract, as a PNG with its resolution when it has one (Tesseract
+    reads differently without it). Light compression: as fast to read as any format
+    (PNM costs Tesseract about 12% more), several times faster to write than the default."""
+    data: bytes
+
+
+def picture(img: Image.Image) -> Picture:
+    buf = io.BytesIO()
+    dpi = img.info.get("dpi")
+    img.convert("L").save(buf, "PNG", compress_level=1, **({"dpi": dpi} if dpi else {}))
+    return Picture(buf.getvalue())
+
+
+def pixmap_picture(pix: pymupdf.Pixmap) -> Picture:
+    """A gray or RGB pixmap, with the resolution it was rendered at."""
+    img = Image.frombytes("L" if pix.n == 1 else "RGB", (pix.width, pix.height), pix.samples)
+    img.info["dpi"] = (pix.xres, pix.yres)
+    return picture(img)
+
+
+def workers() -> int:
+    """OCR processes at a time: TAXONYMOUS_WORKERS, or one per core."""
+    try:
+        return max(1, int(os.environ["TAXONYMOUS_WORKERS"]))
+    except (KeyError, ValueError):
+        return os.cpu_count() or 4
+
+
+_cpu: threading.BoundedSemaphore | None = None
+_cpu_lock = threading.Lock()
+
+
+def _slots() -> threading.BoundedSemaphore:
+    """One OCR read per core at a time, whichever engine and whichever document asks."""
+    global _cpu
+    with _cpu_lock:
+        if _cpu is None:
+            _cpu = threading.BoundedSemaphore(workers())
+        return _cpu
+
+
+def read(pic: Picture, psm: str, tsv: bool = False) -> str:
+    """One read of a picture: Tesseract with that --psm, or Vision (psm VISION)."""
+    with _slots():
+        if psm == VISION:
+            return _vision(pic, tsv)
+        return tesseract(pic, psm, tsv)
+
+
+def _vision(pic: Picture, tsv: bool) -> str:
+    from . import vision
     with tempfile.TemporaryDirectory() as tmp:
         img = Path(tmp) / "page.png"
-        img.write_bytes(png)
+        img.write_bytes(pic.data)
+        return vision.read_file(str(img), tsv, workers())
+
+
+def tesseract(pic: Picture, psm: str, tsv: bool = False) -> str:
+    # from a file: Tesseract reads stdin through a slow path (about 0.4 s more a page)
+    with tempfile.TemporaryDirectory() as tmp:
+        img = Path(tmp) / "page.png"
+        img.write_bytes(pic.data)
         cmd = ["tesseract", str(img), "stdout", "--psm", psm] + (["tsv"] if tsv else [])
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if proc.returncode != 0:
-            raise RuntimeError(f"tesseract failed: {proc.stderr.strip()[:200]}")
-        return proc.stdout
+        proc = subprocess.run(cmd, capture_output=True, timeout=300)
+    if proc.returncode != 0:
+        raise RuntimeError(f"tesseract failed: {proc.stderr.decode(errors='replace').strip()[:200]}")
+    return proc.stdout.decode("utf-8", errors="replace")
 
 
-def run_all(jobs: list[tuple[bytes, str]], tsv: bool = False,
+def run_all(jobs: Iterable[tuple[Picture, str]], tsv: bool = False,
             done: Callable[[int], None] | None = None) -> list[str]:
-    """OCR many (png, psm) jobs in parallel; `done(i)` is called as job i finishes."""
+    """OCR (picture, psm) jobs in parallel, in order; `done(i)` is called as job i finishes.
+    `jobs` is pulled as workers free up, so a long document's pages are never all in
+    memory at once (rendering stays on the calling thread)."""
     require()
+    n = workers()
+    slots = threading.BoundedSemaphore(2 * n)
 
-    def one(i: int) -> str:
-        out = tesseract(jobs[i][0], jobs[i][1], tsv)
+    def one(i: int, pic: Picture, psm: str) -> str:
+        try:
+            out = read(pic, psm, tsv)
+        finally:
+            slots.release()
         if done is not None:
             done(i)
         return out
-    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
-        return list(pool.map(one, range(len(jobs))))
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        futures = []
+        for i, (pic, psm) in enumerate(jobs):
+            slots.acquire()
+            futures.append(pool.submit(one, i, pic, psm))
+        return [f.result() for f in futures]
 
 
 def parse_tsv(tsv: str) -> list[Word]:
@@ -156,14 +240,6 @@ def page_text(words: list[Word], number: int, scale: float, matrix: pymupdf.Matr
     return pt
 
 
-def png(img: Image.Image) -> bytes:
-    """With the image's resolution, when it has one: Tesseract reads differently without it."""
-    buf = io.BytesIO()
-    dpi = img.info.get("dpi")
-    img.convert("L").save(buf, "PNG", **({"dpi": dpi} if dpi else {}))
-    return buf.getvalue()
-
-
 def _skew_score(img: Image.Image) -> float:
     rows = img.resize((1, img.height), Image.Resampling.BOX).tobytes()
     return sum((a - b) ** 2 for a, b in zip(rows, rows[1:], strict=False))
@@ -213,10 +289,11 @@ def _ink(dark: np.ndarray) -> tuple[int, int, int, int] | None:
     return int(cols[0]), y0, int(cols[-1]) + 1, y1
 
 
-def tighten(words: list[Word], img: Image.Image) -> list[Word]:
+def tighten(words: list[Word], img: Image.Image, every: bool = False) -> list[Word]:
     """Shrink word boxes that took in a table rule. A character touching a ruled line is
     read as one word with the line, and that word's box (what gets blacked out) can span
-    the table: rows, columns, the amounts in them. The text read stays as it was."""
+    the table: rows, columns, the amounts in them. The text read stays as it was.
+    `every`: shrink every box to its ink (Vision's boxes take in the line spacing)."""
     h = median_height(words)
     if not h:
         return words
@@ -225,7 +302,7 @@ def tighten(words: list[Word], img: Image.Image) -> list[Word]:
     for w in words:
         x0, y0, x1, y1 = w.rect
         chars = max(1, len(w.text))
-        if y1 - y0 <= 1.5 * h and x1 - x0 <= 1.2 * h * chars + h:
+        if not every and y1 - y0 <= 1.5 * h and x1 - x0 <= 1.2 * h * chars + h:
             out.append(w)
             continue
         if gray is None:

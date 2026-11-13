@@ -155,8 +155,9 @@ class ProfileMatcher:
             if len(digits(value)) < 4 or kind == "PHONE":
                 return
             last4 = digits(value)[-4:]
-            # the masked forms statements print: "XXX-XX-4323", "****4323", "ending in 4323"
-            add(rf"(?<![\w*•#])(?:[*Xx•#]{{2,}}[\s-]?){{1,4}}{last4}(?!\d)", kind, key)
+            # the masked forms statements print: "XXX-XX-4323", "****4323", "ending in 4323";
+            # OCR can read a dash between the marks as an underscore ("***_**-4323")
+            add(rf"(?<![\w*•#])(?:[*Xx•#]{{2,}}[\s_-]?){{1,4}}{last4}(?!\d)", kind, key)
             add(rf"\b(?:ending in|ends in|last (?:4|four)(?: digits)?(?: of)?)\W{{0,3}}(?:[*Xx•#]+[\s-]?)?"
                 rf"(?P<v>{last4})(?!\d)", kind, key)
             if kind == "SSN":  # "SSN 4323", "TIN: 4323"
@@ -328,7 +329,7 @@ _SUFFIX_GROUPS = [["st", "street"], ["ave", "avenue"], ["ln", "lane"], ["ct", "c
 
 SSN_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?<![\w-])\d{3}[- ]\d{2}[- ]\d{4}(?![\w-])"), "SSN"),
-    (re.compile(r"(?<![\w*•])[*Xx•]{3}[- ]?[*Xx•]{2}[- ]?\d{4}(?!\d)"), "SSN"),
+    (re.compile(r"(?<![\w*•])[*Xx•]{3}[-_ ]?[*Xx•]{2}[-_ ]?\d{4}(?!\d)"), "SSN"),
 ]
 OMB_RE = re.compile(r"\bOMB\s*No\W{0,3}$", IC)  # tolerant: OCR reads "OMB No." as "OMBNo," too
 

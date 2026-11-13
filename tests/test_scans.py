@@ -10,6 +10,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from taxonymous import ocr
+from taxonymous import redact as redact_mod
 from taxonymous.detect import ProfileMatcher, detect
 from taxonymous.pagetext import Line, PageText
 from taxonymous.pipeline import Workspace, run
@@ -35,7 +36,11 @@ def read(path) -> str:
             images.append(Image.frombytes("L", (pix.width, pix.height), pix.samples))
     else:
         images = [Image.open(path)]
-    jobs = [(ocr.png(v), psm) for img in images for v, _ in ocr.variants(img) for psm in ocr.PASSES]
+    # Tesseract's reads, and Vision's when it is on: a value Tesseract misreads the same way
+    # in the original and the output (a receipt's "1111" as "4444") is still caught
+    vision = (ocr.VISION,) if ocr.vision_on() else ()
+    jobs = [(ocr.picture(v), psm) for img in images for v, _ in ocr.variants(img) for psm in ocr.PASSES]
+    jobs += [(ocr.picture(img), psm) for img in images for psm in vision]
     return norm(" ".join(ocr.run_all(jobs)))
 
 
@@ -309,9 +314,10 @@ def test_a_value_only_verification_s_ocr_reads_is_found_in_the_built_page(tmp_pa
     out.new_page(width=page.rect.width, height=page.rect.height).insert_image(
         page.rect, pixmap=page.get_pixmap(dpi=300))
     out.save(ws.inbox / "eftps.pdf")
-    original = ocr.variants  # 300 dpi reads of the original (2550 pixels wide) see nothing
-    monkeypatch.setattr(ocr, "variants", lambda img: [(Image.new(img.mode, img.size, "white"), None)]
-                        if img.width > 2000 else original(img))
+    original = redact_mod.reads_of  # 300 dpi reads of the original (2550 pixels wide) see nothing
+    monkeypatch.setattr(redact_mod, "reads_of", lambda img: [
+        (Image.new(img.mode, img.size, "white"), None, psm) for _, _, psm in original(img)]
+        if img.width > 2000 else original(img))
     [outcome] = run(ws)
     assert outcome.report.passed, outcome.report.issues
     assert any("read again the way verification reads it" in n for n in outcome.report.notes)
@@ -337,9 +343,10 @@ def test_the_built_page_is_searched_for_every_value_as_verification_reads_it(tmp
     doc.new_page(width=page.rect.width, height=page.rect.height).insert_image(
         page.rect, pixmap=page.get_pixmap(dpi=300))
     doc.save(ws.inbox / "voucher.pdf")
-    original = ocr.variants  # 300 dpi reads of the original (2550 pixels wide) see nothing
-    monkeypatch.setattr(ocr, "variants", lambda img: [(Image.new(img.mode, img.size, "white"), None)]
-                        if img.width > 2000 else original(img))
+    original = redact_mod.reads_of  # 300 dpi reads of the original (2550 pixels wide) see nothing
+    monkeypatch.setattr(redact_mod, "reads_of", lambda img: [
+        (Image.new(img.mode, img.size, "white"), None, psm) for _, _, psm in original(img)]
+        if img.width > 2000 else original(img))
     [outcome] = run(ws)
     assert outcome.report.passed, outcome.report.issues
     assert [r.page for r in outcome.result.regions if r.kind == "SSN"] == [0, 1]

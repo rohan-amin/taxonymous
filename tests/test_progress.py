@@ -7,7 +7,7 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
-from taxonymous import api as api_mod
+from taxonymous import lanes as lanes_mod
 from taxonymous.api import TOKEN_HEADER, create_app
 from taxonymous.detect import ProfileMatcher
 from taxonymous.pipeline import Workspace, process, reverify
@@ -91,7 +91,7 @@ def test_the_running_document_carries_its_progress(ws, monkeypatch):
         started[n].set()
         assert go[n].wait(30)
 
-    monkeypatch.setattr(api_mod, "process", slow)
+    monkeypatch.setattr(lanes_mod, "process", slow)
     app = create_app(ws, "t")
     client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: "t"})
     assert client.post("/api/run").status_code == 202
@@ -99,8 +99,10 @@ def test_the_running_document_carries_its_progress(ws, monkeypatch):
     docs = {d["id"]: d for d in client.get("/api/documents").json()}
     running = next(d for d in docs.values() if d["status"] == "running")
     queued = next(d for d in docs.values() if d["status"] == "queued")
-    assert running["progress"] == {"stage": "reading", "label": "Reading pages", "done": 3, "total": 4,
-                                   "job": 1, "jobs": 2}
+    progress = running["progress"]
+    assert {k: progress[k] for k in ("stage", "label", "done", "total", "job", "jobs")} == {
+        "stage": "reading", "label": "Reading pages", "done": 3, "total": 4, "job": 1, "jobs": 2}
+    assert 0 < progress["fraction"] < 0.9
     assert queued["progress"] is None
     assert client.get(f"/api/documents/{running['id']}").json()["progress"]["done"] == 3
 

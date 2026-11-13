@@ -189,8 +189,8 @@ def explain(workspace, stem: str, ocr: bool = True) -> list[Hit]:
     if ocr:
         for page in doc:
             if ("ocr", page.number + 1) in pages_with:
-                png = page.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY).tobytes("png")
-                for text in ocr_mod.run_all([(png, psm) for psm in _passes(page)]):
+                pic = ocr_mod.pixmap_picture(page.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY))
+                for text in ocr_mod.run_all([(pic, psm) for psm in _passes(page)]):
                     add("ocr", page.number + 1, text, True)
     out_hits = list(hits.values())
     if ("raw", None) in pages_with:
@@ -208,9 +208,10 @@ def ocr_reads(page: pymupdf.Page, matcher: ProfileMatcher, value: str) -> list[s
     tail = digits(value)[-4:]
     out = []
     for i, (pt, _) in enumerate(p.reads):
-        passes = len(ocr_mod.PASSES)
-        name = (f"read {i + 1} ({p.dpi:.0f} dpi, psm {ocr_mod.PASSES[i % passes]}"
-                + (", straightened)" if i >= passes else ")"))
+        psm = p.passes[i]
+        engine = "Vision" if psm == ocr_mod.VISION else f"psm {psm}"
+        straightened = psm != ocr_mod.VISION and i >= len(ocr_mod.PASSES)
+        name = f"read {i + 1} ({p.dpi:.0f} dpi, {engine}" + (", straightened)" if straightened else ")")
         lines = [m for m in re.finditer(r"[^\n]+", pt.text) if tail and tail in digits(m.group())]
         for m in lines:
             found = sorted({f.kind for t, f in p.found

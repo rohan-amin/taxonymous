@@ -32,6 +32,10 @@ def find(img: Image.Image, scale: float) -> list[pymupdf.Rect]:
 def on_page(page: pymupdf.Page) -> list[pymupdf.Rect]:
     """Each barcode the page shows, in the page's own (unrotated) coordinates, as
     redaction takes them; the picture is of the page as shown, turned."""
-    pix = page.get_pixmap(dpi=DPI, colorspace=pymupdf.csGRAY, alpha=False)
+    return in_pixmap(page, page.get_pixmap(dpi=DPI, colorspace=pymupdf.csGRAY, alpha=False))
+
+
+def in_pixmap(page: pymupdf.Page, pix: pymupdf.Pixmap) -> list[pymupdf.Rect]:
+    """`on_page`, for a gray picture of the page already rendered (at any resolution)."""
     img = Image.frombytes("L", (pix.width, pix.height), pix.samples)
     return [r * page.derotation_matrix for r in find(img, page.rect.width / pix.width)]

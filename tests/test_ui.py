@@ -312,7 +312,7 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
 
 def test_a_run_shows_how_far_it_has_got(page, site, monkeypatch, tmp_path):
     """The bar follows what the engine reports: held part-way here, so it can be looked at."""
-    from taxonymous import api as api_mod
+    from taxonymous import lanes as lanes_mod
     _, app, *_ = site
     open_doc(page, app, "k1_statement.pdf")  # first in the list, so it runs first
     go = threading.Event()
@@ -322,7 +322,7 @@ def test_a_run_shows_how_far_it_has_got(page, site, monkeypatch, tmp_path):
         progress.step(3)
         assert go.wait(30)
 
-    monkeypatch.setattr(api_mod, "process", slow)
+    monkeypatch.setattr(lanes_mod, "process", slow)
     try:
         page.get_by_role("button", name="Run all").click()
         page.wait_for_function("document.querySelector('[data-testid=banner] [data-testid=progress]')"

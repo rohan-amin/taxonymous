@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,10 @@ from taxonymous.profile import Profile
 from taxonymous.redact import redact_file
 from taxonymous.vault import Vault
 from tools.fixtures.generate import generate
+
+# documents one at a time, in the tests' own process, unless a test asks for lanes (tests
+# replace the engine's functions, which a lane's process wouldn't see)
+os.environ["TAXONYMOUS_LANES"] = "1"
 
 
 @pytest.fixture(scope="session")

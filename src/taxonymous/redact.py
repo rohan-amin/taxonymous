@@ -47,6 +47,7 @@ from .detect import (
     repeat_values,
     repeated,
 )
+from .files import replace_with, write_json, write_text
 from .pagetext import PageText, extract
 from .progress import NONE, Progress
 from .sanitize import allow_list, glyphs, moved, sanitize
@@ -57,6 +58,9 @@ SUFFIXES = IMAGE_SUFFIXES | {".pdf"}
 PHOTO_TEXT_HEIGHT = 6.5  # points: OCR word boxes in a photo are scaled so text is about this tall
 JPEG_QUALITY = 80
 OCR_BATCH = 8  # scanned pages rendered and read at a time
+# points kept around a picture on a text page when only the pictures are read: a value
+# printed half on it is still read whole
+PICTURE_MARGIN = 18
 
 
 @dataclass
@@ -90,7 +94,7 @@ class Overrides:
         add = [{"page": n, "rect": list(r)} for n, r in self.add]
         show = [{"page": n, "rect": list(r), "placeholder": ph} for n, r, ph in self.show]
         data = {"keep": sorted(self.keep), "add": add, "show": show}
-        Path(path).write_text(json.dumps(data, indent=2) + "\n")
+        write_json(Path(path), data)
 
     def shown(self, page: int) -> list[pymupdf.Rect]:
         return [pymupdf.Rect(r) for n, r, _ in self.show if n == page]
@@ -159,6 +163,7 @@ class _Ocr:
     scale: float
     dpi: float = 0
     reads: list[tuple[PageText, list[ocr.Word]]] = field(default_factory=list)
+    passes: list[str] = field(default_factory=list)  # each read's psm, or ocr.VISION
     # the reads as OCR gave them, where they differ: putting digits back can glue a value to
     # the letters around it ("AB987654321" -> "A8987654321"), and verification reads these
     raw: list[PageText] = field(default_factory=list)
@@ -223,17 +228,29 @@ def _image(page: pymupdf.Page, dpi: float) -> Image.Image:
     return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
 
-def _render(page: pymupdf.Page) -> _Ocr:
+def _render(page: pymupdf.Page, only: list[pymupdf.Rect] | None = None) -> _Ocr:
+    """`only`: the parts of the page that matter (the pictures on a text page); the rest
+    is painted white, so OCR has only them to read."""
     dpi = _dpi(page)
     img = _image(page, dpi)
-    return _Ocr(page.number, img, page.rect.width / img.width, dpi)
+    scale = page.rect.width / img.width
+    if only is not None and page.rotation == 0:
+        mask = Image.new("L", img.size, 255)
+        draw = ImageDraw.Draw(mask)
+        for r in only:
+            r = r + (-PICTURE_MARGIN, -PICTURE_MARGIN, PICTURE_MARGIN, PICTURE_MARGIN)
+            draw.rectangle([r.x0 / scale, r.y0 / scale, r.x1 / scale, r.y1 / scale], fill=0)
+        img.paste((255, 255, 255), mask=mask)
+    return _Ocr(page.number, img, scale, dpi)
 
 
 def _read_pages(doc: pymupdf.Document, numbers: list[int], matcher: ProfileMatcher,
-                progress: Progress = NONE) -> list[_Ocr]:
+                progress: Progress = NONE, only: dict[int, list[pymupdf.Rect]] | None = None,
+                ) -> list[_Ocr]:
     out = []
+    only = only or {}
     for i in range(0, len(numbers), OCR_BATCH):
-        batch = [_render(doc[n]) for n in numbers[i:i + OCR_BATCH]]
+        batch = [_render(doc[n], only.get(n)) for n in numbers[i:i + OCR_BATCH]]
         _read_all(batch, matcher, progress)
         for p in batch:
             p.img = None  # rendered again if the page is rebuilt
@@ -241,13 +258,24 @@ def _read_pages(doc: pymupdf.Document, numbers: list[int], matcher: ProfileMatch
     return out
 
 
+def reads_of(img: Image.Image) -> list[tuple[Image.Image, pymupdf.Matrix | None, str]]:
+    """Every read of one image: (image, matrix back to it, psm). Tesseract reads it as is and
+    straightened, in each layout mode; Vision, when on, reads it as is (it straightens itself)."""
+    out = [(v, m, psm) for v, m in ocr.variants(img) for psm in ocr.PASSES]
+    if ocr.vision_on():
+        out.append((img, None, ocr.VISION))
+    return out
+
+
 def _read_all(pages: list[_Ocr], matcher: ProfileMatcher, progress: Progress = NONE) -> None:
-    views = [(p, ocr.variants(p.img)) for p in pages]
-    jobs = [(ocr.png(img), psm) for _, vs in views for img, _ in vs for psm in ocr.PASSES]
-    done = progress.per_page([len(vs) * len(ocr.PASSES) for _, vs in views])
+    views = [(p, reads_of(p.img)) for p in pages]
+    jobs = [(ocr.picture(img), psm) for _, rs in views for img, _, psm in rs]
+    done = progress.per_page([len(rs) for _, rs in views])
     tsvs = iter(ocr.run_all(jobs, tsv=True, done=done))
-    for p, vs in views:
-        reads = [(ocr.tighten(ocr.parse_tsv(next(tsvs)), img), m) for img, m in vs for _ in ocr.PASSES]
+    for p, rs in views:
+        reads = [(ocr.tighten(ocr.parse_tsv(next(tsvs)), img, every=psm == ocr.VISION), m)
+                 for img, m, psm in rs]
+        p.passes = [psm for _, _, psm in rs]
         if p.scale <= 0:  # a photo: no physical size, so size it from its text
             h = next((h for h in (ocr.median_height(w) for w, _ in reads) if h), None)
             p.scale = PHOTO_TEXT_HEIGHT / h if h else 72 / 200
@@ -500,6 +528,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         text_pages: dict[int, tuple[PageText, list[Finding]]] = {}
         scan_text: dict[int, tuple[PageText, list[Finding]]] = {}  # text_too pages
         scan_numbers, mixed_numbers = [], []
+        pictures: dict[int, list[pymupdf.Rect]] = {}
         progress.start("reading", doc.page_count)  # a page counts once its text (and OCR, if any) is read
         for page in doc:
             if page.number in as_images or not _visible_text(page):
@@ -512,9 +541,11 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
             text_pages[page.number] = (pt, detect(pt, matcher))
             if _image_rects(page):
                 mixed_numbers.append(page.number)
+                pictures[page.number] = _image_rects(page)
             else:
                 progress.step()
-        read = _read_pages(doc, scan_numbers + mixed_numbers, matcher, progress)
+        # on a text page only its pictures are read: what OCR finds elsewhere is never used
+        read = _read_pages(doc, scan_numbers + mixed_numbers, matcher, progress, only=pictures)
         scans, mixed = read[:len(scan_numbers)], {p.number: p for p in read[len(scan_numbers):]}
         # the reviewer's keeps
         text_pages = {n: (pt, [f for f in fs if wanted(f)]) for n, (pt, fs) in text_pages.items()}
@@ -577,7 +608,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
             page.delete_widget(widget)
     doc.set_metadata({})
     allow_list(doc)  # rebuilding pages and clearing metadata can add keys back
-    doc.save(result.pdf, garbage=4, deflate=True, clean=True)
+    replace_with(result.pdf, lambda tmp: doc.save(tmp, garbage=4, deflate=True, clean=True))
     doc.close()
 
     out = pymupdf.open(result.pdf)
@@ -594,7 +625,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
     pages = [f"=== Page {p.number + 1} ===\n"
              f"{texts[p.number] if p.number in texts else p.get_text(sort=True).rstrip()}\n" for p in out]
     # no file name: one like "Fidelity Rohan Trust 1099.pdf" carries the very name redacted inside
-    result.text.write_text("[redacted by taxonymous]\n\n" + "\n".join(pages))
+    write_text(result.text, "[redacted by taxonymous]\n\n" + "\n".join(pages))
     vault.save()
     return result
 
