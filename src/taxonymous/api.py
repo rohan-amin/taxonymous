@@ -134,7 +134,9 @@ class Worker:
         self.pending: list[Job] = []
         self.running: dict[str, Progress] = {}  # in the order they started
         self.errors: dict[str, str] = {}
-        self.batch = [0, 0]  # jobs done and submitted since the worker was last idle
+        # the documents in the current batch (since the worker was last idle): one each, however
+        # often it's queued; it's done when it's neither waiting nor being cleaned
+        self.batch: set[str] = set()
         self.pages: dict[str, int] = {}  # each waiting or running job's pages, for the time left
         self.per_page: float | None = None  # seconds a page takes a lane on this computer, as measured
         self.unfinished = 0
@@ -148,8 +150,8 @@ class Worker:
         pages = _pages(self.ws, job.stem) if job.action != "merge" else 0
         with self.cv:
             if self.idle():
-                self.batch = [0, 0]
-            self.batch[1] += 1
+                self.batch = set()
+            self.batch.add(job.stem)
             self.unfinished += 1
             self.pages[job.stem] = max(self.pages.get(job.stem, 0), pages)
             self.pending.append(job)
@@ -158,6 +160,12 @@ class Worker:
     def busy(self, stem: str) -> bool:
         with self.cv:
             return stem in self.running or any(j.stem == stem for j in self.pending)
+
+    def waiting(self, stem: str) -> bool:
+        """Queued and not started: queuing it again would only clean it twice. (One being
+        cleaned may be queued again: it started with what is out of date now.)"""
+        with self.cv:
+            return any(j.stem == stem for j in self.pending)
 
     def state(self, stem: str) -> str | None:
         """Whether the job is "running" or "queued", or None."""
@@ -178,7 +186,8 @@ class Worker:
             progress = self.running.get(stem)
             if progress is None:
                 return None
-            done, total = self.batch
+            active = set(self.running) | {j.stem for j in self.pending}
+            done, total = len(self.batch - active), len(self.batch)
             place = done + 1 + list(self.running).index(stem)
             left = self._batch_left()
         snap = progress.snapshot() or {"stage": None, "label": "Starting", "done": 0, "total": 0,
@@ -235,7 +244,6 @@ class Worker:
                     if job.action == "process" and pages:
                         took = (time.monotonic() - started) / pages
                         self.per_page = took if self.per_page is None else 0.7 * self.per_page + 0.3 * took
-                    self.batch[0] += 1
                     self.unfinished -= 1
                     self.cv.notify_all()
 
@@ -491,7 +499,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         stems = [ws.stem(src) for src in ws.pending()]
         processed = [stem for stem in stems if ws.outputs(stem)["report"].exists()]
         for stem in processed:  # cleaned with the earlier details or labels: cleaned again
-            if not worker.busy(stem):
+            if not worker.waiting(stem):  # one being cleaned now goes again after
                 worker.submit(Job(stem, "process"))
         return {"exists": True, "profile": profile, "errors": {}, "path": str(ws.profile_path),
                 "processed": processed, "changed": True}
@@ -516,7 +524,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
             # everything, the first time (nothing could be cleaned before); else what was cleaned
             again = [s for s in stems if s != body.rerun and (first or ws.outputs(s)["report"].exists())]
             for stem in [body.rerun, *again]:
-                if not worker.busy(stem):
+                if not worker.waiting(stem):  # one being cleaned now goes again after
                     worker.submit(Job(stem, "process"))
                     queued.append(stem)
         return {"added": body.kind, "queued": queued}

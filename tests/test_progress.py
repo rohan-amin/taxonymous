@@ -113,3 +113,35 @@ def test_the_running_document_carries_its_progress(ws, monkeypatch):
     go[1].set()
     app.state.worker.wait()
     assert all(d["progress"] is None for d in client.get("/api/documents").json())
+
+
+def test_a_batch_counts_documents_not_times_they_are_queued(ws, monkeypatch):
+    """Two documents; the first, finished, is queued again while the second is cleaned (a
+    profile saved meanwhile): the batch is still two documents ("8 of 9 done" for five
+    documents was jobs counted, not documents). The one being cleaned when the profile is
+    saved goes again after, since it started with the old details."""
+    ws, src = ws
+    for name in ("w2.pdf", "k1_statement.pdf"):
+        (ws.inbox / name).write_bytes((src / name).read_bytes())
+    go = threading.Event()
+    calls: list[str] = []
+
+    def slow(src, ws, matcher, vault, ocr=True, release=True, progress=None):
+        calls.append(src.name)
+        progress.start("reading", 2)
+        progress.step()
+        assert go.wait(30)
+
+    monkeypatch.setattr(lanes_mod, "process", slow)
+    app = create_app(ws, "t")
+    worker = app.state.worker
+    from taxonymous.api import Job
+    worker.submit(Job("k1_statement", "process"))
+    worker.submit(Job("w2", "process"))
+    while "k1_statement" not in worker.running:
+        threading.Event().wait(0.01)
+    worker.submit(Job("k1_statement", "process"))  # again, while it is being cleaned
+    assert worker.progress_of("k1_statement")["jobs"] == 2  # two documents, not three jobs
+    go.set()
+    worker.wait()
+    assert sorted(calls) == ["k1_statement.pdf", "k1_statement.pdf", "w2.pdf"]  # cleaned again after
