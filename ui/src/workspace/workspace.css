@@ -421,3 +421,8 @@
 .ws .ws-status > span { display: inline-flex; align-items: center; gap: 6px; }
 .ws .ws-status.done { color: var(--w-ok); font-weight: 600; }
 .ws-banner.compact .ws-checked li strong { margin-right: 0; font-weight: 600; }
+/* My profile: Edit beside the title; a group's entries open in place */
+.ws .ws-edit { margin-left: 8px; padding: 0 4px; border: 0; background: transparent; color: var(--w-accent); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.ws .ws-edit:hover { text-decoration: underline; }
+.ws-prow.sub { padding-left: 16px; }
+.ws-prow.sub span { font-size: 11px; }

@@ -180,8 +180,8 @@ const pageList = (ps: number[]) => {
   return out.join(", ");
 };
 
-function ProfileDrawer({ profile, found, onOpen, onShow }: {
-  profile: Profile | null; found: FoundEntries | null; onOpen: () => void; onShow: (h: Highlight, doc: string) => void;
+function ProfileDrawer({ profile, found, onShow }: {
+  profile: Profile | null; found: FoundEntries | null; onShow: (h: Highlight, doc: string) => void;
 }) {
   const groups: { title: string; items: Entry[]; person?: boolean }[] = [];
   if (profile) {
@@ -207,62 +207,50 @@ function ProfileDrawer({ profile, found, onOpen, onShow }: {
     if (profile.preparers.length) groups.push({ title: "Tax preparer", items: profile.preparers.map((x, i) => ["Preparer", x.name || x.firm, `preparer:${i}`]) });
   }
   const n = groups.reduce((a, g) => a + g.items.length, 0);
-  const [all, setAll] = useState(() => store.get("profile-all", false));
-  const [open, setOpen] = useState<string | null>(null);
-  useEffect(() => store.set("profile-all", all), [all]);
+  const [open, setOpen] = useState<string | null>(null); // the entry whose "where" is showing
+  const [groupsOpen, setGroupsOpen] = useState<Set<string>>(new Set()); // "5 accounts", opened in place
   const places = (entry: string) => found?.[entry]?.total ?? 0;
   const toggle = (entry: string) => setOpen(open === entry ? null : entry);
+  const row = ([label, value, entry]: Entry, title: string, sub = false) => (
+    <div key={entry}>
+      <button type="button" className={`ws-prow${sub ? " sub" : ""}${open === entry ? " on" : ""}`}
+              onClick={() => toggle(entry)} aria-expanded={open === entry}>
+        <span>{sub ? label : title}</span>
+        <strong>{value}</strong>
+        {found && <em>{places(entry)}</em>}
+      </button>
+      {open === entry && <Where entry={entry} label={value} found={found} onShow={onShow} />}
+    </div>
+  );
   return (
-    <>
-      <div className="ws-drawer-scroll" style={{ padding: "4px 8px 16px" }}>
-        <p className="ws-note">Removed from <strong>all documents</strong>, in any format it's printed. Click one to see where.</p>
-        {!n && <p className="ws-note" style={{ border: "1px dashed var(--w-line-strong)", borderRadius: 8, padding: 12, margin: "8px 6px" }}>
-          Nothing yet. Choose Click a value and click your name on a document, or open My profile to type it.</p>}
-        {n > 0 && !all && (
-          <div className="ws-psummary" data-testid="profile-summary">
-            {groups.map((g, i) => {
-              const one = g.person || g.items.length === 1;
-              const entry = g.items[0][2];
-              return (
-                <div key={`${g.title}${i}`}>
-                  <button type="button" className={`ws-prow${one && open === entry ? " on" : ""}`}
-                          onClick={() => (one ? toggle(entry) : setAll(true))} aria-expanded={one ? open === entry : undefined}>
-                    <span>{g.title}</span>
-                    <strong>{one ? g.items[0][1] : `${g.items.length} ${g.title.toLowerCase()}`}</strong>
-                    {one && found && <em>{places(entry)}</em>}
-                  </button>
-                  {one && open === entry && <Where entry={entry} label={g.items[0][1]} found={found} onShow={onShow} />}
-                </div>
-              );
-            })}
-            <button type="button" className="wbtn quiet" onClick={() => setAll(true)}>Show all {n} details</button>
-          </div>
-        )}
-        {n > 0 && all && <button type="button" className="wbtn quiet" style={{ margin: "2px 0 0" }} onClick={() => setAll(false)}>Show less</button>}
-        {all && groups.map((g, i) => (
-          <div className="ws-pgroup" key={`${g.title}${i}`}>
-            <span>{g.title}</span>
-            {(g.person ? [g.items] : g.items.map((x) => [x])).map((rows, j) => {
-              const entry = rows[0][2];
-              return (
-                <div key={j}>
-                  <button type="button" className={`ws-entry${open === entry ? " on" : ""}`} onClick={() => toggle(entry)}
-                          aria-expanded={open === entry}>
-                    <span className="rows">{rows.map(([k, v]) => <span key={k} className="row"><span className="k">{k}</span><span className="v">{v}</span></span>)}</span>
-                    {found && <em>{places(entry)}</em>}
-                  </button>
-                  {open === entry && <Where entry={entry} label={rows[0][1]} found={found} onShow={onShow} />}
-                </div>
-              );
-            })}
-          </div>
-        ))}
-        <p className="ws-note" style={{ marginTop: 8 }}>Boxes you draw aren't listed here. They stay on their own document.</p>
-      </div>
-      <div className="ws-drawer-foot">
-        <button type="button" className="wbtn" style={{ width: "100%" }} onClick={onOpen}>Open My profile to type or edit</button>
-      </div>
-    </>
+    <div className="ws-drawer-scroll" style={{ padding: "4px 8px 16px" }}>
+      <p className="ws-note">Removed from <strong>all documents</strong>, in any format it's printed. Click one to see where.</p>
+      {!n && <p className="ws-note" style={{ border: "1px dashed var(--w-line-strong)", borderRadius: 8, padding: 12, margin: "8px 6px" }}>
+        Nothing yet. Choose Click a value and click your name on a document, or choose Edit to type it.</p>}
+      {n > 0 && (
+        <div className="ws-psummary" data-testid="profile-summary">
+          {groups.map((g, i) => {
+            if (g.person || g.items.length === 1) return row(g.items[0], g.title);
+            const shown = groupsOpen.has(g.title);
+            return (
+              <div key={`${g.title}${i}`}>
+                <button type="button" className="ws-prow" aria-expanded={shown} onClick={() => {
+                  const next = new Set(groupsOpen);
+                  if (shown) next.delete(g.title); else next.add(g.title);
+                  setGroupsOpen(next);
+                }}>
+                  <span>{g.title}</span>
+                  <strong>{g.items.length} {g.title.toLowerCase()}</strong>
+                  <em aria-hidden="true">{shown ? "▾" : "▸"}</em>
+                </button>
+                {shown && g.items.map((item) => row(item, g.title, true))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="ws-note" style={{ marginTop: 8 }}>Boxes you draw aren't listed here. They stay on their own document.</p>
+    </div>
   );
 }
 
@@ -855,10 +843,10 @@ export function Workspace() {
               <Grip label="Resize My profile" width={rightW} setWidth={setRightW} side="right" />
               <aside className="ws-drawer right" style={{ width: rightW }} aria-label="My profile">
                 <div className="ws-drawer-head">
-                  <strong>My profile</strong>
+                  <strong>My profile <button type="button" className="ws-edit" onClick={() => setView("profile")}>Edit</button></strong>
                   <button type="button" className="wbtn quiet" onClick={() => setRightOpen(false)} aria-label="Hide My profile">Hide ›</button>
                 </div>
-                <ProfileDrawer profile={profile} found={found} onOpen={() => setView("profile")}
+                <ProfileDrawer profile={profile} found={found}
                                onShow={(h, doc) => { setHighlight(h); setSel(doc); setSide("original"); }} />
               </aside>
             </>
