@@ -508,7 +508,7 @@ def test_workspace_click_a_value_to_add_it_to_my_profile(corpus, browser, tmp_pa
         pg.get_by_text("Added to My profile").wait_for()
         assert json.loads(ws.profile_path.read_text())["people"][0]["name"] == "Avery F Abernathy"
         app.state.worker.wait()
-        pg.get_by_text("Checked: none of your details found").wait_for(timeout=20_000)
+        pg.get_by_text("Checked again: none left").wait_for(timeout=20_000)
         pg.get_by_text("What was checked").click()
         listed = pg.get_by_test_id("checked").inner_text()
         assert "read again" in listed and "as images" in listed and "barcodes" in listed and "Tesseract" not in listed

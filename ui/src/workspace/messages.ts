@@ -87,8 +87,10 @@ export function plain(d: DocSummary, hasProfile: boolean): Plain {
   const removed = Object.values(d.redactions ?? {}).reduce((a, n) => a + n, 0);
   switch (d.status) {
     case "passed":
-      return { tone: "ok", title: "Checked: none of your details found",
-               body: `${removed ? `${removed} removed` : "Nothing of yours on it"} · every page read again` };
+      // what was done first, then how it was verified
+      return removed
+        ? { tone: "ok", title: `Cleaned: ${removed} detail${removed === 1 ? "" : "s"} removed`, body: "Checked again: none left" }
+        : { tone: "ok", title: "Cleaned: nothing of yours on it", body: "Checked again: none found" };
     case "queued":
       return { tone: "work", title: "Waiting its turn…", body: "It's cleaned and checked as soon as the documents ahead of it are done." };
     case "running": {
