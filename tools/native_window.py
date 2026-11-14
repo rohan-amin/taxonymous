@@ -90,7 +90,9 @@ def main() -> None:
     ws.init()
     token = secrets.token_urlsafe(32)
     port = DEV_API_PORT if args.dev else free_port()
-    config = uvicorn.Config(create_app(ws, token), host="127.0.0.1", port=port, log_level="warning")
+    # resume: what the last session left unfinished (quit while cleaning) is cleaned again
+    app = create_app(ws, token, resume=True)
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
     threading.Thread(target=server.run, daemon=True).start()
     while not server.started:

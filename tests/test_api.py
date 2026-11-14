@@ -582,3 +582,51 @@ def test_a_document_can_be_removed_entirely(corpus, network_attempts, tmp_path):
     assert [d["id"] for d in client.get("/api/documents").json()] == ["k1_statement"]  # the other stays
     assert ws.outputs("k1_statement")["pdf"].exists()
     assert client.delete(doc).status_code == 404
+
+
+def test_quitting_while_cleaning_records_nothing_and_the_app_resumes_it(corpus, network_attempts, tmp_path):
+    """The app quits while a lane cleans a document: the lane stops without writing a
+    result (it used to record the document as failed: "This file couldn't be opened"). The
+    next time the app opens, it cleans what was left unfinished, or ended in an error,
+    and leaves what passed alone."""
+    import subprocess
+    import sys
+    import time
+
+    from taxonymous import lanes as lanes_mod
+    src, _, profile = corpus
+    ws = Workspace(tmp_path)
+    ws.init()
+    ws.profile_path.write_text(json.dumps(profile))
+    for name in ("brokerage_consolidated.pdf", "w2.pdf", "k1_statement.pdf"):
+        shutil.copy(src / name, ws.inbox / name)
+
+    lane = subprocess.Popen([sys.executable, "-m", "taxonymous.lanes", "--serve"], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    job = {"root": str(ws.root), "action": "process", "stem": "brokerage_consolidated", "forget": [],
+           "ocr": True}
+    lane.stdin.write(json.dumps(job) + "\n")
+    lane.stdin.flush()
+    while not lane.stdout.readline().startswith(lanes_mod.MARK):  # it has started
+        pass
+    lane.stdout.close()  # the app is gone
+    assert lane.wait(timeout=120) == 0
+    assert not ws.outputs("brokerage_consolidated")["report"].exists()
+
+    # one passed, one ended in an error, one never finished
+    from taxonymous.api import unfinished
+    app = create_app(ws, TOKEN)  # no resume: only the app does
+    client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: TOKEN})
+    client.post("/api/documents/w2/run")
+    app.state.worker.wait()
+    report = ws.outputs("k1_statement")["report"]
+    report.write_text(json.dumps({"passed": False, "issues": [{"check": "error", "kind": "OSError"}]}))
+    assert set(unfinished(ws)) == {"brokerage_consolidated", "k1_statement"}
+    passed_at = ws.outputs("w2")["report"].stat().st_mtime_ns
+    time.sleep(0.01)
+    app = create_app(ws, TOKEN, resume=True)
+    app.state.worker.wait()
+    client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: TOKEN})
+    assert {d["id"]: d["status"] for d in client.get("/api/documents").json()} == {
+        "brokerage_consolidated": "passed", "k1_statement": "passed", "w2": "passed"}
+    assert ws.outputs("w2")["report"].stat().st_mtime_ns == passed_at  # not cleaned again

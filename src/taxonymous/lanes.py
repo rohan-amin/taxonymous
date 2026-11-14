@@ -138,8 +138,13 @@ def serve() -> None:
     out = sys.stdout
 
     def send(msg: dict) -> None:
-        out.write(MARK + json.dumps(msg) + "\n")
-        out.flush()
+        try:
+            out.write(MARK + json.dumps(msg) + "\n")
+            out.flush()
+        except (BrokenPipeError, OSError):
+            # the app is gone (quit mid-clean): stop now, writing nothing. Raising would be
+            # caught by verification, which would record the document as failed
+            os._exit(0)
 
     for line in sys.stdin:
         job = json.loads(line)

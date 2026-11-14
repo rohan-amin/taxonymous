@@ -661,7 +661,7 @@ export function Workspace() {
         if (hasProfile) await api.run(d.id).catch(() => undefined);
       } catch (e) {
         const m = (e as Error).message;
-        failed.push(m.includes("already in") ? `You already added ${f.name}.` : m.startsWith("only PDFs")
+        failed.push(m.includes("already in") ? `${f.name} is already in your documents. To add it fresh, right-click it there and remove it first.` : m.startsWith("only PDFs")
           ? `Taxonymous can't open ${f.name}. It works with PDFs and photos.` : `${f.name}: ${m}`);
       }
     }

@@ -418,10 +418,26 @@ class Chosen(BaseModel):
 
 # ---------------------------------------------------------------- app
 
+def unfinished(ws: Workspace) -> list[str]:
+    """Documents to clean again when the app opens: never finished (the app quit while
+    cleaning them, or they were added while it was closed), or ended in an error."""
+    out = []
+    for src in ws.pending():
+        stem = ws.stem(src)
+        report = _read_json(ws.outputs(stem)["report"], None)
+        if report is None or any(i["check"] == "error" for i in report["issues"]):
+            out.append(stem)
+    return out
+
+
 def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None = UI_DIR,
-               lanes: int | None = None) -> FastAPI:
+               lanes: int | None = None, resume: bool = False) -> FastAPI:
+    """`resume`: clean what was left unfinished (the app, not tests or the command line)."""
     ws.init()
     worker = Worker(ws, ocr, lanes)
+    if resume and ws.profile_path.exists():
+        for stem in unfinished(ws):
+            worker.submit(Job(stem, "process"))
     app = FastAPI(title="taxonymous", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.worker = worker
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]", "::1"])
