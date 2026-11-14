@@ -966,3 +966,8 @@ input.secret {
 .details-bar { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 32px; background: var(--bg); }
 .details-bar.top { justify-content: space-between; border-bottom: 1px solid var(--line); }
 .details-bar.bottom { position: static; border-top: 1px solid var(--line); }
+
+/* a person's occupation and employer: indented under their name, so they read as theirs */
+.row.person .occupation { margin-left: 24px; }
+@media (max-width: 1000px) { .row.person .occupation { margin-left: 16px; } }
+.row.person + .row.person { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 4px; }
