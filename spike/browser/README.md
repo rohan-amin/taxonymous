@@ -23,6 +23,12 @@ protected with a passphrase: AES-256-GCM, the key from PBKDF2-SHA-256 with 600,0
 all WebCrypto; a wrong passphrase or a changed file fails to open. Unprotected is an option,
 and the page says what that means.
 
+Documents stay separate: added for a session, safe copies downloaded. What you decided on a
+document (the boxes you drew) is kept in the Taxonymous file under the document's fingerprint,
+the SHA-256 of its bytes: no names, no contents. Add the same file again (to the byte, any
+name) and its boxes come back, with a note saying so; a re-downloaded copy whose bytes differ
+starts fresh, since a box is a position and a shifted layout would put it in the wrong place.
+
 What's in dist/: the page, a service worker (offline), a worker running the engine, the
 pinned Pyodide runtime and packages, the engine's own Python from src/taxonymous, and the
 synthetic sample documents. manifest.json lists every downloaded file with its SHA-256;

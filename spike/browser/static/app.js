@@ -112,7 +112,9 @@ function ready(updateWaiting = false) {
 }
 
 // ---- your Taxonymous file: opened into memory, saved only when you say
-let session = null;  // { profile, vault, name, handle, passphrase, dirty }
+// { profile, vault, decisions, name, handle, passphrase, dirty }. decisions: the boxes you drew,
+// by each document's fingerprint (SHA-256 of its bytes): no names, no documents
+let session = null;
 const FS = "showOpenFilePicker" in window && !new URLSearchParams(location.search).has("nofs");
 const TYPES = [{ description: "Taxonymous file", accept: { "application/json": [".taxonymous"] } }];
 
@@ -168,7 +170,8 @@ async function newFrom(profileText) {
   const profile = JSON.parse(profileText);
   const pass = await askPass("create");
   if (!pass) return;
-  session = { profile, vault: null, name: "My taxes.taxonymous", handle: null, passphrase: pass.passphrase, dirty: true };
+  session = { profile, vault: null, decisions: {}, name: "My taxes.taxonymous", handle: null,
+              passphrase: pass.passphrase, dirty: true };
   showFile();
 }
 
@@ -206,7 +209,8 @@ async function openFile() {
       alertInDialog(e.message);
     }
   }
-  session = { profile: contents.profile, vault: contents.vault, name, handle, passphrase, dirty: false };
+  session = { profile: contents.profile, vault: contents.vault, decisions: contents.decisions || {}, name, handle,
+              passphrase, dirty: false };
   $("results").innerHTML = "";
   showFile();
 }
@@ -216,7 +220,8 @@ function alertInDialog(message) {  // shown at the top of the next passphrase pr
 }
 
 async function save(as = false) {
-  const text = await KEYFILE.seal({ profile: session.profile, vault: session.vault }, session.passphrase);
+  const text = await KEYFILE.seal({ profile: session.profile, vault: session.vault, decisions: session.decisions },
+                                  session.passphrase);
   if (FS && (as || !session.handle)) {
     session.handle = await window.showSaveFilePicker({ suggestedName: session.name, types: TYPES });
     session.name = session.handle.name;
@@ -270,7 +275,7 @@ function engine() {
 }
 
 let nextId = 0;
-function clean(profile, vault, name, bytes) {
+function ask(message, transfer = []) {
   return new Promise((resolve) => {
     const id = nextId++;
     const listen = (e) => {
@@ -279,32 +284,49 @@ function clean(profile, vault, name, bytes) {
       resolve(e.data.result);
     };
     worker.addEventListener("message", listen);
-    worker.postMessage({ id, profile, vault, name, bytes }, [bytes.buffer]);
+    worker.postMessage({ id, ...message }, transfer);
   });
 }
 
-async function run(docs) {
+const docs = [];  // this session's documents, in memory only: { name, bytes, fp, pages, card }
+
+async function add(name, bytes) {
+  const fp = await sha256(bytes);
+  const doc = { name, bytes, fp, pages: null, card: document.createElement("div") };
+  doc.card.className = "result";
+  $("results").append(doc.card);
+  docs.push(doc);
+  const before = session.decisions[fp]?.add?.length || 0;
+  doc.restored = before;  // the same file as before (to the byte): its boxes come back
+  await cleanDoc(doc);
+}
+
+async function cleanDoc(doc) {
+  doc.card.textContent = `${doc.name}: cleaning…`;
+  const copy = doc.bytes.slice();  // the original stays here; the worker gets a copy
+  const r = await ask({ kind: "clean", profile: JSON.stringify(session.profile), vault: session.vault, name: doc.name,
+                        bytes: copy, fingerprint: doc.fp, decisions: JSON.stringify(session.decisions[doc.fp] || {}) },
+                      [copy.buffer]);
+  if (r.vault && r.vault !== session.vault) {  // new labels: kept in memory until you save
+    session.vault = r.vault;
+    changed();
+  }
+  show(doc, r);
+}
+
+async function run(list) {
   $("results").innerHTML = "";
+  docs.length = 0;
   try {
     await engine();
-    for (const { name, bytes } of docs) {
-      const card = document.createElement("div");
-      card.className = "result";
-      card.textContent = `${name}: cleaning…`;
-      $("results").append(card);
-      const r = await clean(JSON.stringify(session.profile), session.vault, name, bytes);
-      if (r.vault && r.vault !== session.vault) {  // new labels: kept in memory until you save
-        session.vault = r.vault;
-        changed();
-      }
-      show(card, r);
-    }
+    for (const { name, bytes } of list) await add(name, bytes);
   } catch (e) {
     $("engine").textContent = `That didn't work: ${e.message}`;
   }
 }
 
-function show(card, r) {
+function show(doc, r) {
+  const card = doc.card;
   card.innerHTML = "";
   if (r.error) { card.textContent = r.error; return; }
   const checked = r.passed && !r.pictures_unread;
@@ -331,8 +353,100 @@ function show(card, r) {
   pre.hidden = true;
   pre.textContent = r.text;
   textBtn.onclick = () => { pre.hidden = !pre.hidden; };
-  row.append(dl, textBtn);
-  card.append(title, status, meta, row, pre);
+  const reviewBtn = document.createElement("button");
+  reviewBtn.textContent = "Review and draw boxes";
+  const review = document.createElement("div");
+  review.className = "review";
+  review.hidden = true;
+  reviewBtn.onclick = () => { review.hidden = !review.hidden; if (!review.hidden) openReview(doc, review); };
+  row.append(dl, textBtn, reviewBtn);
+  card.append(title, status);
+  if (doc.restored) {
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.textContent = `${doc.restored} box${doc.restored === 1 ? "" : "es"} you drew before ${doc.restored === 1 ? "was" : "were"} put back: it's the same file as last time, to the byte.`;
+    card.append(note);
+    doc.restored = 0;
+  }
+  card.append(meta, row, pre, review);
+}
+
+// the review view: the original's pages, the boxes drawn on it (this document only), drag to draw
+async function openReview(doc, el) {
+  if (!doc.pages) {
+    el.textContent = "Drawing the pages…";
+    const copy = doc.bytes.slice();
+    doc.pages = await ask({ kind: "pages", bytes: copy }, [copy.buffer]);
+  }
+  const saved = session.decisions[doc.fp]?.add || [];
+  let boxes = saved.map((b) => ({ ...b }));
+  const draw = () => {
+    el.innerHTML = "";
+    const bar = document.createElement("div");
+    bar.className = "row";
+    const changedBoxes = JSON.stringify(boxes) !== JSON.stringify(saved);
+    const apply = document.createElement("button");
+    apply.className = "primary";
+    apply.textContent = "Apply and check again";
+    apply.disabled = !changedBoxes;
+    apply.onclick = async () => {
+      session.decisions[doc.fp] = { add: boxes };
+      if (!boxes.length) delete session.decisions[doc.fp];
+      changed();
+      doc.restored = 0;
+      await cleanDoc(doc);
+    };
+    const hint = document.createElement("span");
+    hint.className = "muted";
+    hint.textContent = "Drag over anything to black it out on this document only. Click a box's × to take it away.";
+    bar.append(apply, hint);
+    el.append(bar);
+    doc.pages.forEach((p, n) => {
+      const page = document.createElement("div");
+      page.className = "page";
+      page.style.aspectRatio = `${p.w} / ${p.h}`;
+      const img = document.createElement("img");
+      img.src = URL.createObjectURL(new Blob([p.png], { type: "image/png" }));
+      img.draggable = false;
+      page.append(img);
+      const pct = (r) => `left:${(r[0] / p.w) * 100}%;top:${(r[1] / p.h) * 100}%;width:${((r[2] - r[0]) / p.w) * 100}%;height:${((r[3] - r[1]) / p.h) * 100}%`;
+      boxes.forEach((b, i) => {
+        if (b.page !== n) return;
+        const box = document.createElement("div");
+        box.className = "drawn";
+        box.style.cssText = pct(b.rect);
+        const x = document.createElement("button");
+        x.textContent = "×";
+        x.title = "Take this box away";
+        x.onclick = (e) => { e.stopPropagation(); boxes = boxes.filter((_, j) => j !== i); draw(); };
+        box.append(x);
+        page.append(box);
+      });
+      let start = null;
+      const ghost = document.createElement("div");
+      ghost.className = "drawn pending";
+      const at = (e) => {
+        const r = page.getBoundingClientRect();
+        return [((e.clientX - r.left) / r.width) * p.w, ((e.clientY - r.top) / r.height) * p.h];
+      };
+      page.onpointerdown = (e) => { if (e.target.tagName === "BUTTON") return; page.setPointerCapture(e.pointerId); start = at(e); page.append(ghost); };
+      page.onpointermove = (e) => {
+        if (!start) return;
+        const [x, y] = at(e);
+        ghost.style.cssText = pct([Math.min(start[0], x), Math.min(start[1], y), Math.max(start[0], x), Math.max(start[1], y)]);
+      };
+      page.onpointerup = (e) => {
+        if (!start) return;
+        const [x, y] = at(e);
+        const rect = [Math.min(start[0], x), Math.min(start[1], y), Math.max(start[0], x), Math.max(start[1], y)].map((v) => Math.round(v * 10) / 10);
+        start = null;
+        ghost.remove();
+        if (rect[2] - rect[0] > 3 && rect[3] - rect[1] > 3) { boxes.push({ page: n, rect }); draw(); }
+      };
+      el.append(page);
+    });
+  };
+  draw();
 }
 
 $("setup-go").onclick = () => setUp().catch((e) => { $("progress-text").textContent = `Setup stopped: ${e.message}. Try again to resume.`; $("setup-go").hidden = false; });

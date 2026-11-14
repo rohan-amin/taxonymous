@@ -20,10 +20,17 @@ const ready = (async () => {
 
 onmessage = async (e) => {
   const { py, run } = await ready;
-  const { id, profile, vault, name, bytes } = e.data;
+  const { id, kind, profile, vault, name, bytes, fingerprint, decisions } = e.data;
   let result;
   try {
-    const r = run.run(profile, vault || "", name, py.toPy(bytes));
+    if (kind === "pages") {  // the review view's page images
+      const r = run.pages(py.toPy(bytes));
+      result = r.toJs({ dict_converter: Object.fromEntries });
+      r.destroy();
+      postMessage({ id, result }, result.map((p) => p.png.buffer));
+      return;
+    }
+    const r = run.run(profile, vault || "", name, py.toPy(bytes), fingerprint, decisions || "");
     result = r.toJs({ dict_converter: Object.fromEntries });
     r.destroy();
   } catch (err) {
