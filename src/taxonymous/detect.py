@@ -139,6 +139,9 @@ class ProfileMatcher:
         self.by_last4: dict[str, tuple[str, str]] = {}
         self.by_name: dict[str, tuple[str, str]] = {}
         self.surname_of: dict[str, str] = {}  # a person's key -> the key their surname alone has
+        # an address's city and ZIP -> the addresses that have it: more than one, and which is
+        # meant is told by the street printed before it (see `own_addresses`)
+        self.address_parts: dict[str, set[str]] = {}
         # each person's role by their id, and the preparers': what their labels say (<TAXPAYER>)
         self.roles = {(p.id or str(i)): p.role or "other" for i, p in enumerate(profile.people)}
         self.roles.update({f"preparer:{pr.id or i}": "preparer" for i, pr in enumerate(profile.preparers)})
@@ -182,6 +185,10 @@ class ProfileMatcher:
                 add(rf"(?:(?<!\w)[x#*•]|\.{{2,}}|…)\s?(?P<v>{last4}){end}", kind, key, raw=False)
 
         def add_address(a: Address, key: str) -> None:
+            # its city and ZIP, which another of the profile's addresses may share
+            for part in (_city_part(a.city), _zip_part(a.zip)):
+                if part:
+                    self.address_parts.setdefault(part, set()).add(key)
             words = a.street.split()
             # the unit ("Apt 1007", "Apartment APT 1007", "#4B") is printed on a line of its own
             # as often as after the street: each is found on its own
@@ -552,4 +559,41 @@ def detect(pt: PageText, pm: ProfileMatcher) -> list[Finding]:
     adds what the rest of the document found."""
     ssns = [Finding(pt.number, m.start(), m.end(), *pm.canonical(kind, m.group()), "pattern", m.group())
             for m, kind in pattern_hits(pt.text)]
-    return merge(pm.find(pt) + ssns, pt)
+    return own_addresses(merge(pm.find(pt) + ssns, pt), pm)
+
+
+SHARED_PART_REACH = 160  # characters back to the street a shared city or ZIP goes with (a line or two)
+
+
+def _city_part(city: str) -> str:
+    return "city:" + " ".join(city.lower().split()) if len(city.strip()) >= 3 else ""
+
+
+def _zip_part(zip_: str) -> str:
+    ds = digits(zip_)
+    return "zip:" + ds[:5] if len(ds) >= 5 else ""
+
+
+def own_addresses(findings: list[Finding], pm: ProfileMatcher) -> list[Finding]:
+    """A city or ZIP two of the profile's addresses share (two homes in one town) is the
+    address whose street is printed just before it, as forms lay an address out; it used
+    to be whichever address the profile listed first."""
+    shared = {part: keys for part, keys in pm.address_parts.items() if len(keys) > 1}
+    if not shared:
+        return findings
+    for i, f in enumerate(findings):
+        if f.kind != "ADDR":
+            continue
+        part = _zip_part(f.text) if any(c.isdigit() for c in f.text) else _city_part(f.text)
+        keys = shared.get(part)
+        if not keys:
+            continue
+        street = next((g for g in reversed(findings[:i]) if g.kind == "ADDR" and g.key in keys
+                       and f.start - g.end <= SHARED_PART_REACH and not _is_shared(g, shared)), None)
+        if street is not None:
+            f.key = street.key
+    return findings
+
+
+def _is_shared(f: Finding, shared: dict[str, set[str]]) -> bool:
+    return (_zip_part(f.text) if any(c.isdigit() for c in f.text) else _city_part(f.text)) in shared

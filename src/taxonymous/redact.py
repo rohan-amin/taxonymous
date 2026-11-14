@@ -446,6 +446,31 @@ def _rebuild(doc: pymupdf.Document, p: _Ocr, regions, at: int | None, result: Re
     return _substituted(pt, regions).rstrip()
 
 
+def reading_text(page: pymupdf.Page) -> str:
+    """A page's text as it reads: the words that share a line, left to right, lines top to
+    bottom. A placeholder's label is set smaller inside its box, so its top sits a little
+    above its line's: sorting by the top (PyMuPDF's sort) put it before the line's words
+    ("<TAXPAYER_ROTH_IRA_1>Roth IRA"). A wide gap (a form's next column) stays wide."""
+    lines: list[list] = []  # [middle, height, words]: a line's middle is its first word's, and stays
+    for w in sorted(page.get_text("words"), key=lambda w: ((w[1] + w[3]) / 2, w[0])):
+        y0, y1 = w[1], w[3]
+        mid, h = (y0 + y1) / 2, max(y1 - y0, 0.1)
+        line = next((ln for ln in reversed(lines[-6:]) if abs(ln[0] - mid) < 0.35 * max(h, ln[1])), None)
+        if line is None:
+            lines.append([mid, h, [w]])
+        else:
+            line[2].append(w)
+    out = []
+    for _, _, words in sorted(lines, key=lambda ln: ln[0]):
+        words.sort(key=lambda w: w[0])
+        parts = [words[0][4]]
+        for prev, w in zip(words, words[1:], strict=False):
+            char = (prev[2] - prev[0]) / max(len(prev[4]), 1)
+            parts.append(("   " if w[0] - prev[2] > 2.5 * char else " ") + w[4])
+        out.append("".join(parts))
+    return "\n".join(out)
+
+
 def _visible_text(page: pymupdf.Page) -> bool:
     """False for a bare scan, and for a scan whose only text is a scanner's invisible
     OCR layer (render mode 3): both are read and rebuilt as images."""
@@ -628,7 +653,7 @@ def redact_file(src: Path, out_dir: Path, matcher: ProfileMatcher, vault: Vault,
         retry.moved = sorted(set(retry.moved) | set(result.moved) | {n + 1 for n in shifted})
         return retry
     pages = [f"=== Page {p.number + 1} ===\n"
-             f"{texts[p.number] if p.number in texts else p.get_text(sort=True).rstrip()}\n" for p in out]
+             f"{texts[p.number] if p.number in texts else reading_text(p)}\n" for p in out]
     # no file name: one like "Fidelity Rohan Trust 1099.pdf" carries the very name redacted inside
     write_text(result.text, "[redacted by taxonymous]\n\n" + "\n".join(pages))
     vault.save()

@@ -206,3 +206,23 @@ def test_accounts_and_addresses_say_what_they_are(corpus, tmp_path):
     assert client.put("/api/profile", json=saved).status_code == 200
     app.state.worker.wait()
     assert labels(lines()[1]) == ["<ACCT_1>", "<ROUTING_1>"]
+
+
+def test_two_addresses_in_one_town_keep_their_own_labels(tmp_path):
+    """A city and ZIP two addresses share go with the street printed before them (they all
+    went to the first address listed), and a label reads in its place on its line."""
+    profile = {"people": [{"name": "Avery F Abernathy", "role": "taxpayer"}],
+               "addresses": [{"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "WA", "zip": "98458"},
+                             {"street": "12 Harbor Rd", "city": "Seaside", "state": "OR", "zip": "97138"},
+                             {"street": "77 Pine St", "city": "Tacoma", "state": "WA", "zip": "98458"}]}
+    doc = pymupdf.open()
+    page = doc.new_page(width=600, height=300)
+    for i, line in enumerate(["5842 Fenwick Ave", "Tacoma, WA 98458", "12 Harbor Rd", "Seaside, OR 97138",
+                              "Mailing address 77 Pine St", "Tacoma, WA 98458"]):
+        page.insert_text((20, 30 + 30 * i), line, fontsize=11)
+    doc.save(tmp_path / "homes.pdf")
+    result = redact_file(tmp_path / "homes.pdf", tmp_path / "out", ProfileMatcher(Profile.from_dict(profile)),
+                         Vault(tmp_path / "vault.json"))
+    lines = [" ".join(ln.split()) for ln in result.text.read_text().splitlines() if ln.strip()][2:]
+    assert lines == ["<ADDR_1>", "<ADDR_1> , WA <ADDR_1>", "<ADDR_2>", "<ADDR_2> , OR <ADDR_2>",
+                     "Mailing address <ADDR_3>", "<ADDR_3> , WA <ADDR_3>"]
