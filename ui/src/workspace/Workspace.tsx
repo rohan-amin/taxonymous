@@ -104,7 +104,7 @@ function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 720 }}>
           <h1>Share your tax documents with AI, without sharing who you are.</h1>
           <p style={{ fontSize: 15, color: "var(--w-muted)" }}>
-            Taxonymous removes your personal details and keeps the numbers an AI assistant needs.
+            Remove your identity. Preserve your financial context.
           </p>
         </div>
         <div className="ws-local-banner">
