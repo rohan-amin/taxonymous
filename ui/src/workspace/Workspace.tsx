@@ -777,7 +777,7 @@ export function Workspace() {
             <>
               <nav className="ws-drawer left" style={{ width: leftW }} aria-label="Your documents">
                 <div className="ws-drawer-head">
-                  <strong>Documents <span className="count">{total}</span></strong>
+                  <strong>Documents</strong>
                   <button type="button" className="wbtn quiet" onClick={() => setLeftOpen(false)} aria-label="Hide the document list">‹ Hide</button>
                 </div>
                 <div className="ws-drawer-tools">
