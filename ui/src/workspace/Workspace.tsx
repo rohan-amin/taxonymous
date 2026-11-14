@@ -146,7 +146,12 @@ export interface Highlight {
   placeholders: string[];
 }
 
-type Entry = [string, string, string]; // label, value (masked), entry id ("person:0", "acct:1")
+type Entry = [string, string, string];
+// what a group's entries are called, for "10 EINs"
+const NOUN: Record<string, string> = {
+  Addresses: "addresses", Accounts: "accounts", Phones: "phones", Emails: "emails", Cards: "cards",
+  "Your EINs": "EINs", "Other numbers": "numbers", "Tax preparer": "preparers",
+}; // label, value (masked), entry id ("person:0", "acct:1")
 
 function Where({ entry, label, found, onShow }: {
   entry: string; label: string; found: FoundEntries | null; onShow: (h: Highlight, doc: string) => void;
@@ -215,7 +220,7 @@ function ProfileDrawer({ profile, found, onShow }: {
     <div key={entry}>
       <button type="button" className={`ws-prow${sub ? " sub" : ""}${open === entry ? " on" : ""}`}
               onClick={() => toggle(entry)} aria-expanded={open === entry}>
-        <span>{sub ? label : title}</span>
+        <span>{!sub && <i className="ws-disclose" aria-hidden="true" />}{sub ? label : title}</span>
         <strong>{value}</strong>
         {found && <em>{places(entry)}</em>}
       </button>
@@ -224,7 +229,8 @@ function ProfileDrawer({ profile, found, onShow }: {
   );
   return (
     <div className="ws-drawer-scroll" style={{ padding: "4px 8px 16px" }}>
-      <p className="ws-note">Removed from <strong>all documents</strong>, in any format it's printed. Click one to see where.</p>
+      <p className="ws-note">Removed from <strong>all documents</strong>, in any format it's printed. The number is how many
+        places it was removed; click one to see where.</p>
       {!n && <p className="ws-note" style={{ border: "1px dashed var(--w-line-strong)", borderRadius: 8, padding: 12, margin: "8px 6px" }}>
         Nothing yet. Choose Click a value and click your name on a document, or choose Edit to type it.</p>}
       {n > 0 && (
@@ -239,9 +245,9 @@ function ProfileDrawer({ profile, found, onShow }: {
                   if (shown) next.delete(g.title); else next.add(g.title);
                   setGroupsOpen(next);
                 }}>
-                  <span>{g.title}</span>
-                  <strong>{g.items.length} {g.title.toLowerCase()}</strong>
-                  <em aria-hidden="true">{shown ? "▾" : "▸"}</em>
+                  <span><i className="ws-disclose" aria-hidden="true">{shown ? "▾" : "▸"}</i>{g.title}</span>
+                  <strong>{g.items.length} {NOUN[g.title] ?? "entries"}</strong>
+                  {found && <em>{g.items.reduce((a, [, , e]) => a + places(e), 0)}</em>}
                 </button>
                 {shown && g.items.map((item) => row(item, g.title, true))}
               </div>

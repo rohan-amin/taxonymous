@@ -447,3 +447,4 @@
 .ws-confirm .wbtn.danger:focus { outline-color: rgba(179, 38, 30, 0.45); }
 /* a working document's spinner on the selected row: no ring (a full ring hides the turning gap), drawn in white */
 .ws-file.sel .ws-dot.work { box-shadow: none; border-color: var(--w-accent-ink); border-top-color: transparent; }
+.ws-disclose { display: inline-block; width: 12px; margin-left: -2px; font-style: normal; font-size: 9px; color: var(--w-muted); }
