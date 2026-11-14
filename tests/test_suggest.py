@@ -39,6 +39,12 @@ def test_a_value_is_suggested_by_its_shape_and_label(text, label, kind, item):
     assert suggest(text, label)[:2] == (kind, item)
 
 
+def test_an_ordinary_word_is_not_guessed():
+    for word in ("income", "Income", "Total wages"):
+        assert suggest(word)[:2] == ("", {}), word
+    assert suggest("Abernathy", "Last name")[:2] == ("person", {"name": "Abernathy", "role": "other"})
+
+
 def test_the_first_person_added_is_you():
     assert suggest("Avery Abernathy", "", has_people=False)[1]["role"] == "taxpayer"
 

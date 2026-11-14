@@ -511,7 +511,8 @@ def test_workspace_click_a_value_to_add_it_to_my_profile(corpus, browser, tmp_pa
         pg.get_by_text("Checked again: none left").wait_for(timeout=20_000)
         pg.get_by_text("What was checked").click()
         listed = pg.get_by_test_id("checked").inner_text()
-        assert "read again" in listed and "as images" in listed and "barcodes" in listed and "Tesseract" not in listed
+        assert "read again" in listed and "as images" in listed and "barcodes" in listed
+        assert "Tesseract" not in listed and "Vision" not in listed  # no engine names
         # all checked: the next step is saving the safe copies, then Finder
         # My profile: click yourself to see where you were removed, outlined in the document
         pg.get_by_test_id("profile-summary").get_by_role("button", name="You").click()

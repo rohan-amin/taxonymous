@@ -194,7 +194,7 @@ export interface PageWord {
 export interface Suggestion {
   words: number[]; // what the click grew to: the whole name, street or phone number
   text: string;
-  kind: DetailKind;
+  kind: DetailKind | ""; // "": no guess (an ordinary word); the reviewer says what it is
   item: Record<string, string>;
   note: string | null; // a caution: an amount, a company, someone else's EIN
 }

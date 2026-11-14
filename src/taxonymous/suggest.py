@@ -28,7 +28,8 @@ EIN = re.compile(r"^\d{2}-\d{7}$")
 SSN = re.compile(r"^\d{3}-\d{2}-\d{4}$")
 MASKED_SSN = re.compile(r"^[X*•#]{3}[-_ ]?[X*•#]{2}[-_ ]?\d{4}$", re.I)
 PTIN = re.compile(r"^P\d{8}$", re.I)
-NAME = re.compile(r"^[A-Za-z][A-Za-z.'-]*(?:,?\s+[A-Za-z][A-Za-z.'-]*){1,4}$")
+# capitalised words, two to five: "Avery F Abernathy", not "Total wages"
+NAME = re.compile(r"^[A-Z][A-Za-z.'’-]*(?:,?\s+[A-Z][A-Za-z.'’-]*){1,4}$")
 
 # words in a label, by what they say the value is
 LABELS: list[tuple[str, re.Pattern]] = [
@@ -173,7 +174,8 @@ THEIR_EIN = "An employer's or bank's EIN usually stays readable. Add it only if 
 
 def suggest(text: str, label: str = "", has_people: bool = True) -> tuple[str, dict, str | None]:
     """(kind, fields, note) for a value: a kind of profile.ITEMS, a row for its list, and
-    a word of caution when adding it is probably not what the reviewer wants."""
+    a word of caution when adding it is probably not what the reviewer wants. Kind "" when
+    nothing says what it is (an ordinary word): no guess."""
     text = _tidy(text)
     kind, item = _suggest(text, label, has_people)
     note = None
@@ -241,9 +243,9 @@ def _suggest(text: str, label: str, has_people: bool) -> tuple[str, dict]:
         return "preparer", {"name": text if person else "", "firm": "" if person else text}
     if "address" in says and letters:
         return "address", {"street": text, "city": "", "state": "", "zip": ""}
-    if NAME.fullmatch(text) or re.fullmatch(r"[A-Z][A-Za-z'’-]+", text):  # one word: they add the rest
-        return "person", {"name": _person_name(text), **you}
-    return "number", {"number": text, "description": _describe(label)}
+    if NAME.fullmatch(text) or ("name" in says and re.fullmatch(r"[A-Z][A-Za-z'’-]+", text)):
+        return "person", {"name": _person_name(text), **you}  # one word only where a label says it's a name
+    return "", {}  # a word like "income": no guess; the reviewer says what it is
 
 
 def _describe(label: str) -> str:

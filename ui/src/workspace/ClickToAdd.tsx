@@ -96,7 +96,7 @@ export function AddForm({ picked, docId, style, onCancel, onAdded }: {
   onAdded: (queued: string[]) => void;
 }) {
   const s = picked.suggestion;
-  const [kind, setKind] = useState<DetailKind>(s?.kind ?? "person");
+  const [kind, setKind] = useState<DetailKind | "">(s?.kind ?? "");  // "": not said yet
   const [item, setItem] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +107,7 @@ export function AddForm({ picked, docId, style, onCancel, onAdded }: {
   useEffect(() => {
     if (!s) return;
     setKind(s.kind);
-    setItem({ ...blankRow(DETAIL_FORMS.find((d) => d.kind === s.kind)!.fields), ...s.item });
+    setItem(s.kind ? { ...blankRow(DETAIL_FORMS.find((d) => d.kind === s.kind)!.fields), ...s.item } : {});
     setErrors({});
     setError(null);
   }, [s]);
@@ -118,7 +118,8 @@ export function AddForm({ picked, docId, style, onCancel, onAdded }: {
   }, [onCancel]);
   useEffect(() => { form.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [s]);
 
-  const pick = (k: DetailKind) => {
+  const pick = (k: DetailKind | "") => {
+    if (!k) return;
     setKind(k);
     setErrors({});
     setMore(false);
@@ -129,6 +130,7 @@ export function AddForm({ picked, docId, style, onCancel, onAdded }: {
     e.preventDefault();
     setSaving(true);
     try {
+      if (!kind) return;
       const r = await api.addDetail(kind, item, docId);
       onAdded(r.queued);
     } catch (err) {
@@ -142,7 +144,8 @@ export function AddForm({ picked, docId, style, onCancel, onAdded }: {
 
   const all = DETAIL_FORMS.find((d) => d.kind === kind)?.fields ?? [];
   // what the value filled in, and choices; the rest on request
-  const fields = more ? all : all.filter(({ f, options }) => options || f === MAIN[kind] || item[f] || errors[f]);
+  const fields = !kind ? [] : more ? all
+    : all.filter(({ f, options }) => options || f === MAIN[kind] || item[f] || errors[f]);
   return (
     <form ref={form} className="ws-add" style={style} onSubmit={submit} onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()} data-testid="add-to-profile" aria-label="Add to My profile">
@@ -155,6 +158,7 @@ export function AddForm({ picked, docId, style, onCancel, onAdded }: {
         <div className="ws-add-fields">
           <Field label="What is it">
             <select value={kind} onChange={(e) => pick(e.target.value as DetailKind)}>
+              {!kind && <option value="" disabled>Choose…</option>}
               {DETAIL_FORMS.map(({ kind: k, label }) => <option key={k} value={k}>{label}</option>)}
             </select>
           </Field>
@@ -176,7 +180,7 @@ export function AddForm({ picked, docId, style, onCancel, onAdded }: {
             More fields ({all.length - fields.length})</button>}
         {error && <p className="ws-add-error" role="alert">{error}</p>}
         <div className="ws-add-foot">
-          <button type="submit" className="wbtn primary" disabled={saving}>{saving ? "Adding…" : "Add and clean again"}</button>
+          <button type="submit" className="wbtn primary" disabled={saving || !kind}>{saving ? "Adding…" : "Add and clean again"}</button>
           <button type="button" className="wbtn quiet" onClick={onCancel}>Cancel</button>
           <span className="ws-add-tip">Shift-click to add the next word</span>
         </div>

@@ -267,13 +267,14 @@ function ProfileDrawer({ profile, found, onOpen, onShow }: {
 }
 
 function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, onChanged, onAdded,
-                   allDone, onFinish, finishLabel, highlight, onClearHighlight }: {
+                   allDone, onFinish, finishLabel, highlight, onClearHighlight, showName }: {
   summary: DocSummary; hasProfile: boolean; zoom: Zoom; setZoom: (z: Zoom) => void;
   scaleNow: { current: number };
   side: "redacted" | "original"; setSide: (s: "redacted" | "original") => void;
   onChanged: () => void; onAdded: (queued: string[]) => void;
   allDone: boolean; onFinish: () => void; finishLabel: string; // all checked: the next step is saving them
   highlight: Highlight | null; onClearHighlight: () => void; // a profile entry's boxes, outlined
+  showName: boolean; // the file name, only while the documents list (which shows it) is hidden
 }) {
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [drawing, setDrawing] = useState(false);
@@ -425,7 +426,7 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
       <div className="ws-doc-head">
         <div className="ws-doc-title">
           <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-            <span className="file">{summary.folder ? `${summary.folder.replaceAll("/", " / ")} / ` : ""}{summary.name}</span>
+            {showName && <span className="file">{summary.folder ? `${summary.folder.replaceAll("/", " / ")} / ` : ""}{summary.name}</span>}
             <div className={`ws-banner compact ${msg.tone}`} role="status" data-testid="status">
               <span className={`ws-dot ${DOT[msg.tone]}`} aria-hidden="true" />
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -838,7 +839,7 @@ export function Workspace() {
                      scaleNow={scaleNow}
                      side={side} setSide={setSide}
                      allDone={allDone} onFinish={finish} finishLabel={finishLabel}
-                     highlight={highlight} onClearHighlight={() => setHighlight(null)}
+                     highlight={highlight} onClearHighlight={() => setHighlight(null)} showName={!leftOpen}
                      onChanged={refresh}
                      onAdded={(queued) => {
                        loadProfile();
