@@ -294,9 +294,12 @@
 .ws-welcome { position: absolute; inset: 0; z-index: 30; overflow-y: auto; background: var(--w-ground); display: flex; justify-content: center; padding: 48px 24px; }
 .ws-welcome-inner { width: 100%; max-width: 1040px; display: flex; flex-direction: column; gap: 22px; }
 .ws-welcome h1 { font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
-.ws-local-banner { display: flex; gap: 16px; align-items: center; padding: 18px 20px; border-radius: 12px; background: #1f4e43; color: #ffffff; }
+/* the promise: important, not an action and not a status, so neutral; the lock carries it */
+.ws-local-banner { display: flex; gap: 18px; align-items: center; padding: 18px 20px; border-radius: 12px; background: var(--w-surface); color: var(--w-ink); border: 1px solid var(--w-line-strong); }
 .ws-local-banner strong { font-size: 17px; }
-.ws-local-banner p { color: #dcebe5; }
+.ws-local-banner p { color: var(--w-muted); }
+.ws-local-banner p.strong { color: var(--w-ink); font-weight: 600; }
+.ws-lock { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 24px; background: var(--w-accent-soft); color: var(--w-accent); }
 .ws-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
 .ws-steps li { display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 10px; background: var(--w-surface); border: 1px solid var(--w-line); }
 .ws-steps .n { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 16px; background: var(--w-accent-soft); color: var(--w-accent); font-weight: 700; }

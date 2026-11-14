@@ -108,14 +108,16 @@ function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
           </p>
         </div>
         <div className="ws-local-banner">
-          <svg width="30" height="30" viewBox="0 0 16 16" aria-hidden="true" style={{ flex: "none" }}>
-            <rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="#fff" strokeWidth="1.3" />
-            <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="#fff" strokeWidth="1.3" />
-          </svg>
+          <span className="ws-lock" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 16 16">
+              <rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+            </svg>
+          </span>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <strong>Everything stays on this computer</strong>
             <p>Your documents and details are never uploaded. You can even turn off your Wi-Fi and Taxonymous will still work.</p>
-            <p style={{ color: "#fff", fontWeight: 600 }}>You're always in control of your sensitive information: only the safe copies you choose to share ever leave this computer.</p>
+            <p className="strong">You're always in control of your sensitive information: only the safe copies you choose to share ever leave this computer.</p>
           </div>
         </div>
         <ol className="ws-steps">
@@ -671,10 +673,17 @@ export function Workspace() {
       case "prev": if (prev) setSel(prev.id); break;
       case "original": setSide("original"); break;
       case "safe": setSide("redacted"); break;
-      case "safe-copies": setSafeOpen(true); break;
-      case "profile": setView("profile"); break;
-      case "profile-toggle": setView((v) => (v === "profile" ? "work" : "profile")); loadProfile(); break;
-      case "welcome": setWelcome(true); break;
+      case "safe-copies": setWelcome(false); setSafeOpen(true); break;
+      // My Profile goes to the profile from wherever you are: over the welcome screen or a
+      // sheet it would only change what's behind them
+      case "profile": setWelcome(false); setSafeOpen(false); setView("profile"); loadProfile(); break;
+      case "profile-toggle":
+        setSafeOpen(false);
+        setView((v) => (v === "profile" && !welcome ? "work" : "profile"));
+        setWelcome(false);
+        loadProfile();
+        break;
+      case "welcome": setSafeOpen(false); setWelcome(true); break;
       case "added": // files the native File menu copied into the inbox: clean the new ones
         api.documents().then(async (list) => {
           setDocs(list);
@@ -683,7 +692,7 @@ export function Workspace() {
         }).catch(() => undefined);
         break;
     }
-  }, [next, prev, hasProfile, refresh, loadProfile]);
+  }, [next, prev, hasProfile, refresh, loadProfile, welcome]);
   useEffect(() => {
     const onToast = (e: Event) => setToast((e as CustomEvent<string>).detail || null);
     window.addEventListener("tx-toast", onToast);
@@ -924,7 +933,7 @@ export function Workspace() {
           </div>
         </div>
       )}
-      {welcome && <Welcome onClose={(hide) => { store.set("welcome-hidden", hide); setWelcome(false); }} />}
+      {welcome && <Welcome onClose={(hide) => { store.set("welcome-hidden", hide); setWelcome(false); setView("work"); }} />}
       {dropping && <div className="ws-dropping">Drop to add these documents</div>}
       {toast && <div className="ws-toast" role="status"><span>{toast}</span>
         <button type="button" className="wbtn quiet" style={{ color: "inherit" }} onClick={() => setToast(null)}>OK</button></div>}
