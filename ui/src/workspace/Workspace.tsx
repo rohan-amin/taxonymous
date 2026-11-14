@@ -94,7 +94,7 @@ function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
   const steps: [string, string][] = [
     ["Tell it what to protect, once", "Add a document and click your name, SSN and account numbers on it. Or type them into My profile."],
     ["Removed from every document", "Each document you add is cleaned of them automatically, however they're printed, scans and photos included."],
-    ["Review", "Spot something else of yours? Click it to remove it everywhere, or draw a box over it on that document only."],
+    ["Review", "Spot something else of yours? Click to remove it everywhere, or draw a box to remove it from that document only."],
     ["Checked again", "Every copy is read again from scratch, the way a person or an AI would. It's only ready when none of your details turn up."],
     ["Share the safe copies", "Save them and drag them into your AI assistant. Your originals never change."],
   ];
