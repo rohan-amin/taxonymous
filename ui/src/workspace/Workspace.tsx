@@ -402,6 +402,8 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
   const apply = async () => {
     try {
       await api.addBoxes(id, pending);
+      // the saved boxes first, then the dashed ones go: never a moment without the box
+      setDetail(await api.document(id));
       setPending([]);
       setDrawing(false);
       onChanged();
@@ -507,7 +509,8 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
       <div className="ws-viewer" ref={viewer}>
         {!detail && <div className="ws-empty">Loading…</div>}
         {detail?.pages.map(([w, h], n) => {
-          const local = detail.regions.filter((r) => r.page === n && r.source === "manual");
+          // drawn boxes as saved, not as the last run drew them: they stay while it runs again
+          const local = detail.added.filter((r) => r.page === n);
           const others = showing === "original" ? detail.regions.filter((r) => r.page === n && r.source !== "manual") : [];
           const box = (rect: number[]): CSSProperties => ({
             left: `${(rect[0] / w) * 100}%`, top: `${(rect[1] / h) * 100}%`,
