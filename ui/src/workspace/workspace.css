@@ -452,3 +452,10 @@
 .ws-profile-view .details-bar { background: var(--w-sunk); border-color: var(--w-line); padding: 8px 16px; }
 .ws-profile-view .details-bar button.primary { background: var(--w-accent); border-color: var(--w-accent); color: var(--w-accent-ink); border-radius: 6px; padding: 5px 16px; font-weight: 600; }
 .ws-profile-view .details-bar button.primary:hover:not(:disabled) { background: var(--w-accent-hover); }
+
+/* zoomed past the window, a page must scroll to every edge: centred only while it fits (auto
+   margins, not align-items: center, which pushes an overflowing page's left edge out of reach),
+   and the space after the last page kept (WebKit drops a scrolling flex box's end padding) */
+.ws-viewer { align-items: flex-start; }
+.ws-viewer > .ws-page, .ws-viewer > .ws-legend, .ws-viewer > .ws-empty { margin-left: auto; margin-right: auto; }
+.ws-viewer::after { content: ""; flex: none; height: 1px; width: 1px; }
