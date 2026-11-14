@@ -794,16 +794,7 @@ export function Workspace() {
                          aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(batch.fraction * 100)}>
                       <div style={{ width: `${batch.fraction * 100}%` }} />
                     </div>
-                  </div> : total > 0 && (
-                    // where things stand; it opens the summary (saving is the document header's button)
-                    <button type="button" className={`ws-progress ws-status${allDone ? " done" : ""}`} data-testid="done"
-                            onClick={() => setSafeOpen(true)} disabled={!nChecked}>
-                      <span>{allDone && <span className="ws-dot ok" aria-hidden="true" />}
-                        {allDone ? (total === 1 ? "Checked" : `All ${total} checked`) : `${nChecked} of ${total} checked`}
-                        {nChecked > unsaved && ` · ${unsaved ? `${nChecked - unsaved} saved` : "all saved"}`}</span>
-                      {!allDone && <div className="ws-bar"><div style={{ width: `${(nChecked / total) * 100}%` }} /></div>}
-                    </button>
-                  )}
+                  </div> : null}
                 </div>
                 <div className="ws-drawer-scroll">
                   {GROUPS.map((g) => {
