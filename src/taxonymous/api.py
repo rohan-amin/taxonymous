@@ -19,6 +19,9 @@ the same browser can't drive it). It makes no outbound connections.
   POST   /api/documents                         upload a file into inbox/ (multipart "file", and
                                                 "folder" to put it in one: "2024")
   GET    /api/documents/{id}                    status, report, boxes, reviewer decisions, page sizes
+  DELETE /api/documents/{id}                    remove it from the workspace: its copy in inbox/, its
+                                                cleaned files, your boxes on it, its saved safe copy
+                                                (409 while it is being cleaned); never your original
   GET    /api/documents/{id}/pages/{n}/original.png | redacted.png   (?dpi=)
   GET    /api/documents/{id}/pages/{n}/words    the words on the original page, with their boxes
                                                 (page points), read by OCR on a scan; kept in memory
@@ -722,6 +725,24 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
                 "progress": worker.progress_of(job), "last": last_merge(ws, folder)}
 
     # last: an id holds slashes, so this would take every /api/documents/... GET above
+    @app.delete("/api/documents/{stem:path}")  # last but one: "/redactions" etc. are matched first
+    def remove(stem: str):
+        """A document taken out of Taxonymous entirely. Its placeholders stay in the vault:
+        other documents may share them, and a value keeps its label if it comes back."""
+        src = _source(ws, stem)
+        if worker.busy(stem):
+            raise HTTPException(409, "It's being cleaned. Remove it when that's done.")
+        for path in [src, *ws.outputs(stem).values(), ws.overrides_path(stem), *ws.stale(stem)]:
+            path.unlink(missing_ok=True)
+        worker.errors.pop(stem, None)
+        # folders it leaves empty go too (inbox/2024/ with nothing left in it)
+        for root in (ws.inbox, ws.work, ws.ready, ws.overrides_path("x").parent):
+            folder = (root / stem).parent
+            while folder != root and folder.is_dir() and not any(folder.iterdir()):
+                folder.rmdir()
+                folder = folder.parent
+        return {"removed": stem}
+
     @app.get("/api/documents/{stem:path}")
     def document(stem: str):
         src = _source(ws, stem)

@@ -580,6 +580,9 @@ export function Workspace() {
   const [welcome, setWelcome] = useState(() => !store.get("welcome-hidden", false));
   const [dropping, setDropping] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // removing a document: the right-click menu, then the confirmation
+  const [menu, setMenu] = useState<{ doc: DocSummary; x: number; y: number } | null>(null);
+  const [removing, setRemoving] = useState<DocSummary | null>(null);
   const [found, setFound] = useState<FoundEntries | null>(null);
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -618,6 +621,21 @@ export function Workspace() {
   const tones = useMemo(() => new Map((docs ?? []).map((d) => [d.id, plain(d, hasProfile).tone])), [docs, hasProfile]);
   const order = useMemo(() => GROUPS.flatMap((g) => (docs ?? []).filter((d) => g.tone.includes(tones.get(d.id)!))), [docs, tones]);
   const current = docs?.find((d) => d.id === sel) ?? null;
+  // Delete (or Backspace) on the selected document asks to remove it; Escape closes the menu or question
+  useEffect(() => {
+    const key = (e: globalThis.KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      if (e.key === "Escape") { setMenu(null); setRemoving(null); return; }
+      if ((e.key === "Delete" || e.key === "Backspace") && !e.metaKey && current && view === "work"
+          && !welcome && !safeOpen && !removing) {
+        e.preventDefault();
+        setRemoving(current);
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [current, view, welcome, safeOpen, removing]);
   const next = useMemo(() => {
     if (!current) return null;
     const i = order.findIndex((d) => d.id === current.id);
@@ -792,6 +810,7 @@ export function Workspace() {
                         <span className="ws-group-title">{g.title} · {rows.length}</span>
                         {rows.map((d) => (
                           <button type="button" key={d.id} className={`ws-file${d.id === sel ? " sel" : ""}`} onClick={() => setSel(d.id)}
+                                  onContextMenu={(e) => { e.preventDefault(); setSel(d.id); setMenu({ doc: d, x: e.clientX, y: e.clientY }); }}
                                   title={d.folder ? `${d.folder} / ${d.name}` : d.name} aria-current={d.id === sel}>
                             <span className={`ws-dot ${DOT[tones.get(d.id)!]}`} aria-hidden="true" />
                             <span className="name">{d.folder && <span className="folder">{d.folder} / </span>}{d.name}</span>
@@ -912,6 +931,38 @@ export function Workspace() {
                 ))}
                 <p className="ws-note">Each document gets its safe copy as soon as it's checked. Nothing waits for the whole set.</p>
               </>}
+            </div>
+          </div>
+        </div>
+      )}
+      {menu && (
+        <div className="ws-menu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
+          <div className="ws-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
+            <button type="button" role="menuitem" onClick={() => { setRemoving(menu.doc); setMenu(null); }}>
+              Remove from Taxonymous…</button>
+          </div>
+        </div>
+      )}
+      {removing && (
+        <div className="ws-scrim center" onClick={(e) => e.currentTarget === e.target && setRemoving(null)}>
+          <div className="ws-confirm" role="alertdialog" aria-label="Remove from Taxonymous" data-testid="remove">
+            <strong>Remove “{removing.name}” from Taxonymous?</strong>
+            <p><b>Your original file isn't touched.</b> Only Taxonymous's copy is removed, with its safe copy and any boxes
+              you drew on it.</p>
+            <div className="ws-confirm-foot">
+              <button type="button" className="wbtn" onClick={() => setRemoving(null)} autoFocus>Cancel</button>
+              <button type="button" className="wbtn danger" onClick={async () => {
+                const doc = removing;
+                setRemoving(null);
+                try {
+                  await api.remove(doc.id);
+                  setToast(`Removed ${doc.name} from Taxonymous. Your original file is unchanged.`);
+                  if (sel === doc.id) setSel(null);
+                } catch (e) {
+                  setToast((e as Error).message);
+                }
+                refresh();
+              }}>Remove from Taxonymous</button>
             </div>
           </div>
         </div>

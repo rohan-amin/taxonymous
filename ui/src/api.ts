@@ -252,6 +252,7 @@ export const api = {
   found: () => call<{ entries: FoundEntries }>("GET", "/api/profile/found"),
   documents: () => call<DocSummary[]>("GET", "/api/documents"),
   document: (id: string) => call<DocDetail>("GET", doc(id)),
+  remove: (id: string) => call("DELETE", doc(id)), // from the workspace; the original file stays where it is
   text: (id: string) => call<string>("GET", `${doc(id)}/text`),
   upload: (file: File, folder = "") => {
     const form = new FormData();

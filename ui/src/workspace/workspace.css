@@ -426,3 +426,17 @@
 .ws .ws-edit:hover { text-decoration: underline; }
 .ws-prow.sub { padding-left: 16px; }
 .ws-prow.sub span { font-size: 11px; }
+
+/* removing a document: a right-click menu, then a question */
+.ws-menu-scrim { position: absolute; inset: 0; z-index: 35; }
+.ws-menu { position: fixed; min-width: 200px; padding: 4px; border-radius: 8px; background: var(--w-surface); border: 1px solid var(--w-line-strong); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
+.ws-menu button { display: block; width: 100%; padding: 5px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--w-ink); font: inherit; text-align: left; cursor: default; }
+.ws-menu button:hover, .ws-menu button:focus-visible { background: var(--w-accent); color: var(--w-accent-ink); outline: none; }
+.ws-scrim.center { align-items: center; justify-content: center; z-index: 36; }
+.ws-confirm { width: 400px; max-width: calc(100% - 32px); display: flex; flex-direction: column; gap: 10px; padding: 18px 20px 16px; border-radius: 12px; background: var(--w-surface); color: var(--w-ink); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25); }
+.ws-confirm strong { font-size: 14px; overflow-wrap: anywhere; }
+.ws-confirm p { color: var(--w-muted); }
+.ws-confirm p b { color: var(--w-ink); }
+.ws-confirm-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.ws .wbtn.danger { background: #b3261e; border-color: #b3261e; color: #fff; }
+.ws .wbtn.danger:hover:not(:disabled) { background: #8c1d18; }

@@ -4,6 +4,7 @@ import json
 import shutil
 import socket
 from collections import Counter
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -553,3 +554,31 @@ def test_click_a_value_on_a_document_to_add_it_to_your_details(corpus, network_a
         s = client.post(f"/api/documents/{doc}/pages/0/suggest", json={"words": [i]}).json()
         assert s["kind"] == "phone" and s["text"] == f"(555) {value}"
     assert client.get(f"{W2}/pages/9/words").status_code == 404
+
+
+def test_a_document_can_be_removed_entirely(corpus, network_attempts, tmp_path):
+    """Removing a document takes everything Taxonymous holds for it: its copy, its cleaned
+    files, the reviewer's boxes and its saved safe copy; nothing else."""
+    src, _, profile = corpus
+    ws = Workspace(tmp_path)
+    ws.init()
+    ws.profile_path.write_text(json.dumps(profile))
+    (ws.inbox / "2024").mkdir()
+    for name in ("2024/w2.pdf", "k1_statement.pdf"):
+        shutil.copy(src / Path(name).name, ws.inbox / name)
+    app = create_app(ws, TOKEN)
+    client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: TOKEN})
+    client.post("/api/run")
+    app.state.worker.wait()
+    doc = "/api/documents/2024/w2"
+    assert client.post(f"{doc}/redactions", json=boxes(0, (40, 40, 90, 60))).status_code == 202
+    app.state.worker.wait()
+    assert client.post(f"{doc}/export").status_code == 200
+    held = [*ws.outputs("2024/w2").values(), ws.overrides_path("2024/w2"), *ws.released("2024/w2")]
+    assert all(p.exists() for p in held if p.suffix != ".json" or "shown" not in p.name)
+
+    assert client.delete(doc).status_code == 200
+    assert not any(p.exists() for p in held) and not (ws.inbox / "2024").exists()
+    assert [d["id"] for d in client.get("/api/documents").json()] == ["k1_statement"]  # the other stays
+    assert ws.outputs("k1_statement")["pdf"].exists()
+    assert client.delete(doc).status_code == 404

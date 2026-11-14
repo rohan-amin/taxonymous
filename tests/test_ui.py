@@ -546,3 +546,44 @@ def test_workspace_click_a_value_to_add_it_to_my_profile(corpus, browser, tmp_pa
         pg.close()
         server.should_exit = True
     assert not errors
+
+
+def test_workspace_removes_a_document_after_saying_the_original_stays(corpus, browser, tmp_path):
+    import uvicorn
+    src, _, profile = corpus
+    ws = Workspace(tmp_path / "ws")
+    ws.init()
+    ws.profile_path.write_text(json.dumps(profile))
+    for name in ("w2.pdf", "k1_statement.pdf"):
+        shutil.copyfile(src / name, ws.inbox / name)
+    app = create_app(ws, TOKEN, ocr=False)
+    port = free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    threading.Thread(target=server.run, daemon=True).start()
+    while not server.started:
+        time.sleep(0.05)
+    pg = browser.new_page(viewport={"width": 1400, "height": 900}, base_url=f"http://127.0.0.1:{port}")
+    errors: list[str] = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        pg.goto(f"/?token={TOKEN}&ui=workspace")
+        pg.get_by_role("button", name="Get started").click()
+        files = pg.get_by_role("navigation", name="Your documents")
+        # the Delete key asks too, and Cancel keeps it
+        files.get_by_role("button", name="w2.pdf").click()
+        pg.keyboard.press("Delete")
+        pg.get_by_test_id("remove").get_by_role("button", name="Cancel").click()
+        assert (ws.inbox / "w2.pdf").exists()
+        # right-click: the menu, then the question, which says the original isn't touched
+        files.get_by_role("button", name="w2.pdf").click(button="right")
+        pg.get_by_role("menuitem", name="Remove from Taxonymous…").click()
+        dialog = pg.get_by_test_id("remove")
+        assert "Your original file isn't touched." in dialog.inner_text()
+        dialog.get_by_role("button", name="Remove from Taxonymous").click()
+        pg.get_by_text("Your original file is unchanged.").wait_for()
+        assert not (ws.inbox / "w2.pdf").exists() and (ws.inbox / "k1_statement.pdf").exists()
+        assert files.get_by_role("button", name="w2.pdf").count() == 0
+    finally:
+        pg.close()
+        server.should_exit = True
+    assert not errors
