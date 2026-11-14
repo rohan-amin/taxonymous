@@ -49,7 +49,8 @@ from .pagetext import PageText
 from .progress import NONE, Progress
 from .sanitize import CATALOG_KEYS, PAGE_KEYS, outside
 
-PLACEHOLDER_RE = re.compile(r"<[A-Z]+_[A-Z0-9]+>")
+# a label: <TAXPAYER>, <ACCT_1>, <SUCCESSOR_TRUSTEE_1_SSN>
+PLACEHOLDER_RE = re.compile(r"<[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*>")
 MASK_RE = re.compile(r"[*Xx•#]{2,}")
 # letters OCR swaps for each other in words ("Iyer" read as "lyer")
 LETTER_FOLD = str.maketrans({"l": "i", "1": "i", "|": "i", "!": "i", "0": "o", "5": "s", "8": "b"})

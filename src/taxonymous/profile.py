@@ -183,7 +183,10 @@ def _number(item, key: str) -> str:
     return str(_record(item, key)[RECORDS[key][0]])
 
 
-ROLES = ("taxpayer", "spouse", "dependent", "other")
+# who a person is on the return or in an estate; their label says it (<TAXPAYER>, <TRUSTEE_1>)
+ROLES = ("taxpayer", "spouse", "dependent", "grantor", "trustee", "successor_trustee", "beneficiary",
+         "executor", "decedent", "other")
+ONE_EACH = {"taxpayer": "Only one person can be you.", "spouse": "Only one person can be your spouse."}
 DOB_RE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
 ZIP_RE = re.compile(r"\d{5}(?:-\d{4})?")
 EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
@@ -258,6 +261,8 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                 errors[f"{at}.dod"] = "The date of death is before the date of birth."
             p["dod"] = f"{died:%m/%d/%Y}"
         p["role"] = p["role"] if p["role"] in ROLES else "other"
+        if p["role"] in ONE_EACH and any(q["role"] == p["role"] for q in out["people"]):
+            errors[f"{at}.role"] = ONE_EACH[p["role"]]
         p["id"] = _keep_id(raw)
         out["people"].append(p)
 

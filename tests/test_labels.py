@@ -1,39 +1,74 @@
 """The placeholders are what an AI reads in place of who you are, so they must be right:
 one label per identity (no merging two people, no splitting one), the same label in every
-document and in scans, and a person's letter the same in every kind (<NAME_B> and <SSN_B>
-are the same person)."""
+document and in scans, and a label that says who the person is on the return (<TAXPAYER>,
+<SPOUSE_SSN>, <DEPENDENT_2>, <SUCCESSOR_TRUSTEE_1>), each of their details under it."""
 
 import json
 import re
 
 import pymupdf
+from fastapi.testclient import TestClient
 
+from taxonymous.api import TOKEN_HEADER, create_app
 from taxonymous.detect import ProfileMatcher
+from taxonymous.pipeline import Workspace
 from taxonymous.profile import Profile
 from taxonymous.redact import redact_file
 from taxonymous.vault import Vault
 
+ROLES = {"ea0000001": "taxpayer", "eb0000002": "spouse", "ec0000003": "dependent", "ed0000004": "dependent",
+         "ee0000005": "successor_trustee",
+         "preparer:ef0000006": "preparer"}  # ids as profile.new_id makes them
 
-def test_a_persons_letter_is_theirs_in_every_kind_whoever_is_seen_first():
+
+def test_a_persons_label_is_their_role_in_every_kind_whoever_is_seen_first():
     v = Vault()
-    v.people, v.letters = 3, {"ea1": 0, "eb2": 1, "ec3": 2}  # each person's letter, by their permanent id
-    assert v.placeholder("SSN", "ssn:eb2", "987-65-4324") == "<SSN_B>"  # the spouse's SSN, seen first
-    assert v.placeholder("NAME", "person:ec3", "Anneliese") == "<NAME_C>"
-    assert v.placeholder("NAME", "person:ea1", "Avery") == "<NAME_A>"
-    assert v.placeholder("SSN", "ssn:ea1", "987-65-4323") == "<SSN_A>"
-    # anyone not in the profile comes after its people, never taking one of their letters
-    assert v.placeholder("SSN", "ssn:987654320", "987-65-4320") == "<SSN_D>"
-    assert v.placeholder("NAME", "preparer:0:name", "Jordan Okafor") == "<NAME_D>"
-    assert v.placeholder("SSN", "ssn:ec3", "987-65-4325") == "<SSN_C>"
-    assert v.placeholder("ACCT", "acct:4", "0047812") == "<ACCT_1>"  # numbered kinds just count
+    v.roles = dict(ROLES)
+    assert v.placeholder("SSN", "ssn:eb0000002", "987-65-4324") == "<SPOUSE_SSN>"  # seen first
+    assert v.placeholder("NAME", "person:ec0000003", "Anneliese") == "<DEPENDENT_1>"
+    assert v.placeholder("DOB", "dob:ed0000004", "01/02/2015") == "<DEPENDENT_2_DOB>"
+    assert v.placeholder("NAME", "person:ea0000001", "Avery") == "<TAXPAYER>"
+    assert v.placeholder("SSN", "ssn:ea0000001", "987-65-4323") == "<TAXPAYER_SSN>"
+    assert v.placeholder("ORG", "employer:ea0000001", "Contoso") == "<TAXPAYER_EMPLOYER>"
+    assert v.placeholder("NAME", "person:ee0000005", "Jordan") == "<SUCCESSOR_TRUSTEE_1>"
+    assert v.placeholder("NAME", "preparer:ef0000006:name", "Okafor") == "<PREPARER_1>"
+    assert v.placeholder("ID", "preparer:ef0000006:ptin", "P01234567") == "<PREPARER_1_PTIN>"
+    # not the profile's: an SSN shape, a family surname alone; everything else is numbered
+    assert v.placeholder("SSN", "ssn:987654320", "987-65-4320") == "<UNKNOWN_SSN_1>"
+    assert v.placeholder("NAME", "surname:abernathy", "Abernathy") == "<SURNAME_1>"
+    assert v.placeholder("ACCT", "acct:e00000001", "0047812") == "<ACCT_1>"
 
 
-def test_an_older_vault_keeps_its_names_and_never_hands_one_out_twice():
+def test_a_role_change_relabels_that_person_and_never_hands_out_a_number_twice():
     v = Vault()
-    v.placeholder("SSN", "ssn:987654320", "987-65-4320")  # named before letters followed people: <SSN_A>
-    v.people, v.letters = 2, {"0": 0, "1": 1}
-    assert v.placeholder("SSN", "ssn:0", "987-65-4323") == "<SSN_C>"  # A is taken; B is the spouse's
-    assert v.placeholder("SSN", "ssn:987654320", "987-65-4320") == "<SSN_A>"  # unchanged
+    v.roles = dict(ROLES)
+    v.placeholder("NAME", "person:ec0000003", "Anneliese")
+    v.placeholder("SSN", "ssn:ec0000003", "987-65-4325")
+    v.roles["ec0000003"] = "beneficiary"  # was a dependent
+    assert v.relabel() is True and v.relabel() is False
+    assert {v.by_key["person:ec0000003"], v.by_key["ssn:ec0000003"]} == \
+        {"<BENEFICIARY_1>", "<BENEFICIARY_1_SSN>"}
+    assert v.entries["<BENEFICIARY_1_SSN>"]["values"] == ["987-65-4325"]  # the values come along
+    assert v.placeholder("NAME", "person:ed0000004", "Morgan") == "<DEPENDENT_2>"  # DEPENDENT_1 was someone's
+
+
+def test_an_older_vault_gets_role_labels_with_its_values(tmp_path):
+    path = tmp_path / "placeholders.json"
+    old = {"<NAME_A>": {"kind": "NAME", "key": "person:0", "values": ["Avery F Abernathy"]},
+           "<SSN_A>": {"kind": "SSN", "key": "ssn:0", "values": ["987-65-4323"]},
+           "<NAME_B>": {"kind": "NAME", "key": "person:1", "values": ["Quinn L Abernathy"]},
+           "<SSN_C>": {"kind": "SSN", "key": "ssn:987654320", "values": ["987-65-4320"]},
+           "<NAME_D>": {"kind": "NAME", "key": "surname:abernathy", "values": ["Abernathy"]},
+           "<ACCT_1>": {"kind": "ACCT", "key": "acct:0", "values": ["0047812"]}}
+    path.write_text(json.dumps({"placeholders": old}))
+    v = Vault(path)
+    v.roles = {"0": "taxpayer", "1": "spouse"}
+    assert v.relabel() is True
+    saved = json.loads(path.read_text())["placeholders"]
+    assert {ph: e["key"] for ph, e in saved.items()} == {
+        "<TAXPAYER>": "person:0", "<TAXPAYER_SSN>": "ssn:0", "<SPOUSE>": "person:1",
+        "<UNKNOWN_SSN_1>": "ssn:987654320", "<SURNAME_1>": "surname:abernathy", "<ACCT_1>": "acct:0"}
+    assert saved["<TAXPAYER_SSN>"]["values"] == ["987-65-4323"]
 
 
 def test_one_person_however_their_name_is_printed_is_one_label(corpus, tmp_path):
@@ -54,17 +89,17 @@ def test_one_person_however_their_name_is_printed_is_one_label(corpus, tmp_path)
     lines = [" ".join(ln.split()) for ln in result.text.read_text().splitlines() if ln.strip()]
     lines = lines[2:]  # past the header
     # the same person on lines one after another may come out as one box: still one label
-    assert set(lines[:lines.index("Recipient: <NAME_A>")]) == {"<NAME_A>"}, lines
-    after = lines[lines.index("Recipient: <NAME_A>") + 1:]
-    assert after == ["<NAME_B>", "<NAME_A>", "<NAME_B>"], lines  # the spouse never takes Avery's label
+    assert set(lines[:lines.index("Recipient: <TAXPAYER>")]) == {"<TAXPAYER>"}, lines
+    after = lines[lines.index("Recipient: <TAXPAYER>") + 1:]
+    assert after == ["<SPOUSE>", "<TAXPAYER>", "<SPOUSE>"], lines  # the spouse never takes Avery's label
     keys = [e["key"] for e in vault.entries.values()]
     assert set(keys) == {"person:0", "person:1"} and len(keys) == 2
 
 
 def test_every_document_and_scan_shares_one_set_of_labels(corpus, tmp_path):
     """Text documents and scans through one vault: each label stands for one identity,
-    each identity has one label, the people's letters follow the profile, and a scan uses
-    the same labels as the text version of the same form."""
+    each identity has one label, the people's labels say their roles, and a scan uses the
+    same labels as the text version of the same form."""
     src, _, profile = corpus
     matcher = ProfileMatcher(Profile.from_dict(profile))
     vault = Vault(tmp_path / "vault" / "placeholders.json")
@@ -74,25 +109,21 @@ def test_every_document_and_scan_shares_one_set_of_labels(corpus, tmp_path):
     entries = json.loads((tmp_path / "vault" / "placeholders.json").read_text())["placeholders"]
     keys = [e["key"] for e in entries.values()]
     assert len(keys) == len(set(keys))  # no identity split across two labels, none merged into one
+    roles = [p["role"] for p in profile["people"]]
+    assert roles == ["taxpayer", "spouse", "dependent"]  # the test household
+    base = {"0": "TAXPAYER", "1": "SPOUSE", "2": "DEPENDENT_1"}
     for ph, e in entries.items():
-        m = re.fullmatch(r"(?:person|ssn):(\d)", e["key"])
-        if m and e["kind"] in ("NAME", "SSN"):
-            assert ph == f"<{e['kind']}_{'ABC'[int(m.group(1))]}>", (ph, e["key"])
+        if m := re.fullmatch(r"(person|ssn):(\d)", e["key"]):
+            assert ph == f"<{base[m.group(2)]}{'_SSN' if m.group(1) == 'ssn' else ''}>", (ph, e["key"])
     for text, scan in [("w2.pdf", "w2_scan.pdf"), ("1099_int.pdf", "1099_int_scan.pdf"),
                        ("k1_statement.pdf", "k1_statement_scan.pdf")]:
-        people = {ph for ph in used[text] if re.fullmatch(r"<(NAME|SSN)_[A-C]>", ph)}
+        people = {ph for ph in used[text] if re.fullmatch(r"<(TAXPAYER|SPOUSE|DEPENDENT_\d)(_SSN)?>", ph)}
         assert people and people <= used[scan], (text, people - used[scan])
 
 
 def test_labels_follow_people_through_edits_to_the_profile(corpus, tmp_path):
-    """Reorder the people, remove one and add another: everyone keeps their label (they
-    used to follow the place in the list), and a removed person's letter is never reused."""
-    import shutil
-
-    from fastapi.testclient import TestClient
-
-    from taxonymous.api import TOKEN_HEADER, create_app
-    from taxonymous.pipeline import Workspace
+    """Reorder the people, remove one, add another, change a role: everyone keeps their
+    label but the one whose role changed, and a removed person's number is never reused."""
     _, _, profile = corpus
     ws = Workspace(tmp_path / "ws")
     ws.init()
@@ -105,25 +136,31 @@ def test_labels_follow_people_through_edits_to_the_profile(corpus, tmp_path):
     app = create_app(ws, "t", ocr=False)
     client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: "t"})
 
-    def run() -> list[str]:
-        client.post("/api/run")
+    def lines() -> list[str]:
         app.state.worker.wait()
         text = ws.outputs("family")["txt"].read_text()
         return [" ".join(ln.split()) for ln in text.splitlines() if ln.strip()][2:]
 
     people = [{k: p[k] for k in ("name", "ssn", "role")} for p in profile["people"]]
     assert client.put("/api/profile", json={"people": people}).status_code == 200
-    assert run() == ["<NAME_A>", "<NAME_B>", "<NAME_C>", "Morgan Delacroix"]
+    client.post("/api/run")
+    assert lines() == ["<TAXPAYER>", "<SPOUSE>", "<DEPENDENT_1>", "Morgan Delacroix"]
 
     saved = client.get("/api/profile").json()["profile"]["people"]  # with their ids, as the form keeps them
     avery, quinn, _ = saved
     morgan = {"name": "Morgan Delacroix", "role": "dependent"}  # new: no id yet
+    # saving cleans the cleaned documents again by itself
     assert client.put("/api/profile", json={"people": [quinn, avery, morgan]}).status_code == 200
-    shutil.rmtree(ws.work)  # cleaned afresh, from the vault alone
-    ws.work.mkdir()
-    # Avery and Quinn keep A and B though their places swapped. Anneliese is no longer in the
-    # profile: her first names stay readable, the family's surname alone is still removed
-    # (its own label). Morgan doesn't get her retired C.
-    lines = run()
-    assert lines[:2] == ["<NAME_A>", "<NAME_B>"] and lines[2].startswith("Anneliese P <NAME_")
-    assert lines[3] not in ("<NAME_A>", "<NAME_B>", "<NAME_C>", lines[2][len("Anneliese P "):])
+    # Avery and Quinn keep their labels though their places swapped. Anneliese is no longer
+    # in the profile: her first names stay readable, the family's surname alone is still
+    # removed. Morgan doesn't get her retired DEPENDENT_1.
+    assert lines() == ["<TAXPAYER>", "<SPOUSE>", "Anneliese P <SURNAME_1>", "<DEPENDENT_2>"]
+
+    # a role changed: saving relabels that person (the form sends everyone with their ids)
+    quinn, avery, morgan = client.get("/api/profile").json()["profile"]["people"]
+    quinn["role"] = "trustee"
+    assert client.put("/api/profile", json={"people": [quinn, avery, morgan]}).status_code == 200
+    assert lines() == ["<TAXPAYER>", "<TRUSTEE_1>", "Anneliese P <SURNAME_1>", "<DEPENDENT_2>"]
+    # one taxpayer, one spouse
+    r = client.put("/api/profile", json={"people": [avery, {**quinn, "role": "taxpayer"}]})
+    assert r.status_code == 422 and "people.1.role" in r.json()["detail"]["fields"]

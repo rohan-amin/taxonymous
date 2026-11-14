@@ -61,7 +61,7 @@ def mask(text: str, keep_x: bool = False) -> str:
     """Letters to a/A and digits to #, except form words and placeholders (and with
     `keep_x`, a run of X's: a document's own masking, as in "XXXXX####")."""
     out, pos = [], 0
-    for m in re.finditer(r"<[A-Z]+_[A-Z0-9]+>|[A-Za-z]+|\d", text):
+    for m in re.finditer(r"<[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*>|[A-Za-z]+|\d", text):
         out.append(text[pos:m.start()])
         token = m.group()
         if (token.startswith("<") or token.lower() in KEEP_WORDS

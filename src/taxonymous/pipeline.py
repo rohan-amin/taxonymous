@@ -67,23 +67,32 @@ class Workspace:
     def source(self, stem: str) -> Path | None:
         return next((p for p in self.pending() if self.stem(p) == stem), None)
 
-    def upgrade(self) -> None:
-        """A profile from before entries had ids, given them (each its position, as the vault
-        knew it); its phones and emails, known by place until then, rekeyed by value."""
+    def upgrade(self) -> bool:
+        """The vault and profile brought up to date: a profile from before entries had ids
+        given them (each its position, as the vault knew it); phones and emails, known by
+        place until then, rekeyed by value; and every person's labels as their role says
+        now (role labels, or a role changed). Returns whether any label changed: then every
+        cleaned document is out of date."""
         from .profile import email_key, phone_key, with_ids
         from .profile import save as save_profile
         from .vault import Vault
         if not self.profile_path.exists():
-            return
+            return False
         d = json.loads(self.profile_path.read_text())
         d, changed = with_ids(d)
         if changed:
             save_profile(d, self.profile_path)
         keys = {**{f"phone:{i}": phone_key(v) for i, v in enumerate(d.get("phones") or [])},
                 **{f"email:{i}": email_key(v) for i, v in enumerate(d.get("emails") or [])}}
-        vault = self.vault_dir / "placeholders.json"
-        if keys and vault.exists():
-            Vault(vault).rekey(keys)
+        path = self.vault_dir / "placeholders.json"
+        if not path.exists():
+            return False
+        vault = Vault(path)
+        if keys:
+            vault.rekey(keys)
+        vault.roles = {**{str(p.get("id")): p.get("role") or "other" for p in d.get("people") or []},
+                       **{f"preparer:{p.get('id')}": "preparer" for p in d.get("preparers") or []}}
+        return vault.relabel()
 
     def overrides_path(self, stem: str) -> Path:
         return self.vault_dir / "overrides" / f"{stem}.json"

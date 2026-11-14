@@ -139,9 +139,9 @@ class ProfileMatcher:
         self.by_last4: dict[str, tuple[str, str]] = {}
         self.by_name: dict[str, tuple[str, str]] = {}
         self.surname_of: dict[str, str] = {}  # a person's key -> the key their surname alone has
-        self.people = len(profile.people)
-        # each person's letter (<NAME_A>, <SSN_A>) by their id: their place in the list
-        self.letters = {(p.id or str(i)): i for i, p in enumerate(profile.people)}
+        # each person's role by their id, and the preparers': what their labels say (<TAXPAYER>)
+        self.roles = {(p.id or str(i)): p.role or "other" for i, p in enumerate(profile.people)}
+        self.roles.update({f"preparer:{pr.id or i}": "preparer" for i, pr in enumerate(profile.preparers)})
 
         def add(pattern: str | None, kind: str, key: str, flags: int = IC, raw: bool = True) -> None:
             if pattern:

@@ -191,7 +191,7 @@ def _repeated_region(pg):
     boxes = "[data-testid=pane-redacted] .region:not(.shown)"
     titles = pg.eval_on_selector_all(boxes, "els => els.map(e => e.title)")
     placeholders = [t.split(" · ")[0] for t in titles]
-    i = next(i for i, ph in enumerate(placeholders) if ph.startswith("<SSN_") and placeholders.count(ph) > 1)
+    i = next(i for i, ph in enumerate(placeholders) if ph.endswith("_SSN>") and placeholders.count(ph) > 1)
     return pg.locator("[data-testid=pane-redacted] .region:not(.shown)").nth(i), placeholders[i]
 
 

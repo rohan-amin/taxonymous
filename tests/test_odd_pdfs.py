@@ -148,7 +148,7 @@ def test_pages_keep_their_visible_area_and_rotation(processed):
     assert cropped.rect == pymupdf.Rect(0, 0, 595, 442) and "Statement of account" in cropped.get_text()
     for angle in (90, 180, 270):
         page = pymupdf.open(outcomes[f"rotate_{angle}.pdf"].result.pdf)[0]
-        assert page.rotation == angle and "<SSN_A>" in page.get_text()
+        assert page.rotation == angle and "<TAXPAYER_SSN>" in page.get_text()
 
 
 @pytest.mark.parametrize("name, check", [

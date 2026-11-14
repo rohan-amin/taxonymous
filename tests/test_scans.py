@@ -112,7 +112,7 @@ def test_scan_pages_are_rebuilt_as_one_image(scanned):
 def test_scan_text_file_has_placeholders_and_kept_values(scanned):
     _, res = scanned["w2_scan.pdf"]
     text = res.text.read_text()
-    assert "<SSN_A>" in text and "Wages, tips, other compensation" in text
+    assert "<TAXPAYER_SSN>" in text and "Wages, tips, other compensation" in text
 
 
 def test_mixed_page_keeps_its_text_layer(scanned):

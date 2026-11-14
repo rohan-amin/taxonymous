@@ -6,8 +6,11 @@ export type ListKey = "phones" | "emails";
 export type RecordKey = "accounts" | "eins" | "cards" | "numbers" | "preparers";
 export type Row = Record<string, string>;
 
+// who a person is: their labels in the safe copies say it (<TAXPAYER>, <SPOUSE>, <TRUSTEE_1>)
 export const ROLES: [string, string][] = [
-  ["taxpayer", "You"], ["spouse", "Spouse"], ["dependent", "Dependent"], ["other", "Other"],
+  ["taxpayer", "You (taxpayer)"], ["spouse", "Spouse"], ["dependent", "Dependent"],
+  ["grantor", "Grantor"], ["trustee", "Trustee"], ["successor_trustee", "Successor trustee"],
+  ["beneficiary", "Beneficiary"], ["executor", "Executor"], ["decedent", "Decedent"], ["other", "Other"],
 ];
 export const LISTS: { key: ListKey; title: string; label: string; add: string; placeholder: string }[] = [
   { key: "phones", title: "Phone numbers", label: "Phone number", add: "Add a phone number",

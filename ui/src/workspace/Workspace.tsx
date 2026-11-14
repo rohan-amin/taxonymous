@@ -147,6 +147,10 @@ export interface Highlight {
 }
 
 type Entry = [string, string, string];
+const ROLE_TITLE: Record<string, string> = {
+  taxpayer: "You", spouse: "Spouse", dependent: "Dependent", grantor: "Grantor", trustee: "Trustee",
+  successor_trustee: "Successor trustee", beneficiary: "Beneficiary", executor: "Executor", decedent: "Decedent",
+};
 // what a group's entries are called, for "10 EINs"
 const NOUN: Record<string, string> = {
   Addresses: "addresses", Accounts: "accounts", Phones: "phones", Emails: "emails", Cards: "cards",
@@ -196,7 +200,7 @@ function ProfileDrawer({ profile, found, onShow }: {
       if (p.ssn) items.push(["SSN", mask(p.ssn), e]);
       if (p.dob) items.push(["Born", mask(p.dob), e]);
       if (p.employer) items.push(["Employer", p.employer, e]);
-      groups.push({ title: ({ taxpayer: "You", spouse: "Spouse", dependent: "Dependent" } as Record<string, string>)[p.role] ?? "Person", items, person: true });
+      groups.push({ title: ROLE_TITLE[p.role] ?? "Person", items, person: true });
     });
     if (profile.addresses.length) {
       groups.push({ title: "Addresses", items: profile.addresses.map((a, i) => ["Address", [a.street, a.city, a.state, a.zip].filter(Boolean).join(", "), `addr:${a.id ?? i}`]) });
@@ -556,8 +560,8 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
             <span><span className="ws-swatch" style={{ background: "repeating-linear-gradient(135deg,#1f4f80 0 3px,#3a7bc0 3px 6px)" }} />Drawn: this document only</span>
             <span style={{ flexBasis: "100%" }}>In the safe copy both are solid black. The stripes are only here, so you can tell them apart.</span>
             {!labelsKnown && <span className="ws-labels-note" style={{ flexBasis: "100%" }}>
-              Each box in the safe copy carries a label like &lt;NAME_A&gt;. It tells your AI which details belong to the
-              same person or account, across all your documents. Your real details aren't in it.
+              Each box in the safe copy carries a label like &lt;TAXPAYER&gt; or &lt;SPOUSE_SSN&gt;. It tells your AI who
+              each detail belongs to, across all your documents. Your real details aren't in it.
               <button type="button" className="wbtn quiet" onClick={() => { store.set("labels-known", true); setLabelsKnown(true); }}>Got it</button>
             </span>}
           </div>

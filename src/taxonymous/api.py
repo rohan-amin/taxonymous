@@ -439,10 +439,14 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
                lanes: int | None = None, resume: bool = False) -> FastAPI:
     """`resume`: clean what was left unfinished (the app, not tests or the command line)."""
     ws.init()
-    ws.upgrade()  # a profile from before entries had permanent ids gets them, keeping every label
+    relabelled = ws.upgrade()  # permanent ids, and labels as each person's role says
     worker = Worker(ws, ocr, lanes)
     if resume and ws.profile_path.exists():
-        for stem in unfinished(ws):
+        stems = unfinished(ws)
+        if relabelled:  # every cleaned document still has the old labels
+            stems += [ws.stem(src) for src in ws.pending()
+                      if ws.stem(src) not in stems and ws.outputs(ws.stem(src))["report"].exists()]
+        for stem in stems:
             worker.submit(Job(stem, "process"))
     app = FastAPI(title="taxonymous", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.worker = worker
@@ -479,8 +483,12 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         if errors:
             raise HTTPException(422, {"message": "Some details need fixing.", "fields": errors})
         save_profile(profile, ws.profile_path)
+        ws.upgrade()  # a person whose role changed gets their new labels
         stems = [ws.stem(src) for src in ws.pending()]
         processed = [stem for stem in stems if ws.outputs(stem)["report"].exists()]
+        for stem in processed:  # cleaned with the earlier details or labels: cleaned again
+            if not worker.busy(stem):
+                worker.submit(Job(stem, "process"))
         return {"exists": True, "profile": profile, "errors": {}, "path": str(ws.profile_path),
                 "processed": processed}
 

@@ -42,8 +42,8 @@ def failed(tmp_path):
 
 
 def test_mask_keeps_form_words_and_placeholders_only():
-    assert mask("Employer ID: 00-4869455 Avery <NAME_A> Wages 1,234.56") == \
-        "Employer ID: ##-####### Aaaaa <NAME_A> Wages #,###.##"
+    assert mask("Employer ID: 00-4869455 Avery <TAXPAYER> <DEPENDENT_2_SSN> Wages 1,234.56") == \
+        "Employer ID: ##-####### Aaaaa <TAXPAYER> <DEPENDENT_2_SSN> Wages #,###.##"  # labels as they are
 
 
 def test_explain_shows_where_without_showing_what(failed, capsys):

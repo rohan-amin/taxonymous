@@ -172,7 +172,7 @@ def test_image_urls_can_carry_the_token(server):
 
 def test_text(server):
     client, *_ = server
-    assert "<SSN_A>" in client.get(f"{W2}/text").text
+    assert "<TAXPAYER_SSN>" in client.get(f"{W2}/text").text
 
 
 # ---------------------------------------------------------------- reviewer decisions
