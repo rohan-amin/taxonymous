@@ -19,10 +19,17 @@ own labels. Other numbers are any IDs of yours (an e-file signature PIN, a clien
 preparer's every field is redacted. Only these details (and anything shaped like an SSN)
 are redacted.
 Older profiles listed plain strings for accounts, EINs and cards; both load.
+
+Every entry (a person, an address, an account, a preparer...) carries a permanent "id",
+made when it is added and kept through edits and reordering: the vault ties each
+placeholder to it, so <NAME_B> stays the same person whatever else changes in the list.
+Entries from before ids got their position at that time as their id (`with_ids`), which
+is what the vault used then. Phones and emails are known by their value.
 """
 
 import json
 import re
+import secrets
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -38,6 +45,7 @@ class Person:
     dod: str = ""  # date of death: for the record, and left readable in documents (it matters for taxes)
     occupation: str = ""  # as the return prints it, under the signature
     employer: str = ""  # its name, as a W-2 prints it
+    id: str = ""  # permanent: see the module's docstring
 
     @property
     def parts(self) -> tuple[str, list[str], str]:
@@ -52,6 +60,7 @@ class Address:
     state: str = ""
     zip: str = ""
     school_district: str = ""  # a state return asks for it (NY)
+    id: str = ""
 
 
 @dataclass
@@ -66,6 +75,7 @@ class Preparer:
     phone: str = ""
     ptin: str = ""
     ein: str = ""
+    id: str = ""
 
 
 @dataclass
@@ -80,6 +90,9 @@ class Profile:
     routing: list[str] = field(default_factory=list)  # the accounts' routing numbers
     numbers: list[str] = field(default_factory=list)  # other IDs: PINs, client IDs
     preparers: list[Preparer] = field(default_factory=list)
+    # the ids of the number lists' entries, in order: accounts, eins, cards, numbers, and
+    # routing (an account's routing number has its account's id)
+    ids: dict[str, list[str]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "Profile":
@@ -97,8 +110,12 @@ class Profile:
             cards=[_number(c, "cards") for c in d.get("cards", [])],
             routing=[r for a in d.get("accounts", []) if (r := str(_record(a, "accounts")["routing"]))],
             numbers=[_number(n, "numbers") for n in d.get("numbers", [])],
-            preparers=[Preparer(**{k: str(v or "") for k, v in p.items() if k in PREPARER_FIELDS})
+            preparers=[Preparer(**{k: str(v or "") for k, v in p.items() if k in (*PREPARER_FIELDS, "id")})
                        for p in d.get("preparers", [])],
+            ids={**{key: [_id_of(x, i) for i, x in enumerate(d.get(key, []))]
+                    for key in ("accounts", "eins", "cards", "numbers")},
+                 "routing": [_id_of(a, i) for i, a in enumerate(d.get("accounts", []))
+                             if str(_record(a, "accounts")["routing"])]},
         )
 
 
@@ -110,6 +127,48 @@ RECORDS = {
     "numbers": ("number", ("number", "description")),
 }
 PREPARER_FIELDS = ("name", "firm", "street", "city", "state", "zip", "phone", "ptin", "ein")
+
+
+def new_id() -> str:
+    """A new entry's id: random, never all digits (an entry from before ids has its old
+    position, "0", "1"...), and nothing to do with the values it stands for."""
+    return "e" + secrets.token_hex(4)
+
+
+def _id_of(item, position: int) -> str:
+    """An entry's id; an entry from before ids (not given one yet) is known by its position."""
+    return str(item.get("id") or position) if isinstance(item, dict) else str(position)
+
+
+LISTS_WITH_IDS = ("people", "addresses", "accounts", "eins", "cards", "numbers", "preparers")
+
+
+def with_ids(d: dict) -> tuple[dict, bool]:
+    """A saved profile with an id on every entry: one without gets its position, which is
+    what the vault knew it by until now (so every placeholder keeps its entry). Returns
+    (profile, whether anything changed)."""
+    out, changed = dict(d), False
+    for key in LISTS_WITH_IDS:
+        rows = []
+        for i, item in enumerate(d.get(key) or []):
+            if key in RECORDS and not isinstance(item, dict):
+                item = _record(item, key)  # an older plain string
+                changed = True
+            if not item.get("id"):
+                item = {**item, "id": str(i)}
+                changed = True
+            rows.append(item)
+        if key in d:
+            out[key] = rows
+    return out, changed
+
+
+def phone_key(v: str) -> str:
+    return "phone:" + _digits(v)[-10:]
+
+
+def email_key(v: str) -> str:
+    return "email:" + v.strip().lower()
 
 
 def _record(item, key: str) -> dict:
@@ -141,6 +200,12 @@ def _phone_ok(v: str) -> bool:
 
 def _account_ok(v: str) -> bool:
     return len(re.sub(r"[^A-Za-z0-9]", "", v)) >= 4
+
+
+def _keep_id(raw) -> str:
+    """An entry's id as the form sent it back, or a new one for a new entry."""
+    v = raw.get("id") if isinstance(raw, dict) else None
+    return str(v) if v and re.fullmatch(r"\d{1,3}|e[0-9a-f]{8}", str(v)) else new_id()
 
 
 def clean(d: dict) -> tuple[dict, dict[str, str]]:
@@ -193,10 +258,11 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                 errors[f"{at}.dod"] = "The date of death is before the date of birth."
             p["dod"] = f"{died:%m/%d/%Y}"
         p["role"] = p["role"] if p["role"] in ROLES else "other"
+        p["id"] = _keep_id(raw)
         out["people"].append(p)
 
-    for i, a in enumerate(d.get("addresses") or []):
-        a = {k: text(a.get(k)) for k in ("street", "city", "state", "zip", "school_district")}
+    for i, raw_a in enumerate(d.get("addresses") or []):
+        a = {k: text(raw_a.get(k)) for k in ("street", "city", "state", "zip", "school_district")}
         if not any(a.values()):
             continue
         at = f"addresses.{i}"
@@ -208,6 +274,7 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                 errors[f"{at}.state"] = "Use the two-letter state code."
         if a["zip"] and not ZIP_RE.fullmatch(a["zip"]):
             errors[f"{at}.zip"] = "Use 5 digits (or ZIP+4)."
+        a["id"] = _keep_id(raw_a)
         out["addresses"].append(a)
 
     for i, raw in enumerate(d.get("preparers") or []):
@@ -240,6 +307,7 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                 errors[f"{at}.ein"] = "An EIN has 9 digits."
             else:
                 r["ein"] = f"{_digits(r['ein'])[:2]}-{_digits(r['ein'])[2:]}"
+        r["id"] = _keep_id(raw)
         out["preparers"].append(r)
 
     lists = {
@@ -283,6 +351,7 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                     errors[f"{key}.{i}.routing"] = "A routing number has 9 digits."
                 else:
                     r["routing"] = _digits(r["routing"])
+            r["id"] = _keep_id(item)
             out[key].append(r)
     return out, errors
 

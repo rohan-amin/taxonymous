@@ -54,6 +54,7 @@ def run_job(ws: Workspace, action: str, stem: str, forget: list[str], ocr: bool,
     """Clean (`process`) or check again (`verify`) one document."""
     if not ws.profile_path.exists():
         raise FileNotFoundError(f"no profile at {ws.profile_path}")
+    ws.upgrade()
     matcher = ProfileMatcher(Profile.load(ws.profile_path))
     vault = Vault(ws.vault_dir / "placeholders.json")
     for key in forget:

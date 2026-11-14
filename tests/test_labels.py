@@ -16,22 +16,22 @@ from taxonymous.vault import Vault
 
 def test_a_persons_letter_is_theirs_in_every_kind_whoever_is_seen_first():
     v = Vault()
-    v.people = 3
-    assert v.placeholder("SSN", "ssn:1", "987-65-4324") == "<SSN_B>"  # the spouse's SSN, seen first
-    assert v.placeholder("NAME", "person:2", "Anneliese") == "<NAME_C>"
-    assert v.placeholder("NAME", "person:0", "Avery") == "<NAME_A>"
-    assert v.placeholder("SSN", "ssn:0", "987-65-4323") == "<SSN_A>"
+    v.people, v.letters = 3, {"ea1": 0, "eb2": 1, "ec3": 2}  # each person's letter, by their permanent id
+    assert v.placeholder("SSN", "ssn:eb2", "987-65-4324") == "<SSN_B>"  # the spouse's SSN, seen first
+    assert v.placeholder("NAME", "person:ec3", "Anneliese") == "<NAME_C>"
+    assert v.placeholder("NAME", "person:ea1", "Avery") == "<NAME_A>"
+    assert v.placeholder("SSN", "ssn:ea1", "987-65-4323") == "<SSN_A>"
     # anyone not in the profile comes after its people, never taking one of their letters
     assert v.placeholder("SSN", "ssn:987654320", "987-65-4320") == "<SSN_D>"
     assert v.placeholder("NAME", "preparer:0:name", "Jordan Okafor") == "<NAME_D>"
-    assert v.placeholder("SSN", "ssn:2", "987-65-4325") == "<SSN_C>"
+    assert v.placeholder("SSN", "ssn:ec3", "987-65-4325") == "<SSN_C>"
     assert v.placeholder("ACCT", "acct:4", "0047812") == "<ACCT_1>"  # numbered kinds just count
 
 
 def test_an_older_vault_keeps_its_names_and_never_hands_one_out_twice():
     v = Vault()
     v.placeholder("SSN", "ssn:987654320", "987-65-4320")  # named before letters followed people: <SSN_A>
-    v.people = 2
+    v.people, v.letters = 2, {"0": 0, "1": 1}
     assert v.placeholder("SSN", "ssn:0", "987-65-4323") == "<SSN_C>"  # A is taken; B is the spouse's
     assert v.placeholder("SSN", "ssn:987654320", "987-65-4320") == "<SSN_A>"  # unchanged
 
@@ -82,3 +82,48 @@ def test_every_document_and_scan_shares_one_set_of_labels(corpus, tmp_path):
                        ("k1_statement.pdf", "k1_statement_scan.pdf")]:
         people = {ph for ph in used[text] if re.fullmatch(r"<(NAME|SSN)_[A-C]>", ph)}
         assert people and people <= used[scan], (text, people - used[scan])
+
+
+def test_labels_follow_people_through_edits_to_the_profile(corpus, tmp_path):
+    """Reorder the people, remove one and add another: everyone keeps their label (they
+    used to follow the place in the list), and a removed person's letter is never reused."""
+    import shutil
+
+    from fastapi.testclient import TestClient
+
+    from taxonymous.api import TOKEN_HEADER, create_app
+    from taxonymous.pipeline import Workspace
+    _, _, profile = corpus
+    ws = Workspace(tmp_path / "ws")
+    ws.init()
+    doc = pymupdf.open()
+    page = doc.new_page(width=600, height=300)
+    names = ["Avery F Abernathy", "Quinn L Abernathy", "Anneliese P Abernathy", "Morgan Delacroix"]
+    for i, name in enumerate(names):
+        page.insert_text((20, 30 + 30 * i), name, fontsize=11)
+    doc.save(ws.inbox / "family.pdf")
+    app = create_app(ws, "t", ocr=False)
+    client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: "t"})
+
+    def run() -> list[str]:
+        client.post("/api/run")
+        app.state.worker.wait()
+        text = ws.outputs("family")["txt"].read_text()
+        return [" ".join(ln.split()) for ln in text.splitlines() if ln.strip()][2:]
+
+    people = [{k: p[k] for k in ("name", "ssn", "role")} for p in profile["people"]]
+    assert client.put("/api/profile", json={"people": people}).status_code == 200
+    assert run() == ["<NAME_A>", "<NAME_B>", "<NAME_C>", "Morgan Delacroix"]
+
+    saved = client.get("/api/profile").json()["profile"]["people"]  # with their ids, as the form keeps them
+    avery, quinn, _ = saved
+    morgan = {"name": "Morgan Delacroix", "role": "dependent"}  # new: no id yet
+    assert client.put("/api/profile", json={"people": [quinn, avery, morgan]}).status_code == 200
+    shutil.rmtree(ws.work)  # cleaned afresh, from the vault alone
+    ws.work.mkdir()
+    # Avery and Quinn keep A and B though their places swapped. Anneliese is no longer in the
+    # profile: her first names stay readable, the family's surname alone is still removed
+    # (its own label). Morgan doesn't get her retired C.
+    lines = run()
+    assert lines[:2] == ["<NAME_A>", "<NAME_B>"] and lines[2].startswith("Anneliese P <NAME_")
+    assert lines[3] not in ("<NAME_A>", "<NAME_B>", "<NAME_C>", lines[2][len("Anneliese P "):])

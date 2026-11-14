@@ -191,7 +191,7 @@ function ProfileDrawer({ profile, found, onShow }: {
   const groups: { title: string; items: Entry[]; person?: boolean }[] = [];
   if (profile) {
     profile.people.forEach((p, i) => {
-      const e = `person:${i}`;
+      const e = `person:${p.id ?? i}`;
       const items: Entry[] = [["Name", p.name, e]];
       if (p.ssn) items.push(["SSN", mask(p.ssn), e]);
       if (p.dob) items.push(["Born", mask(p.dob), e]);
@@ -199,17 +199,17 @@ function ProfileDrawer({ profile, found, onShow }: {
       groups.push({ title: ({ taxpayer: "You", spouse: "Spouse", dependent: "Dependent" } as Record<string, string>)[p.role] ?? "Person", items, person: true });
     });
     if (profile.addresses.length) {
-      groups.push({ title: "Addresses", items: profile.addresses.map((a, i) => ["Address", [a.street, a.city, a.state, a.zip].filter(Boolean).join(", "), `addr:${i}`]) });
+      groups.push({ title: "Addresses", items: profile.addresses.map((a, i) => ["Address", [a.street, a.city, a.state, a.zip].filter(Boolean).join(", "), `addr:${a.id ?? i}`]) });
     }
     if (profile.accounts.length) {
-      groups.push({ title: "Accounts", items: profile.accounts.map((a, i) => [a.institution || "Account", mask(a.number), `acct:${i}`]) });
+      groups.push({ title: "Accounts", items: profile.accounts.map((a, i) => [a.institution || "Account", mask(a.number), `acct:${a.id ?? i}`]) });
     }
-    if (profile.phones.length) groups.push({ title: "Phones", items: profile.phones.map((x, i) => ["Phone", x, `phone:${i}`]) });
-    if (profile.emails.length) groups.push({ title: "Emails", items: profile.emails.map((x, i) => ["Email", x, `email:${i}`]) });
-    if (profile.cards.length) groups.push({ title: "Cards", items: profile.cards.map((c, i) => [c.description || "Card", mask(c.number), `card:${i}`]) });
-    if (profile.eins.length) groups.push({ title: "Your EINs", items: profile.eins.map((e, i) => [e.description || "EIN", mask(e.ein), `ein:${i}`]) });
-    if (profile.numbers.length) groups.push({ title: "Other numbers", items: profile.numbers.map((x, i) => [x.description || "Number", mask(x.number), `id:${i}`]) });
-    if (profile.preparers.length) groups.push({ title: "Tax preparer", items: profile.preparers.map((x, i) => ["Preparer", x.name || x.firm, `preparer:${i}`]) });
+    if (profile.phones.length) groups.push({ title: "Phones", items: profile.phones.map((x) => ["Phone", x, `phone:${x.replace(/\D/g, "").slice(-10)}`]) });
+    if (profile.emails.length) groups.push({ title: "Emails", items: profile.emails.map((x) => ["Email", x, `email:${x.trim().toLowerCase()}`]) });
+    if (profile.cards.length) groups.push({ title: "Cards", items: profile.cards.map((c, i) => [c.description || "Card", mask(c.number), `card:${c.id ?? i}`]) });
+    if (profile.eins.length) groups.push({ title: "Your EINs", items: profile.eins.map((e, i) => [e.description || "EIN", mask(e.ein), `ein:${e.id ?? i}`]) });
+    if (profile.numbers.length) groups.push({ title: "Other numbers", items: profile.numbers.map((x, i) => [x.description || "Number", mask(x.number), `id:${x.id ?? i}`]) });
+    if (profile.preparers.length) groups.push({ title: "Tax preparer", items: profile.preparers.map((x, i) => ["Preparer", x.name || x.firm, `preparer:${x.id ?? i}`]) });
   }
   const n = groups.reduce((a, g) => a + g.items.length, 0);
   const [open, setOpen] = useState<string | null>(null); // the entry whose "where" is showing

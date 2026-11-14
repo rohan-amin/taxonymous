@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 
 from .pagetext import PageText
-from .profile import Address, Profile
+from .profile import Address, Profile, email_key, phone_key
 
 IC = re.IGNORECASE
 PRIORITY = {"profile": 2, "pattern": 1, "repeat": 0}
@@ -139,7 +139,9 @@ class ProfileMatcher:
         self.by_last4: dict[str, tuple[str, str]] = {}
         self.by_name: dict[str, tuple[str, str]] = {}
         self.surname_of: dict[str, str] = {}  # a person's key -> the key their surname alone has
-        self.people = len(profile.people)  # their letters: the first is A (<NAME_A>, <SSN_A>), and so on
+        self.people = len(profile.people)
+        # each person's letter (<NAME_A>, <SSN_A>) by their id: their place in the list
+        self.letters = {(p.id or str(i)): i for i, p in enumerate(profile.people)}
 
         def add(pattern: str | None, kind: str, key: str, flags: int = IC, raw: bool = True) -> None:
             if pattern:
@@ -228,8 +230,10 @@ class ProfileMatcher:
             mid = rf"(?:\s+(?:{initial})(?![\w-])(?:\.|,(?=\s))?){{0,2}}"
             return re.escape(first), initial, mid, re.escape(last)
 
+        # keys are "kind:<entry id>": the id stays with the entry whatever else is edited
         for i, p in enumerate(profile.people):
-            key = f"person:{i}"
+            pid = p.id or str(i)
+            key = f"person:{pid}"
             self.surname_of[key] = f"surname:{p.parts[2].lower()}"
             first, _, last = p.parts
             f, initial, mid, last_ = name_rules(p.name)
@@ -247,33 +251,37 @@ class ProfileMatcher:
                 add(rf"\b(?:{last_}|{re.escape(last.upper())})\b", "NAME", f"surname:{last.lower()}", 0)
             self.by_name[" ".join(p.name.lower().split())] = ("NAME", key)
             if p.ssn:
-                add_number(p.ssn, "SSN", f"ssn:{i}")
+                add_number(p.ssn, "SSN", f"ssn:{pid}")
             if p.dob:
                 for pat in date_patterns(p.dob):
-                    add(pat, "DOB", f"dob:{i}")
+                    add(pat, "DOB", f"dob:{pid}")
             if p.occupation:  # "Software Engineer", "SOFTWARE ENGINEER"
-                add(phrase(p.occupation), "OCCUPATION", f"occupation:{i}")
+                add(phrase(p.occupation), "OCCUPATION", f"occupation:{pid}")
             if p.employer:  # "Contoso Widgets, LLC", "CONTOSO WIDGETS LLC"
-                add(phrase(p.employer), "ORG", f"employer:{i}")
+                add(phrase(p.employer), "ORG", f"employer:{pid}")
         for i, a in enumerate(profile.addresses):
-            add_address(a, f"addr:{i}")
-        for i, v in enumerate(profile.emails):
-            add(re.escape(v), "EMAIL", f"email:{i}")
-        for i, v in enumerate(profile.phones):
-            add_phone(v, f"phone:{i}")
+            add_address(a, f"addr:{a.id or i}")
+        for v in profile.emails:  # known by their value
+            add(re.escape(v), "EMAIL", email_key(v))
+        for v in profile.phones:
+            add_phone(v, phone_key(v))
         for kind, values in [("EIN", profile.eins), ("ACCT", profile.accounts), ("CARD", profile.cards),
                              ("ROUTING", profile.routing)]:
             for i, v in enumerate(values):
-                add_number(v, kind, f"{kind.lower()}:{i}")
+                ids = profile.ids.get({"EIN": "eins", "ACCT": "accounts", "CARD": "cards",
+                                       "ROUTING": "routing"}[kind], [])
+                add_number(v, kind, f"{kind.lower()}:{ids[i] if i < len(ids) else i}")
         for i, v in enumerate(profile.numbers):
+            nids = profile.ids.get("numbers", [])
+            nid = nids[i] if i < len(nids) else i
             if re.search(r"[A-Za-z]", v):  # a client ID like "AB-10442": its letters and digits, any spacing
                 chars = re.sub(r"[^A-Za-z0-9]", "", v)
                 add(r"(?<![A-Za-z0-9])" + r"[\s.\-]?".join(map(re.escape, chars)) + r"(?![A-Za-z0-9])",
-                    "ID", f"id:{i}", raw=len(chars) >= SHORT)
+                    "ID", f"id:{nid}", raw=len(chars) >= SHORT)
             else:
-                add_number(v, "ID", f"id:{i}")
+                add_number(v, "ID", f"id:{nid}")
         for i, pr in enumerate(profile.preparers):
-            key = f"preparer:{i}"
+            key = f"preparer:{pr.id or i}"
             if len(pr.name.split()) > 1:  # the whole name only: a first name alone is too common
                 f, _, mid, last_ = name_rules(pr.name)
                 add(rf"\b{f}{mid}\s*(?<=[\s.,]){last_}\b", "NAME", f"{key}:name")

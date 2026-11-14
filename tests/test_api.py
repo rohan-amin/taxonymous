@@ -1,6 +1,7 @@
 """M5 acceptance: the local API, with every outbound connection blocked."""
 
 import json
+import re
 import shutil
 import socket
 from collections import Counter
@@ -14,6 +15,17 @@ from taxonymous import api as api_mod
 from taxonymous.api import TOKEN_HEADER, check_loopback, create_app, serve
 from taxonymous.pipeline import Workspace
 from taxonymous.redact import Overrides
+
+
+def without_ids(profile: dict) -> dict:
+    """A saved profile with its entries' permanent ids checked (one each, well formed,
+    no two alike) and then left out, to compare the rest."""
+    ids = [r["id"] for key in ("people", "addresses", "accounts", "eins", "cards", "numbers", "preparers")
+           for r in profile.get(key, [])]
+    assert all(re.fullmatch(r"\d{1,3}|e[0-9a-f]{8}", i) for i in ids) and len(ids) == len(set(ids)), ids
+    return {k: [{f: v for f, v in r.items() if f != "id"} if isinstance(r, dict) else r for r in rows]
+            if isinstance(rows, list) else rows for k, rows in profile.items()}
+
 
 TOKEN = "test-token"
 K1, W2 = "/api/documents/k1_statement", "/api/documents/w2"
@@ -377,7 +389,7 @@ def test_details_are_cleaned_saved_and_private(fresh):
     client, ws = fresh
     r = client.put("/api/profile", json=FORM)
     assert r.status_code == 200
-    saved = json.loads(ws.profile_path.read_text())
+    saved = without_ids(json.loads(ws.profile_path.read_text()))
     assert saved["people"] == [{"name": "Avery F Abernathy", "ssn": "987-65-4323", "dob": "04/07/1984",
                                 "role": "taxpayer", "dod": "", "occupation": "Software engineer",
                                 "employer": "", "deceased": False}]
@@ -392,7 +404,8 @@ def test_details_are_cleaned_saved_and_private(fresh):
                                    "street": "100 Main St", "city": "Seattle", "state": "WA", "zip": "98101",
                                    "phone": "(555) 555-0123", "ptin": "P00012345", "ein": "00-1234567"}]
     assert ws.profile_path.stat().st_mode & 0o777 == 0o600
-    assert client.get("/api/profile").json()["profile"] == saved
+    # read back as saved, the same ids included (none made up on the way)
+    assert client.get("/api/profile").json()["profile"] == json.loads(ws.profile_path.read_text())
     assert client.post("/api/run").status_code == 202
 
 
@@ -442,9 +455,12 @@ def test_an_older_profile_with_plain_numbers_still_loads(fresh):
              "eins": ["00-4869454"], "cards": ["4111111111111111"]}
     ws.profile_path.write_text(json.dumps(older))
     p = client.get("/api/profile").json()["profile"]
-    assert p["accounts"] == [{"institution": "", "number": "8320968305", "routing": "", "name": ""}]
-    assert p["eins"] == [{"ein": "00-4869454", "description": ""}]
-    assert p["cards"] == [{"number": "4111 1111 1111 1111", "description": ""}]
+    # each entry got its place as its permanent id: what the vault already knew it by
+    assert p["accounts"] == [{"institution": "", "number": "8320968305", "routing": "", "name": "",
+                              "id": "0"}]
+    assert p["eins"] == [{"ein": "00-4869454", "description": "", "id": "0"}]
+    assert p["cards"] == [{"number": "4111 1111 1111 1111", "description": "", "id": "0"}]
+    assert p["people"][0]["id"] == "0" and json.loads(ws.profile_path.read_text())["accounts"][0]["id"] == "0"
 
 
 def test_details_need_the_token(fresh):
@@ -472,7 +488,7 @@ def test_a_detail_seen_in_a_document_is_added_to_your_details(fresh):
     account = {"institution": "Contoso Bank", "number": "0047812", "routing": "", "name": "Brokerage"}
     assert add("account", **account).status_code == 200
     assert add("phone", value="5555550199").status_code == 200
-    saved = json.loads(ws.profile_path.read_text())
+    saved = without_ids(json.loads(ws.profile_path.read_text()))
     assert saved["people"][-1] == {"name": "Morgan Delacroix", "ssn": "987-65-4325", "dob": "",
                                    "role": "spouse", "dod": "", "deceased": False, "occupation": "",
                                    "employer": ""}
@@ -543,8 +559,9 @@ def test_click_a_value_on_a_document_to_add_it_to_your_details(corpus, network_a
     app.state.worker.wait()
     assert client.get(W2).json()["status"] == "passed"
     found = client.get("/api/profile/found").json()["entries"]  # where each profile entry was removed
-    assert set(found) == {"person:0"}  # the W-2's SSN is SSN-shaped, not in the profile: no one's entry
-    assert "w2" in [d["id"] for d in found["person:0"]["documents"]] and found["person:0"]["total"] > 0
+    you = f"person:{json.loads(ws.profile_path.read_text())['people'][0]['id']}"  # by permanent id
+    assert set(found) == {you}  # the W-2's SSN is SSN-shaped, not in the profile: no one's entry
+    assert "w2" in [d["id"] for d in found[you]["documents"]] and found[you]["total"] > 0
     report = client.get(W2).json()["report"]  # what was checked, for "What was checked"
     assert len(report["engines"]) == report["pages"] and all(report["engines"])
 

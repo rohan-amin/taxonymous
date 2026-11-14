@@ -67,6 +67,24 @@ class Workspace:
     def source(self, stem: str) -> Path | None:
         return next((p for p in self.pending() if self.stem(p) == stem), None)
 
+    def upgrade(self) -> None:
+        """A profile from before entries had ids, given them (each its position, as the vault
+        knew it); its phones and emails, known by place until then, rekeyed by value."""
+        from .profile import email_key, phone_key, with_ids
+        from .profile import save as save_profile
+        from .vault import Vault
+        if not self.profile_path.exists():
+            return
+        d = json.loads(self.profile_path.read_text())
+        d, changed = with_ids(d)
+        if changed:
+            save_profile(d, self.profile_path)
+        keys = {**{f"phone:{i}": phone_key(v) for i, v in enumerate(d.get("phones") or [])},
+                **{f"email:{i}": email_key(v) for i, v in enumerate(d.get("emails") or [])}}
+        vault = self.vault_dir / "placeholders.json"
+        if keys and vault.exists():
+            Vault(vault).rekey(keys)
+
     def overrides_path(self, stem: str) -> Path:
         return self.vault_dir / "overrides" / f"{stem}.json"
 
@@ -270,6 +288,7 @@ def export(ws: Workspace, stem: str) -> list[Path]:
 def run(ws: Workspace, ocr: bool = True) -> list[Outcome]:
     if not ws.profile_path.exists():
         raise FileNotFoundError(f"no profile at {ws.profile_path}; create it first (see README)")
+    ws.upgrade()
     matcher = ProfileMatcher(Profile.load(ws.profile_path))
     vault = Vault(ws.vault_dir / "placeholders.json")
     return [process(src, ws, matcher, vault, ocr) for src in ws.pending()]

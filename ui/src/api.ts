@@ -115,6 +115,7 @@ export class ApiError extends Error {
 }
 
 export interface Person {
+  id?: string; // permanent: labels follow it (taxonymous/profile.py)
   name: string;
   ssn: string;
   dob: string;
@@ -126,6 +127,7 @@ export interface Person {
 }
 
 export interface Address {
+  id?: string; // permanent: labels follow it (taxonymous/profile.py)
   street: string;
   city: string;
   state: string;
@@ -134,6 +136,7 @@ export interface Address {
 }
 
 export interface Account {
+  id?: string; // permanent: labels follow it (taxonymous/profile.py)
   institution: string;
   number: string;
   routing: string;
@@ -141,21 +144,25 @@ export interface Account {
 }
 
 export interface Ein {
+  id?: string; // permanent: labels follow it (taxonymous/profile.py)
   ein: string;
   description: string;
 }
 
 export interface Card {
+  id?: string; // permanent: labels follow it (taxonymous/profile.py)
   number: string;
   description: string;
 }
 
 export interface OtherNumber {
+  id?: string; // permanent: labels follow it (taxonymous/profile.py)
   number: string;
   description: string;
 }
 
 export interface Preparer {
+  id?: string; // permanent: labels follow it (taxonymous/profile.py)
   name: string;
   firm: string;
   street: string;

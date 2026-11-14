@@ -304,12 +304,17 @@ def _status(ws: Workspace, worker: Worker, stem: str) -> str:
 
 
 # a vault key -> the profile entry it comes from: a person's SSN, birth date, job and
-# employer are that person's ("ssn:0" -> "person:0"); a preparer's parts are the preparer's.
-# The number is a row of the profile; an SSN-shaped number not in it is keyed by its own
-# digits ("ssn:987654323") and is no entry's.
-_ENTRY = [(re.compile(r"(?:person|ssn|dob|occupation|employer):(\d{1,3})$"), "person:{}"),
-          (re.compile(r"preparer:(\d{1,3})(?::.*)?$"), "preparer:{}"),
-          (re.compile(r"((?:addr|email|phone|acct|card|ein|id|routing):\d{1,3})$"), "{}")]
+# employer are that person's ("ssn:e3fa91c2b" -> "person:e3fa91c2b"); a preparer's parts are
+# the preparer's. An SSN-shaped number not in the profile is keyed by its own digits
+# ("ssn:987654323") and is no entry's.
+# An entry's id is a short number (from before ids: its place then) or e + 8 hex digits;
+# phones and emails are known by their value; an account's routing number is the account's.
+_ID = r"(\d{1,3}|e[0-9a-f]{8})"
+_ENTRY = [(re.compile(rf"(?:person|ssn|dob|occupation|employer):{_ID}$"), "person:{}"),
+          (re.compile(rf"preparer:{_ID}(?::.*)?$"), "preparer:{}"),
+          (re.compile(rf"routing:{_ID}$"), "acct:{}"),
+          (re.compile(rf"((?:addr|acct|card|ein|id):(?:{_ID[1:-1]}))$"), "{}"),
+          (re.compile(r"((?:phone|email):.+)$"), "{}")]
 
 
 def _entry(key: str) -> str | None:
@@ -434,6 +439,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
                lanes: int | None = None, resume: bool = False) -> FastAPI:
     """`resume`: clean what was left unfinished (the app, not tests or the command line)."""
     ws.init()
+    ws.upgrade()  # a profile from before entries had permanent ids gets them, keeping every label
     worker = Worker(ws, ocr, lanes)
     if resume and ws.profile_path.exists():
         for stem in unfinished(ws):
@@ -460,6 +466,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
 
     @app.get("/api/profile")
     def get_profile():
+        ws.upgrade()  # one put in place while the app runs (copied in by hand) gets its ids first
         exists = ws.profile_path.exists()
         profile, errors = clean(json.loads(ws.profile_path.read_text()) if exists else {})
         return {"exists": exists, "profile": profile, "errors": errors, "path": str(ws.profile_path)}

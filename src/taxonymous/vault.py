@@ -19,7 +19,7 @@ from pathlib import Path
 from .files import write_json
 
 LETTER_KINDS = {"SSN", "NAME"}  # <SSN_A>, <NAME_B>; everything else is numbered: <ACCT_1>
-PERSON_KEY = re.compile(r"(?:person|ssn):(\d{1,3})")  # the profile's person n (an SSN not in it: its digits)
+PERSON_KEY = re.compile(r"(?:person|ssn):(.+)")  # a person's name or SSN, by their id
 _threads = threading.Lock()  # flock is per process: threads in one also take turns
 
 
@@ -37,6 +37,7 @@ class Vault:
         self.entries: dict[str, dict] = {}
         self._seen: dict[str, list[str]] = {}  # values added here since the last write
         self.people = 0  # the profile's people: letters A.. are theirs; anyone else's come after
+        self.letters: dict[str, int] = {}  # a person's id -> their letter (0: A), from the matcher
         if self.path and self.path.exists():
             self._use(self._read())
 
@@ -95,14 +96,27 @@ class Vault:
         first letter after the profile's people. Numbered kinds count on."""
         if kind in LETTER_KINDS:
             m = PERSON_KEY.fullmatch(key)
-            if m and _name(kind, int(m.group(1))) not in self.entries:
-                return _name(kind, int(m.group(1)))
+            n = self.letters.get(m.group(1)) if m else None
+            if n is not None and _name(kind, n) not in self.entries:
+                return _name(kind, n)
             n = self.people
         else:
             n = sum(1 for p in self.entries if p.startswith(f"<{kind}_"))
         while _name(kind, n) in self.entries:  # never reuse a name still taken
             n += 1
         return _name(kind, n)
+
+    def rekey(self, keys: dict[str, str]) -> None:
+        """Entries known by another key from now on (old key -> new); one already under the
+        new key wins. For phones and emails, once known by their place in the list."""
+        if not any(e["key"] in keys for e in self.entries.values()):
+            return
+        with self._locked():
+            taken = {e["key"] for e in self.entries.values()}
+            for e in self.entries.values():
+                if e["key"] in keys and keys[e["key"]] not in taken:
+                    e["key"] = keys[e["key"]]
+            self._use(self.entries)
 
     def forget(self, key: str) -> None:
         """Drop an identity (a reviewer removed the box they drew), so its value is no

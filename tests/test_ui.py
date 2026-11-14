@@ -5,6 +5,7 @@ Playwright's Chromium; skipped otherwise.
 """
 
 import json
+import re
 import shutil
 import socket
 import threading
@@ -18,6 +19,16 @@ from taxonymous.pipeline import Workspace
 
 pytestmark = pytest.mark.skipif(not (UI_DIR / "index.html").exists(), reason="UI not built")
 sync_api = pytest.importorskip("playwright.sync_api")
+
+def without_ids(profile: dict) -> dict:
+    """A saved profile with its entries' permanent ids checked (one each, well formed,
+    no two alike) and then left out, to compare the rest."""
+    ids = [r["id"] for key in ("people", "addresses", "accounts", "eins", "cards", "numbers", "preparers")
+           for r in profile.get(key, [])]
+    assert all(re.fullmatch(r"\d{1,3}|e[0-9a-f]{8}", i) for i in ids) and len(ids) == len(set(ids)), ids
+    return {k: [{f: v for f, v in r.items() if f != "id"} if isinstance(r, dict) else r for r in rows]
+            if isinstance(rows, list) else rows for k, rows in profile.items()}
+
 
 TOKEN = "ui-test-token"
 FILES = ["k1_statement.pdf", "w2.pdf"]
@@ -288,7 +299,7 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     person.get_by_label("SSN or ITIN").fill("987654323")
     pg.get_by_role("button", name="Save").click()
     pg.wait_for_function("document.querySelector('[data-testid=details-message]')?.innerText === 'Saved.'")
-    saved = json.loads(ws.profile_path.read_text())
+    saved = without_ids(json.loads(ws.profile_path.read_text()))
     assert [p["role"] for p in saved["people"]] == ["taxpayer", "spouse"]
     assert saved["people"][0]["ssn"] == "987-65-4323"
     assert saved["people"][0]["occupation"] == "Software engineer"
