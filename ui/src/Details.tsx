@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { api, ApiError } from "./api";
 import type { Address, Person, Profile } from "./api";
 
@@ -9,7 +10,9 @@ const NEW_PERSON: Person = { name: "", ssn: "", dob: "", role: "taxpayer", decea
                                employer: "" };
 const NEW_ADDRESS: Address = { street: "", city: "", state: "", zip: "", school_district: "" };
 
-export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: () => void }) {
+// `back`: what the fixed top bar shows on its left (the workspace's "Back to documents")
+export function Details({ onSaved, onRunAll, back }: { onSaved: () => void; onRunAll: () => void;
+                                                       back?: ReactNode }) {
   const [form, setForm] = useState<Profile | null>(null);
   const [path, setPath] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -66,6 +69,12 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
   const secret = hide ? " secret" : "";
 
   return (
+    // Save is always on screen: in a top bar and a bottom bar that don't scroll; the details between do
+    <div className="details-frame">
+      <div className="details-bar top">
+        <div>{back}</div>
+        <button type="button" className="primary" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+      </div>
     <div className="details">
       <div className="details-head">
         <h1>Your details</h1>
@@ -206,7 +215,8 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
         </section>
       ))}
 
-      <div className="details-foot">
+    </div>
+      <div className="details-bar bottom details-foot">
         <button type="button" className="primary" onClick={save} disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </button>

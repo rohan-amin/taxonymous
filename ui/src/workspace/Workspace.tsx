@@ -789,10 +789,8 @@ export function Workspace() {
 
       {view === "profile" ? (
         <div className="ws-profile-view">
-          <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--w-line)" }}>
-            <button type="button" className="wbtn quiet" onClick={() => { setView("work"); loadProfile(); }}>‹ Back to documents</button>
-          </div>
-          <Details onSaved={loadProfile} onRunAll={() => { api.runAll().then(refresh); setView("work"); }} />
+          <Details onSaved={loadProfile} onRunAll={() => { api.runAll().then(refresh); setView("work"); }}
+                   back={<button type="button" className="wbtn quiet" onClick={() => { setView("work"); loadProfile(); }}>‹ Back to documents</button>} />
         </div>
       ) : (
         <div className="ws-body">

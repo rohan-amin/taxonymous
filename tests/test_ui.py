@@ -292,12 +292,17 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     preparer.get_by_label("Preparer's name").fill("Jordan Q Okafor")
     preparer.get_by_label("PTIN").fill("P00012345")
 
-    pg.get_by_role("button", name="Save").click()
+    # Save is in a top bar and a bottom bar that don't scroll: both on screen, wherever the form is
+    viewport = pg.viewport_size
+    for save in pg.get_by_role("button", name="Save").all():
+        box = save.bounding_box()
+        assert box and 0 <= box["y"] and box["y"] + box["height"] <= viewport["height"]
+    pg.get_by_role("button", name="Save").first.click()
     pg.get_by_text("An SSN or ITIN has 9 digits.").wait_for()
     assert not ws.profile_path.exists()
 
     person.get_by_label("SSN or ITIN").fill("987654323")
-    pg.get_by_role("button", name="Save").click()
+    pg.get_by_role("button", name="Save").last.click()  # the bottom one
     pg.wait_for_function("document.querySelector('[data-testid=details-message]')?.innerText === 'Saved.'")
     saved = without_ids(json.loads(ws.profile_path.read_text()))
     assert [p["role"] for p in saved["people"]] == ["taxpayer", "spouse"]

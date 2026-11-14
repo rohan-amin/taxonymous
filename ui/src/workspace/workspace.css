@@ -448,3 +448,7 @@
 /* a working document's spinner on the selected row: no ring (a full ring hides the turning gap), drawn in white */
 .ws-file.sel .ws-dot.work { box-shadow: none; border-color: var(--w-accent-ink); border-top-color: transparent; }
 .ws-disclose { display: inline-block; width: 12px; margin-left: -2px; font-style: normal; font-size: 9px; color: var(--w-muted); }
+.ws-profile-view { overflow: hidden; display: flex; flex-direction: column; }
+.ws-profile-view .details-bar { background: var(--w-sunk); border-color: var(--w-line); padding: 8px 16px; }
+.ws-profile-view .details-bar button.primary { background: var(--w-accent); border-color: var(--w-accent); color: var(--w-accent-ink); border-radius: 6px; padding: 5px 16px; font-weight: 600; }
+.ws-profile-view .details-bar button.primary:hover:not(:disabled) { background: var(--w-accent-hover); }
