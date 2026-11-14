@@ -432,9 +432,10 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
                 {summary.status === "passed" && detail?.report && (
                   <details className="ws-checked" data-testid="checked">
                     <summary>What was checked</summary>
-                    <ul>{checked(detail.report, detail.redactions).map((c) => <li key={c}>{c}</li>)}</ul>
-                    <p>Taxonymous looks for what's in My profile, and anything shaped like an SSN. Anything else stays
-                      readable, so look the copy over before you share it.</p>
+                    <ul>{checked(detail.report, detail.redactions).map(([b, rest]) =>
+                      <li key={b + rest}>{b && <strong>{b}</strong>} {rest}</li>)}</ul>
+                    <p>Only what's in My profile, and anything shaped like an SSN, is removed. Look the copy over
+                      before you share it.</p>
                   </details>
                 )}
                 {summary.status === "running" && summary.progress?.fraction != null &&

@@ -108,28 +108,25 @@ export function plain(d: DocSummary, hasProfile: boolean): Plain {
 }
 
 const pages = (n: number) => `${n} page${n === 1 ? "" : "s"}`;
-const both = (xs: string[]) => xs.join(" and ");
 
-// what checking a passed document did, for "What was checked": every claim is one the report backs
-export function checked(r: Report, redactions: Record<string, number> = {}): string[] {
+// what checking a passed document did, for "What was checked": short, plain, and only what
+// the report backs (which engines read a page stays in the report, not in the words)
+export function checked(r: Report, redactions: Record<string, number> = {}): [string, string][] {
   const removed = removedList(redactions);
-  const out = [removed ? `Removed ${removed}.` : "Nothing from My profile was on it."];
-  out.push(`Then the copy was read again from scratch. Its text, all ${pages(r.pages)}: none of your details were in it.`);
-  const engines = r.engines ?? [];
-  const read = engines.filter((e) => e.length > 0);
+  const out: [string, string][] = [["Removed:", removed ? `${removed}.` : "nothing; none of your details were on it."]];
+  const read = (r.engines ?? []).filter((e) => e.length > 0);
   if (r.ocr === false || !read.length) {
-    out.push("The pages weren't read as pictures (OCR was turned off), so text drawn as an image wasn't checked.");
+    out.push([`All ${pages(r.pages)} read again as text:`,
+      "none of your details found. Not read as images (turned off), so text drawn as a picture wasn't checked."]);
   } else {
-    const all = [...new Set(read.flat())];
-    const everyPage = read.length === r.pages && read.every((e) => both(e) === both(read[0]));
-    const pics = r.pictures?.length ?? 0;
-    out.push(everyPage
-      ? `Every page was also read as a picture, the way a person sees it, by ${both(all)}: none of your details turned up.`
-      : `Every page was also read as a picture, the way a person sees it, by ${both(all.filter((e) => read.every((x) => x.includes(e))))}${pics ? `, and the ${pics === 1 ? "page with a picture on it" : `${pics} pages with pictures on them`} by ${both(all)} too` : ""}: none of your details turned up.`);
+    const twice = read.some((e) => e.length > 1) && !read.every((e) => e.length > 1);
+    out.push([`All ${pages(r.pages)} read again, as text and as images:`,
+      `none of your details found.${twice ? " Pages with pictures were read twice, two different ways."
+        : read.every((e) => e.length > 1) ? " Each was read twice, two different ways." : ""}`]);
   }
-  out.push("Every page was checked for barcodes: none can be scanned.");
-  out.push("Hidden data was removed: the file's details, form fields, comments and attachments.");
-  for (const note of r.notes ?? []) out.push(note);
+  out.push(["No barcodes", "can be scanned."]);
+  out.push(["Hidden data removed:", "file details, form fields, comments and attachments."]);
+  for (const note of r.notes ?? []) out.push(["", note]);
   return out;
 }
 

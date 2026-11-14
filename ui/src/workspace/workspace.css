@@ -420,3 +420,4 @@
 .ws .ws-status:disabled { cursor: default; }
 .ws .ws-status > span { display: inline-flex; align-items: center; gap: 6px; }
 .ws .ws-status.done { color: var(--w-ok); font-weight: 600; }
+.ws-banner.compact .ws-checked li strong { margin-right: 0; font-weight: 600; }
