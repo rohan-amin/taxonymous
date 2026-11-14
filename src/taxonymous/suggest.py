@@ -51,6 +51,19 @@ LABELS: list[tuple[str, re.Pattern]] = [
 ]
 
 
+# an account's type, from the words around its number; the first that fits
+ACCOUNT_KIND = [("roth_401k", r"roth\s*401"), ("roth_ira", r"\broth\b"),
+                ("sep_simple_ira", r"\b(?:sep|simple)\b"),
+                ("401k", r"\b40[13]\s*\(?[kb]\)?|\b457\b"), ("traditional_ira", r"\bira\b"),
+                ("hsa", r"\bhsa\b|health savings"), ("529", r"\b529\b"), ("coverdell", r"coverdell"),
+                ("mortgage", r"mortgage"), ("student_loan", r"student loan"), ("checking", r"checking"),
+                ("savings", r"savings"), ("brokerage", r"brokerage")]
+
+
+def account_kind(label: str) -> str:
+    return next((kind for kind, rx in ACCOUNT_KIND if re.search(rx, label, re.I)), "")
+
+
 def digits(s: str) -> str:
     return re.sub(r"\D", "", s)
 
@@ -219,7 +232,8 @@ def _suggest(text: str, label: str, has_people: bool) -> tuple[str, dict]:
     if EIN.fullmatch(text) or ("ein" in says and len(ds) == 9 and not letters):
         return "ein", {"ein": text, "description": _describe(label)}
     if "account" in says and ds and not MONEY.fullmatch(text):
-        return "account", {"institution": "", "number": text, "routing": "", "name": ""}
+        return "account", {"institution": "", "number": text, "routing": "", "name": "",
+                           "type": account_kind(label)}
     if "routing" in says and len(ds) == 9:
         return "account", {"institution": "", "number": "", "routing": ds, "name": ""}
     if 13 <= len(ds) <= 19 and not letters and ("card" in says or luhn(ds)) and "account" not in says:

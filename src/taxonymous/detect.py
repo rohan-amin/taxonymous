@@ -142,6 +142,12 @@ class ProfileMatcher:
         # each person's role by their id, and the preparers': what their labels say (<TAXPAYER>)
         self.roles = {(p.id or str(i)): p.role or "other" for i, p in enumerate(profile.people)}
         self.roles.update({f"preparer:{pr.id or i}": "preparer" for i, pr in enumerate(profile.preparers)})
+        # what each account and address is, by id (every one, typed or not: the vault tells a
+        # cleared type from a removed entry): their labels say it (<JOINT_CHECKING_1>, <HOME_ADDR>)
+        acct_ids = profile.ids.get("accounts", [])
+        self.entities = {f"acct:{acct_ids[i]}": info for i, info in enumerate(profile.account_info)
+                         if i < len(acct_ids)}
+        self.entities.update({f"addr:{a.id or i}": {"type": a.type} for i, a in enumerate(profile.addresses)})
 
         def add(pattern: str | None, kind: str, key: str, flags: int = IC, raw: bool = True) -> None:
             if pattern:
@@ -194,7 +200,7 @@ class ProfileMatcher:
                 add(r"\b" + r"\s+".join(parts) + r"(?!\w)", "ADDR", key)
             # a form prints them in boxes of their own ("SCARSDALE" | "NY" | "10583"), and its
             # state and ZIP can run together ("NY10583"); a state alone ("NY") is everywhere
-            if a.state and a.zip:
+            if a.state and a.zip and not profile.keep_state:  # else the state stays readable: city and ZIP go
                 city = r"\s+".join(map(re.escape, a.city.split()))
                 town = rf"(?:{city},?\s+)?" if city else ""
                 add(rf"\b{town}{re.escape(a.state)}\s*{re.escape(a.zip)}(?:-\d{{4}})?(?!\d)", "ADDR", key)

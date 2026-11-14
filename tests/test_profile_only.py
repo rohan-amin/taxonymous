@@ -42,7 +42,7 @@ def found(*lines: str, details: dict = DETAILS) -> list[str]:
 def test_only_your_details_and_ssn_shapes_are_found():
     texts = found(*W2)
     assert NAME in texts and SSN in texts and OTHER_SSN in texts
-    assert "5842 Fenwick Avenue" in texts and "Tacoma, WA 98458" in texts
+    assert "5842 Fenwick Avenue" in texts and "Tacoma" in texts and "98458" in texts  # the state stays
     for kept in (EIN, "Contoso", "0047812", "Morgan", "54367.87"):
         assert not any(kept in t for t in texts), kept
 

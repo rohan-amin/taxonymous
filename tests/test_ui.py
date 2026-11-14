@@ -284,6 +284,8 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
     account.get_by_label("Institution").fill("Contoso Bank")
     account.get_by_label("Account number").fill("8320968305")
     account.get_by_label("Account name").fill("Joint checking")
+    account.get_by_label("Type").select_option("checking")
+    account.get_by_label("Owner").select_option("joint")
     account.get_by_label("Routing number").fill("021000021")
     pg.get_by_role("button", name="Add a number").click()
     pg.get_by_test_id("record-numbers").first.get_by_label("Number or ID").fill("54321")
@@ -316,7 +318,8 @@ def test_first_run_asks_for_your_details_in_a_form(fresh_page):
                            ".every(e => e.scrollWidth <= e.clientWidth + 1)"), width
     pg.set_viewport_size({"width": 1500, "height": 950})
     assert saved["accounts"] == [{"institution": "Contoso Bank", "number": "8320968305",
-                                  "routing": "021000021", "name": "Joint checking"}]
+                                  "routing": "021000021", "name": "Joint checking", "type": "checking",
+                                  "owner": "joint"}]
     assert saved["numbers"] == [{"number": "54321", "description": ""}]
     assert saved["preparers"][0]["name"] == "Jordan Q Okafor" and saved["preparers"][0]["ptin"] == "P00012345"
     assert saved["people"][1]["deceased"] is True and saved["people"][1]["dod"] == "03/14/2025"

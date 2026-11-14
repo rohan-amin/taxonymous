@@ -133,6 +133,7 @@ export interface Address {
   state: string;
   zip: string;
   school_district: string;
+  type?: string; // home, prior_home, rental, vacation, business, or "" (taxonymous/profile.py ADDRESS_TYPES)
 }
 
 export interface Account {
@@ -141,6 +142,8 @@ export interface Account {
   number: string;
   routing: string;
   name: string;
+  type?: string; // checking, roth_ira, 401k... or "" (ACCOUNT_TYPES)
+  owner?: string; // a person's id, joint, trust, estate, or ""
 }
 
 export interface Ein {
@@ -175,6 +178,7 @@ export interface Preparer {
 }
 
 export interface Profile {
+  keep_state?: boolean; // an address's state stays readable (default true)
   people: Person[];
   addresses: Address[];
   phones: string[];

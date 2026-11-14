@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { api, ApiError } from "./api";
 import type { Address, Person, Profile } from "./api";
 
-import { Field, LISTS, quiet, RECORDS, ROLES } from "./fields";
+import { ACCOUNT_TYPES, ADDRESS_TYPES, Field, LISTS, newId, OWNERS, quiet, RECORDS, ROLE_NAME, ROLES } from "./fields";
 import type { ListKey, RecordKey, Row } from "./fields";
 
 const NEW_PERSON: Person = { name: "", ssn: "", dob: "", role: "taxpayer", deceased: false, dod: "", occupation: "",
@@ -23,8 +23,8 @@ export function Details({ onSaved, onRunAll, back }: { onSaved: () => void; onRu
   useEffect(() => {
     api.profile().then((s) => {
       const p = s.profile;
-      setForm({ ...p, people: p.people.length ? p.people : [{ ...NEW_PERSON }],
-                addresses: p.addresses.length ? p.addresses : [{ ...NEW_ADDRESS }] });
+      setForm({ ...p, people: p.people.length ? p.people : [{ ...NEW_PERSON, id: newId() }],
+                addresses: p.addresses.length ? p.addresses : [{ ...NEW_ADDRESS, id: newId() }] });
       setPath(s.path);
       setErrors(s.errors);
     });
@@ -89,6 +89,12 @@ export function Details({ onSaved, onRunAll, back }: { onSaved: () => void; onRu
           <input type="checkbox" checked={hide} onChange={(e) => setHide(e.target.checked)} />
           hide numbers on screen
         </label>
+        <label className="check" data-testid="keep-state">
+          <input type="checkbox" checked={form.keep_state !== false}
+                 onChange={(e) => change({ ...form, keep_state: e.target.checked })} />
+          Leave the state readable in my addresses (your AI needs it for state taxes; the street, city and ZIP
+          are still removed)
+        </label>
       </div>
 
       <section>
@@ -140,7 +146,7 @@ export function Details({ onSaved, onRunAll, back }: { onSaved: () => void; onRu
           </div>
         ))}
         <button type="button" onClick={() => change({ ...form, people: [...form.people,
-          { ...NEW_PERSON, role: form.people.length ? "dependent" : "taxpayer" }] })}>Add a person</button>
+          { ...NEW_PERSON, id: newId(), role: form.people.length ? "dependent" : "taxpayer" }] })}>Add a person</button>
       </section>
 
       <section>
@@ -167,11 +173,16 @@ export function Details({ onSaved, onRunAll, back }: { onSaved: () => void; onRu
               <input value={a.school_district ?? ""} placeholder="Optional" {...quiet}
                      onChange={(e) => setAddress(i, { school_district: e.target.value })} />
             </Field>
+            <Field label="Type" error={errors[`addresses.${i}.type`]}>
+              <select value={a.type ?? ""} onChange={(e) => setAddress(i, { type: e.target.value })}>
+                {ADDRESS_TYPES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
+            </Field>
             <button type="button" className="remove" title="Remove this address" aria-label="Remove this address"
                     onClick={() => remove("addresses", i)}>×</button>
           </div>
         ))}
-        <button type="button" onClick={() => change({ ...form, addresses: [...form.addresses, { ...NEW_ADDRESS }] })}>
+        <button type="button" onClick={() => change({ ...form, addresses: [...form.addresses, { ...NEW_ADDRESS, id: newId() }] })}>
           Add an address
         </button>
       </section>
@@ -188,6 +199,24 @@ export function Details({ onSaved, onRunAll, back }: { onSaved: () => void; onRu
                          onChange={(e) => setRecord(key, i, { [f]: e.target.value })} />
                 </Field>
               ))}
+              {key === "accounts" && <>
+                <Field label="Type">
+                  <select value={r.type ?? ""} onChange={(e) => setRecord(key, i, { type: e.target.value })}>
+                    {[...new Set(ACCOUNT_TYPES.map(([, , g]) => g))].map((g) => g
+                      ? <optgroup key={g} label={g}>{ACCOUNT_TYPES.filter(([, , x]) => x === g).map(([v, label]) =>
+                          <option key={v} value={v}>{label}</option>)}</optgroup>
+                      : <option key="" value="">Not set</option>)}
+                  </select>
+                </Field>
+                <Field label="Owner">
+                  <select value={r.owner ?? ""} onChange={(e) => setRecord(key, i, { owner: e.target.value })}>
+                    {OWNERS.slice(0, 1).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                    {form.people.filter((p) => p.id && p.name.trim()).map((p) => (
+                      <option key={p.id} value={p.id}>{p.name} ({ROLE_NAME[p.role] ?? "Other"})</option>))}
+                    {OWNERS.slice(1).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                  </select>
+                </Field>
+              </>}
               <button type="button" className="remove" title={`Remove this ${noun}`} aria-label={`Remove this ${noun}`}
                       onClick={() => remove(key, i)}>×</button>
             </div>

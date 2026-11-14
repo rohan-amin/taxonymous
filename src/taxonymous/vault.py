@@ -21,6 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .files import write_json
+from .profile import ACCOUNT_TYPES, ADDRESS_TYPES, OWNERS
 
 ID = r"(\d{1,3}|e[0-9a-f]{8})"  # a profile entry's permanent id (profile.py)
 PERSON_PART = re.compile(rf"(person|ssn|dob|occupation|employer):{ID}")  # a person's detail, by id
@@ -33,7 +34,9 @@ PREPARER_SUFFIX = {"name": "", "firm": "_FIRM", "addr": "_ADDR", "phone": "_PHON
 ROLE_LABEL = {"taxpayer": "TAXPAYER", "spouse": "SPOUSE", "dependent": "DEPENDENT", "grantor": "GRANTOR",
               "trustee": "TRUSTEE", "successor_trustee": "SUCCESSOR_TRUSTEE", "beneficiary": "BENEFICIARY",
               "executor": "EXECUTOR", "decedent": "DECEDENT", "other": "PERSON", "preparer": "PREPARER"}
-ONE_OF = {"TAXPAYER", "SPOUSE"}
+ONE_OF = {"TAXPAYER", "SPOUSE", "HOME"}  # one each; everything else with a label base is numbered
+ACCOUNT_PART = re.compile(rf"(acct|routing):{ID}")  # an account's number or routing number, by its id
+ADDRESS_PART = re.compile(rf"addr:{ID}")
 _threads = threading.Lock()  # flock is per process: threads in one also take turns
 
 
@@ -51,6 +54,8 @@ class Vault:
         self.entries: dict[str, dict] = {}
         self._seen: dict[str, list[str]] = {}  # values added here since the last write
         self.roles: dict[str, str] = {}  # a person's id (a preparer's "preparer:<id>") -> role
+        # what an account ("acct:<id>": type, owner) or an address ("addr:<id>": type) is, from the profile
+        self.entities: dict[str, dict] = {}
         self.bases: dict[str, str] = {}  # that id -> its label base ("DEPENDENT_2"): kept in the file
         self.retired: set[str] = set()  # bases given up (a role changed): never given to anyone else
         if self.path and self.path.exists():
@@ -130,12 +135,32 @@ class Vault:
             return f"<{self._base(who, self.roles.get(who, 'other'))}{PERSON_SUFFIX[m.group(1)]}>"
         if m := PREPARER_PART.fullmatch(key):
             return f"<{self._base('preparer:' + m.group(1), 'preparer')}{PREPARER_SUFFIX[m.group(2)]}>"
+        if m := ACCOUNT_PART.fullmatch(key):  # <TAXPAYER_ROTH_IRA_1>, <JOINT_CHECKING_1_ROUTING>
+            who = f"acct:{m.group(2)}"
+            label = self._account_label(self.entities.get(who, {}))
+            suffix = "_ROUTING" if m.group(1) == "routing" else ""
+            return f"<{self._base_as(who, label)}{suffix}>" if label else None
+        if m := ADDRESS_PART.fullmatch(key):  # <HOME_ADDR>, <RENTAL_1_ADDR>
+            who = f"addr:{m.group(1)}"
+            label = ADDRESS_TYPES.get(self.entities.get(who, {}).get("type", ""))
+            return f"<{self._base_as(who, label)}_ADDR>" if label else None
         return None
 
+    def _account_label(self, info: dict) -> str | None:
+        """Owner then type: TAXPAYER_ROTH_IRA, JOINT_CHECKING; None when neither is set."""
+        kind, owner = ACCOUNT_TYPES.get(info.get("type", "")), info.get("owner", "")
+        whose = OWNERS.get(owner) or (self._base(owner, self.roles.get(owner, "other")) if owner else None)
+        if not (kind or whose):
+            return None
+        label = "_".join(p for p in (whose, kind or "ACCT") if p)
+        return label if label[0].isalpha() else f"ACCT_{label}"  # a label starts with a letter
+
     def _base(self, who: str, role: str) -> str:
-        """Their label base: kept while their role is the same; a new one when it changes,
-        never one anyone has had."""
-        label = ROLE_LABEL.get(role, "PERSON")
+        return self._base_as(who, ROLE_LABEL.get(role, "PERSON"))
+
+    def _base_as(self, who: str, label: str) -> str:
+        """Their label base (a person, an account, an address): kept while what it says is
+        the same; a new one when that changes, never one anyone has had."""
         base = self.bases.get(who)
         if base and (base == label or re.fullmatch(rf"{label}_\d+", base)):
             return base
@@ -158,15 +183,19 @@ class Vault:
         return f"<{prefix}_{n}>"
 
     def relabel(self) -> bool:
-        """Every label of a profile person or preparer as their role says now (a role changed,
-        or the vault is from before role labels), and an unlisted SSN or a lone surname as
-        such. Returns whether any changed: then the documents are cleaned again."""
+        """Every label as the profile says now: a person's role, an account's owner and type,
+        an address's type (one changed, or the vault is from before such labels); an unlisted
+        SSN or a lone surname as such; an account or address whose type was cleared back to
+        plain (<ACCT_3>). Returns whether any changed: then the documents are cleaned again."""
         def wanted(ph: str, e: dict) -> str | None:
             name = self._expected(e["kind"], e["key"])
             if name is None and e["kind"] == "SSN" and not ph.startswith("<UNKNOWN_SSN_"):
                 return ""
             if name is None and e["key"].startswith("surname:") and not ph.startswith("<SURNAME_"):
                 return ""
+            plain = ACCOUNT_PART.fullmatch(e["key"]) or ADDRESS_PART.fullmatch(e["key"])
+            if name is None and plain and not re.fullmatch(rf"<{e['kind']}_\d+>", ph):
+                return ""  # its type cleared: a plain number again
             return name
 
         def in_profile(key: str) -> bool:  # a person or preparer the profile still has
@@ -174,7 +203,11 @@ class Vault:
                 return m.group(2) in self.roles
             if m := PREPARER_PART.fullmatch(key):
                 return f"preparer:{m.group(1)}" in self.roles
-            return True  # not a person's: an unlisted SSN, a surname, an account...
+            if m := ACCOUNT_PART.fullmatch(key):
+                return f"acct:{m.group(2)}" in self.entities
+            if m := ADDRESS_PART.fullmatch(key):
+                return f"addr:{m.group(1)}" in self.entities
+            return True  # no one's: an unlisted SSN, a surname
 
         todo = [ph for ph, e in self.entries.items()
                 if in_profile(e["key"]) and wanted(ph, e) not in (None, ph)]
@@ -185,8 +218,10 @@ class Vault:
             for ph in [p for p in list(self.entries) if p in todo]:
                 e = self.entries[ph]
                 name = wanted(ph, e)
-                if name == "":  # an unlisted SSN or a surname still under its old name
-                    name = self._next("UNKNOWN_SSN" if e["kind"] == "SSN" else "SURNAME")
+                if name == "":  # an unlisted SSN or a surname under its old name; a type cleared
+                    name = self._next("UNKNOWN_SSN" if e["kind"] == "SSN" and e["key"].startswith("ssn:")
+                                      and not PERSON_PART.fullmatch(e["key"])
+                                      else "SURNAME" if e["key"].startswith("surname:") else e["kind"])
                 if name and name != ph and name not in self.entries:
                     self.entries[name] = self.entries.pop(ph)
                     changed = True

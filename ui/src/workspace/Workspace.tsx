@@ -5,6 +5,7 @@ import type { CSSProperties, DragEvent, KeyboardEvent, PointerEvent as RPointerE
 import { api, pageImage } from "../api";
 import type { Box, DocDetail, DocSummary, FoundEntries, Profile } from "../api";
 import { Details } from "../Details";
+import { ACCOUNT_TYPES, ADDRESS_TYPES } from "../fields";
 import { AddForm, WordLayer, popoverPlace, usePageWords } from "./ClickToAdd";
 import type { Picked } from "./ClickToAdd";
 import { DOT, checked, plain, removedList, timeLeft } from "./messages";
@@ -147,6 +148,8 @@ export interface Highlight {
 }
 
 type Entry = [string, string, string];
+const ACCOUNT_NAME: Record<string, string> = Object.fromEntries(ACCOUNT_TYPES.filter(([v]) => v).map(([v, l]) => [v, l]));
+const ADDRESS_NAME: Record<string, string> = Object.fromEntries(ADDRESS_TYPES.filter(([v]) => v).map(([v, l]) => [v, l]));
 const ROLE_TITLE: Record<string, string> = {
   taxpayer: "You", spouse: "Spouse", dependent: "Dependent", grantor: "Grantor", trustee: "Trustee",
   successor_trustee: "Successor trustee", beneficiary: "Beneficiary", executor: "Executor", decedent: "Decedent",
@@ -203,10 +206,10 @@ function ProfileDrawer({ profile, found, onShow }: {
       groups.push({ title: ROLE_TITLE[p.role] ?? "Person", items, person: true });
     });
     if (profile.addresses.length) {
-      groups.push({ title: "Addresses", items: profile.addresses.map((a, i) => ["Address", [a.street, a.city, a.state, a.zip].filter(Boolean).join(", "), `addr:${a.id ?? i}`]) });
+      groups.push({ title: "Addresses", items: profile.addresses.map((a, i) => [ADDRESS_NAME[a.type ?? ""] ?? "Address", [a.street, a.city, a.state, a.zip].filter(Boolean).join(", "), `addr:${a.id ?? i}`]) });
     }
     if (profile.accounts.length) {
-      groups.push({ title: "Accounts", items: profile.accounts.map((a, i) => [a.institution || "Account", mask(a.number), `acct:${a.id ?? i}`]) });
+      groups.push({ title: "Accounts", items: profile.accounts.map((a, i) => [ACCOUNT_NAME[a.type ?? ""] ?? (a.institution || "Account"), mask(a.number), `acct:${a.id ?? i}`]) });
     }
     if (profile.phones.length) groups.push({ title: "Phones", items: profile.phones.map((x) => ["Phone", x, `phone:${x.replace(/\D/g, "").slice(-10)}`]) });
     if (profile.emails.length) groups.push({ title: "Emails", items: profile.emails.map((x) => ["Email", x, `email:${x.trim().toLowerCase()}`]) });

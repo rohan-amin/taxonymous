@@ -396,7 +396,7 @@ def test_details_are_cleaned_saved_and_private(fresh):
     assert saved["addresses"][0]["state"] == "WA"
     assert saved["eins"] == [{"ein": "00-4869454", "description": "Household employer"}]
     assert saved["accounts"] == [{"institution": "Contoso Bank", "number": "8320968305", "routing": "",
-                                  "name": "Joint checking"}]
+                                  "name": "Joint checking", "type": "", "owner": ""}]
     assert saved["cards"] == [{"number": "4111 1111 1111 1111", "description": "Travel card"}]
     assert saved["phones"] == ["(555) 555-0188"]
     assert saved["numbers"] == [{"number": "54321", "description": "Signature PIN"}]
@@ -457,7 +457,7 @@ def test_an_older_profile_with_plain_numbers_still_loads(fresh):
     p = client.get("/api/profile").json()["profile"]
     # each entry got its place as its permanent id: what the vault already knew it by
     assert p["accounts"] == [{"institution": "", "number": "8320968305", "routing": "", "name": "",
-                              "id": "0"}]
+                              "type": "", "owner": "", "id": "0"}]
     assert p["eins"] == [{"ein": "00-4869454", "description": "", "id": "0"}]
     assert p["cards"] == [{"number": "4111 1111 1111 1111", "description": "", "id": "0"}]
     assert p["people"][0]["id"] == "0" and json.loads(ws.profile_path.read_text())["accounts"][0]["id"] == "0"
@@ -492,7 +492,8 @@ def test_a_detail_seen_in_a_document_is_added_to_your_details(fresh):
     assert saved["people"][-1] == {"name": "Morgan Delacroix", "ssn": "987-65-4325", "dob": "",
                                    "role": "spouse", "dod": "", "deceased": False, "occupation": "",
                                    "employer": ""}
-    assert saved["accounts"][-1] == account and saved["phones"][-1] == "(555) 555-0199"
+    assert saved["accounts"][-1] == {**account, "type": "", "owner": ""}
+    assert saved["phones"][-1] == "(555) 555-0199"
     assert len(saved["people"]) == 2 and len(saved["accounts"]) == 2
 
     r = add("ein", ein="12345", description="Trust")

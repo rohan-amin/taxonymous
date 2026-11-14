@@ -164,3 +164,45 @@ def test_labels_follow_people_through_edits_to_the_profile(corpus, tmp_path):
     # one taxpayer, one spouse
     r = client.put("/api/profile", json={"people": [avery, {**quinn, "role": "taxpayer"}]})
     assert r.status_code == 422 and "people.1.role" in r.json()["detail"]["fields"]
+
+
+def test_accounts_and_addresses_say_what_they_are(corpus, tmp_path):
+    """An account's label is its owner and type, an address's its type; the state stays
+    readable in an address; clearing a type makes it a plain number again."""
+    _, _, profile = corpus
+    ws = Workspace(tmp_path / "ws")
+    ws.init()
+    doc = pymupdf.open()
+    page = doc.new_page(width=600, height=300)
+    for i, line in enumerate(["Roth IRA 2287441903", "Checking 8320968305 routing 021000021",
+                              "5842 Fenwick Ave", "Tacoma, WA 98458"]):
+        page.insert_text((20, 30 + 30 * i), line, fontsize=11)
+    doc.save(ws.inbox / "accounts.pdf")
+    app = create_app(ws, "t", ocr=False)
+    client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: "t"})
+    you = {"id": "ea0000001", "name": "Avery F Abernathy", "role": "taxpayer"}
+    accounts = [{"number": "2287441903", "type": "roth_ira", "owner": you["id"]},
+                {"number": "8320968305", "routing": "021000021", "type": "checking", "owner": "joint"}]
+    home = {"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "WA", "zip": "98458", "type": "home"}
+    r = client.put("/api/profile", json={"people": [you], "accounts": accounts, "addresses": [home]})
+    assert r.status_code == 200
+    client.post("/api/run")
+    app.state.worker.wait()
+
+    def lines() -> list[str]:
+        text = ws.outputs("accounts")["txt"].read_text()
+        return [" ".join(ln.split()) for ln in text.splitlines() if ln.strip()][2:]
+
+    def labels(line: str) -> list[str]:  # what a line says, label by label (the text puts them in place)
+        return sorted(re.findall(r"<[A-Z0-9_]+>|\bWA\b", line))
+
+    got = lines()
+    assert [labels(ln) for ln in got] == [["<TAXPAYER_ROTH_IRA_1>"],
+                                         ["<JOINT_CHECKING_1>", "<JOINT_CHECKING_1_ROUTING>"],
+                                         ["<HOME_ADDR>"], ["<HOME_ADDR>", "<HOME_ADDR>", "WA"]], got
+    assert not any(v in " ".join(got) for v in ("2287441903", "8320968305", "021000021", "Tacoma", "98458"))
+    saved = client.get("/api/profile").json()["profile"]
+    saved["accounts"][1]["type"], saved["accounts"][1]["owner"] = "", ""  # cleared: a plain number again
+    assert client.put("/api/profile", json=saved).status_code == 200
+    app.state.worker.wait()
+    assert labels(lines()[1]) == ["<ACCT_1>", "<ROUTING_1>"]

@@ -90,8 +90,10 @@ class Workspace:
         vault = Vault(path)
         if keys:
             vault.rekey(keys)
-        vault.roles = {**{str(p.get("id")): p.get("role") or "other" for p in d.get("people") or []},
-                       **{f"preparer:{p.get('id')}": "preparer" for p in d.get("preparers") or []}}
+        from .detect import ProfileMatcher
+        from .profile import Profile
+        matcher = ProfileMatcher(Profile.from_dict(d))  # what each person, account and address is
+        vault.roles, vault.entities = matcher.roles, matcher.entities
         return vault.relabel()
 
     def overrides_path(self, stem: str) -> Path:

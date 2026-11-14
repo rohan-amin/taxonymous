@@ -61,6 +61,7 @@ class Address:
     zip: str = ""
     school_district: str = ""  # a state return asks for it (NY)
     id: str = ""
+    type: str = ""  # ADDRESS_TYPES: what it is to the return; its label says it (<HOME_ADDR>)
 
 
 @dataclass
@@ -93,6 +94,10 @@ class Profile:
     # the ids of the number lists' entries, in order: accounts, eins, cards, numbers, and
     # routing (an account's routing number has its account's id)
     ids: dict[str, list[str]] = field(default_factory=dict)
+    # each account's type and owner (a person's id, or joint / trust / estate), in order:
+    # its label says them (<TAXPAYER_ROTH_IRA_1>)
+    account_info: list[dict] = field(default_factory=list)
+    keep_state: bool = True  # an address's state stays readable (a state return needs it)
 
     @classmethod
     def load(cls, path: Path) -> "Profile":
@@ -102,7 +107,8 @@ class Profile:
     def from_dict(cls, d: dict) -> "Profile":
         return cls(
             people=[Person(**p) for p in d.get("people", [])],
-            addresses=[Address(**a) for a in d.get("addresses", [])],
+            addresses=[Address(**{k: v for k, v in a.items() if k in Address.__dataclass_fields__})
+                       for a in d.get("addresses", [])],
             phones=list(d.get("phones", [])),
             emails=list(d.get("emails", [])),
             eins=[_number(e, "eins") for e in d.get("eins", [])],
@@ -112,6 +118,9 @@ class Profile:
             numbers=[_number(n, "numbers") for n in d.get("numbers", [])],
             preparers=[Preparer(**{k: str(v or "") for k, v in p.items() if k in (*PREPARER_FIELDS, "id")})
                        for p in d.get("preparers", [])],
+            account_info=[{"type": r.get("type") or "", "owner": r.get("owner") or ""}
+                          for r in (a if isinstance(a, dict) else {} for a in d.get("accounts", []))],
+            keep_state=bool(d.get("keep_state", True)),
             ids={**{key: [_id_of(x, i) for i, x in enumerate(d.get(key, []))]
                     for key in ("accounts", "eins", "cards", "numbers")},
                  "routing": [_id_of(a, i) for i, a in enumerate(d.get("accounts", []))
@@ -121,7 +130,7 @@ class Profile:
 
 # per kind of record: the field that is the identifier, and all of its fields
 RECORDS = {
-    "accounts": ("number", ("institution", "number", "routing", "name")),
+    "accounts": ("number", ("institution", "number", "routing", "name", "type", "owner")),
     "eins": ("ein", ("ein", "description")),
     "cards": ("number", ("number", "description")),
     "numbers": ("number", ("number", "description")),
@@ -184,6 +193,15 @@ def _number(item, key: str) -> str:
 
 
 # who a person is on the return or in an estate; their label says it (<TAXPAYER>, <TRUSTEE_1>)
+# what an account or an address is: the value kept in the profile -> its part of a label
+ACCOUNT_TYPES = {"checking": "CHECKING", "savings": "SAVINGS", "cd": "CD", "brokerage": "BROKERAGE",
+                 "traditional_ira": "TRADITIONAL_IRA", "roth_ira": "ROTH_IRA", "sep_simple_ira": "SEP_IRA",
+                 "401k": "401K", "roth_401k": "ROTH_401K", "pension": "PENSION", "hsa": "HSA", "529": "529",
+                 "coverdell": "COVERDELL", "mortgage": "MORTGAGE", "student_loan": "STUDENT_LOAN",
+                 "loan": "LOAN"}
+OWNERS = {"joint": "JOINT", "trust": "TRUST", "estate": "ESTATE"}  # or a person's id
+ADDRESS_TYPES = {"home": "HOME", "prior_home": "PRIOR_HOME", "rental": "RENTAL", "vacation": "VACATION_HOME",
+                 "business": "BUSINESS"}
 ROLES = ("taxpayer", "spouse", "dependent", "grantor", "trustee", "successor_trustee", "beneficiary",
          "executor", "decedent", "other")
 ONE_EACH = {"taxpayer": "Only one person can be you.", "spouse": "Only one person can be your spouse."}
@@ -218,6 +236,7 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
     errors: dict[str, str] = {}  # paths use the row numbers as sent, empty rows included
     out: dict = {k: [] for k in ("people", "addresses", "phones", "emails", "eins", "accounts", "cards",
                                  "numbers", "preparers")}
+    out["keep_state"] = bool(d.get("keep_state", True))
 
     def text(v) -> str:
         return " ".join(str(v or "").split())
@@ -268,6 +287,7 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
 
     for i, raw_a in enumerate(d.get("addresses") or []):
         a = {k: text(raw_a.get(k)) for k in ("street", "city", "state", "zip", "school_district")}
+        kind = text(raw_a.get("type"))
         if not any(a.values()):
             continue
         at = f"addresses.{i}"
@@ -279,6 +299,9 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                 errors[f"{at}.state"] = "Use the two-letter state code."
         if a["zip"] and not ZIP_RE.fullmatch(a["zip"]):
             errors[f"{at}.zip"] = "Use 5 digits (or ZIP+4)."
+        a["type"] = kind if kind in ADDRESS_TYPES else ""
+        if a["type"] == "home" and any(b["type"] == "home" for b in out["addresses"]):
+            errors[f"{at}.type"] = "Only one address can be your home. Mark the others as previous homes."
         a["id"] = _keep_id(raw_a)
         out["addresses"].append(a)
 
@@ -356,6 +379,10 @@ def clean(d: dict) -> tuple[dict, dict[str, str]]:
                     errors[f"{key}.{i}.routing"] = "A routing number has 9 digits."
                 else:
                     r["routing"] = _digits(r["routing"])
+            if key == "accounts":  # its type; its owner: someone in this profile, joint, a trust or an estate
+                r["type"] = r["type"] if r["type"] in ACCOUNT_TYPES else ""
+                people = {p["id"] for p in out["people"]}
+                r["owner"] = r["owner"] if r["owner"] in OWNERS or r["owner"] in people else ""
             r["id"] = _keep_id(item)
             out[key].append(r)
     return out, errors

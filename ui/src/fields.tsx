@@ -22,7 +22,8 @@ export const LISTS: { key: ListKey; title: string; label: string; add: string; p
 // records with identifiers (redacted) and labels that are only for you
 export const RECORDS: { key: RecordKey; title: string; noun: string; add: string; hint: string; blank: Row;
                  fields: { f: string; label: string; placeholder?: string; secret?: boolean; wide?: boolean }[] }[] = [
-  { key: "accounts", title: "Accounts", noun: "account", add: "Add an account", blank: { institution: "", number: "", routing: "", name: "" },
+  { key: "accounts", title: "Accounts", noun: "account", add: "Add an account",
+    blank: { institution: "", number: "", routing: "", name: "", type: "", owner: "" },
     hint: "Bank, brokerage, IRA, 529, HSA, loan and mortgage accounts. The number is removed from documents, "
       + "and so are its last 4 digits wherever they appear on their own, and the routing number if you enter one.",
     fields: [
@@ -66,6 +67,32 @@ export const RECORDS: { key: RecordKey; title: string; noun: string; add: string
       { f: "ein", label: "Firm EIN", placeholder: "e.g. 00-1234567", secret: true },
     ] },
 ];
+
+// a new entry's permanent id, made here so it can be chosen (an account's owner) before saving;
+// the same form the engine makes (taxonymous/profile.py new_id)
+export const newId = () => "e" + Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, "0")).join("");
+
+// what an account or an address is: its label says it (<TAXPAYER_ROTH_IRA_1>, <HOME_ADDR>)
+export const ACCOUNT_TYPES: [string, string, string][] = [  // value, label, group
+  ["", "Not set", ""], ["checking", "Checking", "Banking"], ["savings", "Savings", "Banking"],
+  ["cd", "CD / money market", "Banking"], ["brokerage", "Brokerage", "Investing"],
+  ["traditional_ira", "Traditional IRA", "Retirement"], ["roth_ira", "Roth IRA", "Retirement"],
+  ["sep_simple_ira", "SEP / SIMPLE IRA", "Retirement"], ["401k", "401(k) / 403(b) / 457", "Retirement"],
+  ["roth_401k", "Roth 401(k)", "Retirement"], ["pension", "Pension / annuity", "Retirement"],
+  ["hsa", "HSA", "Health and education"], ["529", "529 plan", "Health and education"],
+  ["coverdell", "Coverdell ESA", "Health and education"], ["mortgage", "Mortgage", "Loans"],
+  ["student_loan", "Student loan", "Loans"], ["loan", "Other loan", "Loans"],
+];
+export const OWNERS: [string, string][] = [["", "Not set"], ["joint", "Joint"], ["trust", "A trust"], ["estate", "An estate"]];
+export const ADDRESS_TYPES: [string, string][] = [
+  ["", "Other"], ["home", "Home"], ["prior_home", "Previous home"], ["rental", "Rental property"],
+  ["vacation", "Vacation / second home"], ["business", "Business / office"],
+];
+export const ROLE_NAME: Record<string, string> = Object.fromEntries([
+  ["taxpayer", "You"], ["spouse", "Spouse"], ["dependent", "Dependent"], ["grantor", "Grantor"], ["trustee", "Trustee"],
+  ["successor_trustee", "Successor trustee"], ["beneficiary", "Beneficiary"], ["executor", "Executor"],
+  ["decedent", "Decedent"], ["other", "Other"],
+]);
 
 // password managers and browsers shouldn't offer to fill or save any of this
 export const quiet = { autoComplete: "off", spellCheck: false, "data-1p-ignore": true, "data-lpignore": "true" };
@@ -111,7 +138,9 @@ export const DETAIL_FORMS: { kind: DetailKind; label: string; fields: FieldDef[]
   ...RECORDS.map(({ key, noun, fields }) => ({
     kind: ({ accounts: "account", eins: "ein", cards: "card", numbers: "number", preparers: "preparer" } as const)[key],
     label: noun === "EIN" ? "EIN" : noun[0].toUpperCase() + noun.slice(1),
-    fields,
+    fields: key === "accounts"
+      ? [...fields, { f: "type", label: "Type", options: ACCOUNT_TYPES.map(([v, l]) => [v, l] as [string, string]) }]
+      : fields,
   })),
   ...LISTS.map(({ key, label, placeholder }) => ({
     kind: ({ phones: "phone", emails: "email" } as const)[key],

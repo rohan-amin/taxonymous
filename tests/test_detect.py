@@ -153,11 +153,15 @@ MORE = Profile.from_dict({
     ("Card x7808", "7808"), ("Routing 021000021", "021000021"), ("PIN 54321", "54321"),
     ("Self-select PIN 5 4 3 2 1", "5 4 3 2 1"), ("Client ID ab 10442", "ab 10442"),
     ("OKAFOR & CO CPAS", "OKAFOR & CO CPAS"), ("Paid preparer Jordan Q. Okafor", "Jordan Q. Okafor"),
-    ("100 Main St", "100 Main St"), ("Seattle, WA 98101", "Seattle, WA 98101"),
+    ("100 Main St", "100 Main St"),
     ("PTIN P00012345", "P00012345"), ("Firm's EIN 00-1234567", "00-1234567"),
 ])
 def test_routing_other_numbers_and_the_preparer_are_found(line, expected):
     assert [f.text for f in findings(line, profile=MORE)] == [expected]
+
+
+def test_a_preparers_city_and_zip_are_found_and_the_state_stays():
+    assert texts_of(["Seattle, WA 98101"], MORE) == ["Seattle", "98101"]
 
 
 @pytest.mark.parametrize("line", [
@@ -179,8 +183,8 @@ def test_a_short_number_alone_is_not_looked_for_in_raw_file_content():
                                     "5842 Fenwick Ave #1007"])
 def test_an_address_s_unit_is_found_apart_from_its_street(street):
     """Forms print the unit on the street's line or the next one, with any designator."""
-    profile = Profile.from_dict({"addresses": [{"street": street, "city": "Tacoma", "state": "WA",
-                                                "zip": "98458"}]})
+    profile = Profile.from_dict({"keep_state": False, "addresses": [
+        {"street": street, "city": "Tacoma", "state": "WA", "zip": "98458"}]})
     assert texts_of(["5842 FENWICK AVENUE", "APT 1007, TACOMA, WA 98458"], profile) == [
         "5842 FENWICK AVENUE", "APT 1007", "TACOMA, WA 98458"]
     assert texts_of(["5842 Fenwick Ave., Unit #1007"], profile) == ["5842 Fenwick Ave.", "Unit #1007"]
@@ -215,14 +219,24 @@ def test_a_school_district_is_found_as_the_state_return_prints_it():
     assert texts_of(lines, profile) == ["TACOMA UNION FREE"]
 
 
-def test_a_city_state_and_zip_in_boxes_of_their_own_are_found():
+@pytest.mark.parametrize("keep_state, found", [
+    (True, ["TACOMA", "98458", "98458-1234", "98458"]),  # the default: the state stays readable
+    (False, ["TACOMA", "WA98458", "98458-1234", "98458"]),  # unchecked: removed next to the ZIP too
+])
+def test_a_city_state_and_zip_in_boxes_of_their_own_are_found(keep_state, found):
     """A form prints them in boxes of their own, its state and ZIP can run together, and a
     state alone is everywhere on a state return."""
-    profile = Profile.from_dict({"addresses": [{"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "WA",
-                                                "zip": "98458"}]})
+    profile = Profile.from_dict({"keep_state": keep_state, "addresses": [
+        {"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "WA", "zip": "98458"}]})
     lines = ["City, town, or post office TACOMA", "State ZIP code WA98458", "ZIP 98458-1234", "98458",
              "WA IT-201", "Wages 98458.00", "Total 98,458", "Ref 1984581"]
-    assert texts_of(lines, profile) == ["TACOMA", "WA98458", "98458-1234", "98458"]
+    assert texts_of(lines, profile) == found
+
+
+def test_with_the_state_readable_an_address_line_keeps_only_its_state():
+    profile = Profile.from_dict({"addresses": [{"street": "5842 Fenwick Ave", "city": "Tacoma", "state": "WA",
+                                                "zip": "98458"}]})
+    assert texts_of(["TACOMA, WA 98458"], profile) == ["TACOMA", "98458"]
 
 
 def test_an_employer_is_found_however_it_is_printed():
