@@ -782,7 +782,7 @@ export function Workspace() {
                 </div>
                 <div className="ws-drawer-tools">
                   <button type="button" className="wbtn primary" onClick={() => fileInput.current?.click()}>Add documents…</button>
-                  <input className="search" type="search" placeholder="Find a document" aria-label="Find a document" value={q} onChange={(e) => setQ(e.target.value)} />
+                  <input className="search" type="search" placeholder="Filter by file name" aria-label="Filter by file name" value={q} onChange={(e) => setQ(e.target.value)} />
                   {batch ? <div className="ws-progress" data-testid="batch">
                     <span>Cleaning · {batch.finished} of {batch.jobs} done{batch.left ? ` · ${batch.left}` : ""}</span>
                     <div className="ws-bar work" role="progressbar" aria-label="How far cleaning has got"
