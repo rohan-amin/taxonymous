@@ -101,7 +101,7 @@ function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
   return (
     <div className={`ws-welcome${NATIVE ? " native" : ""}`} role="dialog" aria-label="Welcome to Taxonymous">
       <div className="ws-welcome-inner">
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 720 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <h1>Share your tax documents with AI, without sharing who you are.</h1>
           <p style={{ fontSize: 15, color: "var(--w-muted)" }}>
             Remove your identity. Preserve your financial context.
@@ -744,7 +744,7 @@ export function Workspace() {
   return (
     <div className="ws" onDragOver={(e) => { e.preventDefault(); setDropping(true); }}
          onDragLeave={(e) => e.currentTarget === e.target && setDropping(false)} onDrop={onDrop}>
-      {NATIVE ? <header className="ws-top native" aria-hidden="true" /> : (
+      {NATIVE ? null : (
         <header className="ws-top">
           <div className="ws-brand">
             <svg width="18" height="18" viewBox="0 0 28 28" aria-hidden="true"><rect x="3" y="2" width="22" height="24" rx="4" fill="none" stroke="currentColor" strokeWidth="2.4" /><rect x="8" y="9" width="12" height="4" rx="1" fill="currentColor" /></svg>

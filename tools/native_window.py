@@ -10,10 +10,10 @@ three-panel workspace (`?ui=workspace`); `--classic` opens the old screen.
 `--dev` serves the API on 127.0.0.1:8765 and loads the UI from Vite
 (`cd ui && npm run dev`), so UI edits show in the window as you save them.
 
-The window has no title bar of its own: like a Mac app's, it is transparent over the
-page's top band (`&native=1` tells the page to leave room for the window buttons), with
-"How It Works" and "My Profile" as toolbar buttons. The toolbar is also what drags the
-window, so the page puts nothing clickable under it.
+The window's title bar has no title and no colour of its own: it is the page's top band
+(`&native=1` tells the page to leave its own header out), with the window buttons and
+"How It Works" and "My Profile" as toolbar buttons. It is a real title bar, so it drags
+the window as in any app.
 
 No JavaScript bridge is exposed to the page: the menu bar and toolbar run Python, which
 only ever sends the page a command name (`tx-command`) or a message to show.
@@ -62,7 +62,10 @@ def load_frame() -> dict:
 def save_frame(window: webview.Window) -> None:
     try:
         STATE.parent.mkdir(parents=True, exist_ok=True)
-        frame = {"width": window.width, "height": window.height, "x": window.x, "y": window.y}
+        # the page's size, which is what a new window is made at; the window's own height
+        # takes in the title bar, and saving that would grow the window every launch
+        page = window.native.contentView().frame().size
+        frame = {"width": round(page.width), "height": round(page.height), "x": window.x, "y": window.y}
         STATE.write_text(json.dumps(frame))
     except OSError:
         pass  # not remembered: fine
@@ -105,7 +108,6 @@ def main() -> None:
     send = commander(lambda: window)
     if not args.classic:
         window.events.before_show += lambda: AppHelper.callAfter(mac_title_bar, window, send)
-        window.events.shown += lambda: AppHelper.callAfter(drag_band, window)
     # shown only once the page has drawn, so it opens without a white flash
     window.events.loaded += lambda: window.show()
     window.events.closing += lambda: save_frame(window)
@@ -156,53 +158,38 @@ class ToolbarButtons(AppKit.NSObject):
         threading.Thread(target=self.send(command), daemon=True).start()
 
 
-BAND = 52  # the toolbar band's height: the window buttons sit in it, and it drags the window
+# the title bar's colour: the page's top band (--w-sunk in ui/src/workspace/workspace.css),
+# light and dark, so bar and page read as one surface
+BAND_LIGHT, BAND_DARK = (251, 250, 247), (31, 32, 29)
 
 
-class DragBand(AppKit.NSView):
-    """Over the page's top band: dragging it moves the window, a double-click zooms it.
-    With the title bar transparent, macOS asks the view under a click whether it moves
-    the window, and a web view never does."""
-
-    def mouseDownCanMoveWindow(self):
-        return True
-
-    def mouseDown_(self, event):
-        if event.clickCount() == 2:
-            self.window().performZoom_(None)
-        else:
-            self.window().performWindowDragWithEvent_(event)
+def _band_colour() -> AppKit.NSColor:
+    def pick(appearance):
+        dark = appearance.bestMatchFromAppearancesWithNames_(
+            [AppKit.NSAppearanceNameAqua, AppKit.NSAppearanceNameDarkAqua]) == AppKit.NSAppearanceNameDarkAqua
+        r, g, b = BAND_DARK if dark else BAND_LIGHT
+        return AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(r / 255, g / 255, b / 255, 1)
+    return AppKit.NSColor.colorWithName_dynamicProvider_("taxonymous-band", pick)
 
 
 def mac_title_bar(window: webview.Window, send) -> None:
-    """No title, and the bar transparent over the page; the window buttons sit in a
-    toolbar-height band at the top-left, the page's own top band under them."""
+    """A real title bar, so macOS drags the window by it as in any app, but with no title
+    and no bar of its own: transparent over the window's colour, which is the page's top
+    band. The window buttons and the toolbar's buttons share it; the page starts below."""
     win = window.native
-    win.setStyleMask_(win.styleMask() | AppKit.NSWindowStyleMaskFullSizeContentView)
     win.setTitlebarAppearsTransparent_(True)
     win.setTitleVisibility_(AppKit.NSWindowTitleHidden)
-    # pywebview paints the title bar the window's colour; clear, so the page shows through
+    win.setBackgroundColor_(_band_colour())
+    # pywebview paints the title bar the system's window colour; clear, so the band shows
     win.contentView().superview().subviews().lastObject().setBackgroundColor_(AppKit.NSColor.clearColor())
     toolbar = AppKit.NSToolbar.alloc().initWithIdentifier_("taxonymous")
     window.toolbar_buttons = ToolbarButtons.alloc().initWithSend_(send)  # kept: the toolbar doesn't retain it
     toolbar.setDelegate_(window.toolbar_buttons)
     toolbar.setDisplayMode_(AppKit.NSToolbarDisplayModeIconOnly)
-    toolbar.setShowsBaselineSeparator_(False)
+    toolbar.setShowsBaselineSeparator_(True)
     win.setToolbar_(toolbar)
     win.setToolbarStyle_(AppKit.NSWindowToolbarStyleUnified)
 
-
-def drag_band(window: webview.Window) -> None:
-    """On top of the page, once it is in the window (pywebview adds it after the title bar
-    is set up). pywebview's page view flips the frames of views added to it, so the band
-    is given where it would go in the page's own coordinates."""
-    page = window.native.contentView()
-    width, height = page.bounds().size.width, page.bounds().size.height
-    top = 0 if not page.isFlipped() else height - BAND  # flipped back by pywebview's addSubview_
-    band = DragBand.alloc().initWithFrame_(AppKit.NSMakeRect(0, top, width, BAND))
-    band.setAutoresizingMask_(AppKit.NSViewWidthSizable
-                              | (AppKit.NSViewMaxYMargin if page.isFlipped() else AppKit.NSViewMinYMargin))
-    page.addSubview_(band)
 
 def menus(get_window, ws: Workspace) -> list[Menu]:
     send = commander(get_window)

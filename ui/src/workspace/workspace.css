@@ -293,7 +293,7 @@
 .ws-sheet { margin-left: auto; width: 420px; max-width: 100%; height: 100%; background: var(--w-surface); display: flex; flex-direction: column; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.15); }
 .ws-welcome { position: absolute; inset: 0; z-index: 30; overflow-y: auto; background: var(--w-ground); display: flex; justify-content: center; padding: 48px 24px; }
 .ws-welcome-inner { width: 100%; max-width: 1040px; display: flex; flex-direction: column; gap: 22px; }
-.ws-welcome h1 { font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; }
+.ws-welcome h1 { font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
 .ws-local-banner { display: flex; gap: 16px; align-items: center; padding: 18px 20px; border-radius: 12px; background: #1f4e43; color: #ffffff; }
 .ws-local-banner strong { font-size: 17px; }
 .ws-local-banner p { color: #dcebe5; }
@@ -340,9 +340,6 @@
 .ws-add-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ws-add-tip { flex-basis: 100%; }
 .ws .ws-add-more { align-self: flex-start; height: 24px; padding: 0 6px; margin: -4px 0 -2px -6px; font-size: 12px; }
-/* the Mac window's toolbar band: its buttons are native, over this; the window buttons sit at its left */
-.ws-top.native { height: 52px; padding: 0; }
-.ws-welcome.native { padding-top: 84px; }
 .ws-checked { margin-top: 6px; }
 .ws-checked summary { cursor: pointer; font-weight: 600; font-size: 12px; width: max-content; }
 .ws-checked ul { margin: 6px 0 4px; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
@@ -379,8 +376,6 @@
 .ws-psummary > div span { color: var(--w-muted); flex: none; }
 .ws-psummary > div strong { font-weight: 500; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-psummary .wbtn { align-self: flex-start; margin: 4px 0 0 -8px; height: 24px; font-size: 12px; }
-/* in the Mac window, sheets open below the toolbar band (its buttons stay usable) */
-.ws-scrim.native { top: 52px; }
 
 /* compact status: one line, details on request */
 .ws-banner.compact { padding: 8px 12px; align-items: flex-start; }
