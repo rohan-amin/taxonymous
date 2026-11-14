@@ -684,6 +684,7 @@ export function Workspace() {
         loadProfile();
         break;
       case "welcome": setSafeOpen(false); setWelcome(true); break;
+      case "documents": setWelcome(false); setSafeOpen(false); setView("work"); break;
       case "added": // files the native File menu copied into the inbox: clean the new ones
         api.documents().then(async (list) => {
           setDocs(list);

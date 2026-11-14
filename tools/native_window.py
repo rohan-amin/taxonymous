@@ -12,7 +12,7 @@ three-panel workspace (`?ui=workspace`); `--classic` opens the old screen.
 
 The window's title bar has no title and no colour of its own: it is the page's top band
 (`&native=1` tells the page to leave its own header out), with the window buttons and
-"How It Works" and "My Profile" as toolbar buttons. It is a real title bar, so it drags
+"How It Works", "My Profile" and "Document Review" as toolbar buttons. It is a real title bar, so it drags
 the window as in any app.
 
 No JavaScript bridge is exposed to the page: the menu bar and toolbar run Python, which
@@ -123,7 +123,8 @@ def commander(get_window):
     return send
 
 
-TOOLBAR = [("welcome", "How It Works", "welcome"), ("profile", "My Profile", "profile-toggle")]
+TOOLBAR = [("welcome", "How It Works", "welcome"), ("profile", "My Profile", "profile"),
+           ("documents", "Document Review", "documents")]
 
 
 class ToolbarButtons(AppKit.NSObject):
