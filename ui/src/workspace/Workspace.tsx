@@ -266,12 +266,12 @@ function ProfileDrawer({ profile, found, onOpen, onShow }: {
   );
 }
 
-function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, onNext, nextName, onChanged, onAdded,
+function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, onChanged, onAdded,
                    allDone, onFinish, finishLabel, highlight, onClearHighlight }: {
   summary: DocSummary; hasProfile: boolean; zoom: Zoom; setZoom: (z: Zoom) => void;
   scaleNow: { current: number };
   side: "redacted" | "original"; setSide: (s: "redacted" | "original") => void;
-  onNext: () => void; nextName: string | null; onChanged: () => void; onAdded: (queued: string[]) => void;
+  onChanged: () => void; onAdded: (queued: string[]) => void;
   allDone: boolean; onFinish: () => void; finishLabel: string; // all checked: the next step is saving them
   highlight: Highlight | null; onClearHighlight: () => void; // a profile entry's boxes, outlined
 }) {
@@ -448,11 +448,7 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
           <div style={{ display: "flex", gap: 6, flex: "none" }}>
             {!processed && hasProfile && summary.status === "new" &&
               <button type="button" className="wbtn" onClick={clean}>Clean this document</button>}
-            {allDone ? <>
-              {nextName && <button type="button" className="wbtn" onClick={onNext} title={nextName}>Next document ›</button>}
-              <button type="button" className="wbtn primary" onClick={onFinish}>{finishLabel}</button>
-            </> : <button type="button" className="wbtn primary" onClick={onNext} disabled={!nextName}
-                          title={nextName ?? "No other documents"}>Next document ›</button>}
+            {allDone && <button type="button" className="wbtn primary" onClick={onFinish}>{finishLabel}</button>}
           </div>
         </div>
         <div className="ws-tools">
@@ -836,7 +832,7 @@ export function Workspace() {
           {current ? (
             <DocView key={current.id} summary={current} hasProfile={hasProfile} zoom={zoom} setZoom={setZoom}
                      scaleNow={scaleNow}
-                     side={side} setSide={setSide} onNext={() => next && setSel(next.id)} nextName={next?.name ?? null}
+                     side={side} setSide={setSide}
                      allDone={allDone} onFinish={finish} finishLabel={finishLabel}
                      highlight={highlight} onClearHighlight={() => setHighlight(null)}
                      onChanged={refresh}
