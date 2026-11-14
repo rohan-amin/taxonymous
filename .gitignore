@@ -41,3 +41,6 @@ tests/fixtures/generated/
 
 # --- OS ---
 .DS_Store
+
+# the browser spike: fetched files
+spike/browser/.downloads/

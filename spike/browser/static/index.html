@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taxonymous in your browser (test)</title>
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="app.webmanifest">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Taxonymous in your browser</h1>
+    <p class="muted">A test of running the whole engine inside this page. Nothing you choose here is uploaded:
+      the page can only talk to the site it came from, and after setup it works with no connection at all.</p>
+  </header>
+
+  <section id="setup" class="card">
+    <h2>Set up Taxonymous on this computer</h2>
+    <p id="setup-what" class="muted">Checking…</p>
+    <div id="progress" hidden>
+      <div class="bar"><div id="bar"></div></div>
+      <p id="progress-text" class="muted"></p>
+    </div>
+    <div class="row">
+      <button id="setup-go" class="primary" hidden>Download and set up</button>
+      <span id="ready" hidden>Ready offline ✓</span>
+      <button id="remove" class="quiet" hidden>Remove from this computer</button>
+    </div>
+  </section>
+
+  <section id="try" class="card" hidden>
+    <h2>Try it</h2>
+    <p class="muted">Text PDFs only for now. Scans and pictures need OCR, which isn't in this test yet: a document
+      with pictures is cleaned, but it says so and isn't marked checked. Barcodes aren't checked yet either, so
+      don't use it on a state return (its barcode can hold the whole return).</p>
+    <div class="row">
+      <label>Profile
+        <select id="profile-choice">
+          <option value="sample">The sample household (fake people)</option>
+          <option value="file">A profile.json on this computer…</option>
+        </select>
+      </label>
+      <input id="profile-file" type="file" accept=".json,application/json" hidden>
+    </div>
+    <div class="row">
+      <button id="samples">Clean the sample documents</button>
+      <span class="muted">or</span>
+      <label class="button">Choose PDFs on this computer…<input id="pdfs" type="file" accept=".pdf,application/pdf" multiple hidden></label>
+    </div>
+    <p id="engine" class="muted"></p>
+    <div id="results"></div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

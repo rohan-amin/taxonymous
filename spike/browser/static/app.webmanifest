@@ -1,0 +1,9 @@
+{
+  "name": "Taxonymous (browser test)",
+  "short_name": "Taxonymous",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6f5f1",
+  "theme_color": "#1f4e43",
+  "icons": []
+}
