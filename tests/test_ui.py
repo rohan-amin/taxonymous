@@ -569,11 +569,21 @@ def test_workspace_removes_a_document_after_saying_the_original_stays(corpus, br
         pg.goto(f"/?token={TOKEN}&ui=workspace")
         pg.get_by_role("button", name="Get started").click()
         files = pg.get_by_role("navigation", name="Your documents")
-        # the Delete key asks too, and Cancel keeps it
+        # the Delete key asks too; Cancel is the default, so Enter keeps it
         files.get_by_role("button", name="w2.pdf").click()
         pg.keyboard.press("Delete")
-        pg.get_by_test_id("remove").get_by_role("button", name="Cancel").click()
-        assert (ws.inbox / "w2.pdf").exists()
+        pg.get_by_test_id("remove").wait_for()
+        time.sleep(1.5)  # the list refreshes meanwhile: Cancel keeps the focus
+        assert pg.evaluate("document.activeElement.innerText") == "Cancel"
+        pg.keyboard.press("Enter")
+        assert pg.get_by_test_id("remove").count() == 0 and (ws.inbox / "w2.pdf").exists()
+        # arrows move to Remove; Escape still backs out
+        pg.keyboard.press("Delete")
+        pg.get_by_test_id("remove").wait_for()
+        pg.keyboard.press("ArrowRight")
+        assert pg.evaluate("document.activeElement.innerText") == "Remove from Taxonymous"
+        pg.keyboard.press("Escape")
+        assert pg.get_by_test_id("remove").count() == 0 and (ws.inbox / "w2.pdf").exists()
         # right-click: the menu, then the question, which says the original isn't touched
         files.get_by_role("button", name="w2.pdf").click(button="right")
         pg.get_by_role("menuitem", name="Remove from Taxonymous…").click()

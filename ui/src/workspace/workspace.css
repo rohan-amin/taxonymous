@@ -438,7 +438,12 @@
 .ws-confirm p { color: var(--w-muted); }
 .ws-confirm p b { color: var(--w-ink); }
 .ws-confirm-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
-.ws .wbtn.danger { background: #b3261e; border-color: #b3261e; color: #fff; }
-.ws .wbtn.danger:hover:not(:disabled) { background: #8c1d18; }
+/* the destructive choice: outlined in red, never the default; Cancel is (filled, focused) */
+.ws .wbtn.danger { background: var(--w-surface); border-color: #b3261e; color: #b3261e; }
+.ws .wbtn.danger:hover:not(:disabled) { background: #fbeaea; }
+@media (prefers-color-scheme: dark) { .ws .wbtn.danger { color: #f2a19b; border-color: #f2a19b; } .ws .wbtn.danger:hover:not(:disabled) { background: #3a1a18; } }
+/* which button Enter presses: plainly marked, mouse or keyboard */
+.ws-confirm .wbtn:focus { outline: 3px solid color-mix(in srgb, var(--w-accent) 50%, transparent); outline-offset: 2px; }
+.ws-confirm .wbtn.danger:focus { outline-color: rgba(179, 38, 30, 0.45); }
 /* a working document's spinner on the selected row: no ring (a full ring hides the turning gap), drawn in white */
 .ws-file.sel .ws-dot.work { box-shadow: none; border-color: var(--w-accent-ink); border-top-color: transparent; }

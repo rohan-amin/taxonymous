@@ -583,6 +583,8 @@ export function Workspace() {
   // removing a document: the right-click menu, then the confirmation
   const [menu, setMenu] = useState<{ doc: DocSummary; x: number; y: number } | null>(null);
   const [removing, setRemoving] = useState<DocSummary | null>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (removing) cancelRef.current?.focus(); }, [removing]);  // once, as the question opens
   const [found, setFound] = useState<FoundEntries | null>(null);
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -945,12 +947,23 @@ export function Workspace() {
       )}
       {removing && (
         <div className="ws-scrim center" onClick={(e) => e.currentTarget === e.target && setRemoving(null)}>
-          <div className="ws-confirm" role="alertdialog" aria-label="Remove from Taxonymous" data-testid="remove">
+          <div className="ws-confirm" role="alertdialog" aria-label="Remove from Taxonymous" data-testid="remove"
+               onKeyDown={(e) => {  // arrows (and Tab) move between the two buttons, as in a Mac alert
+                const buttons = Array.from(e.currentTarget.querySelectorAll("button"));
+                const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
+                  ?? (e.key === "Tab" ? (e.shiftKey ? -1 : 1) : 0);
+                if (step) {
+                  e.preventDefault();
+                  buttons[(at + step + buttons.length) % buttons.length]?.focus();
+                }
+              }}>
             <strong>Remove “{removing.name}” from Taxonymous?</strong>
             <p><b>Your original file isn't touched.</b> Only Taxonymous's copy is removed, with its safe copy and any boxes
               you drew on it.</p>
             <div className="ws-confirm-foot">
-              <button type="button" className="wbtn" onClick={() => setRemoving(null)} autoFocus>Cancel</button>
+              <button type="button" className="wbtn primary" ref={cancelRef}
+                      onClick={() => setRemoving(null)}>Cancel</button>
               <button type="button" className="wbtn danger" onClick={async () => {
                 const doc = removing;
                 setRemoving(null);
