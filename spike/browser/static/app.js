@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const CACHE_PREFIX = "taxonymous-v-";  // one per version; the service worker keeps the page in "taxonymous-shell"
 let manifest, manifestText, cacheName, worker, workerReady;
 
-const mb = (n) => `${(n / 2 ** 20).toFixed(1)} MB`;
+const mb = (n) => (n < 2 ** 20 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 async function sha256(buf) {
@@ -13,16 +13,33 @@ async function sha256(buf) {
 }
 
 async function start() {
-  if ("serviceWorker" in navigator) await navigator.serviceWorker.register("sw.js");
-  const text = await (await fetch("manifest.json", { cache: "no-store" }).catch(() => caches.match("manifest.json"))).text();
+  if ("serviceWorker" in navigator) {
+    await navigator.serviceWorker.register("sw.js");
+    await navigator.serviceWorker.ready;
+  }
+  const text = await (await fetch("manifest.json", { cache: "no-store" })).text();
   manifest = JSON.parse(text);
   manifestText = text;
   cacheName = CACHE_PREFIX + (await sha256(new TextEncoder().encode(text))).slice(0, 16);
-  const total = manifest.files.reduce((a, f) => a + f.size, 0);
-  if (await isSetUp()) return ready();
-  $("setup-what").textContent = `One-time download, ${mb(total)}. After this, Taxonymous works with no internet `
-    + "connection, and your documents never leave this computer.";
+  const current = await currentVersion();
+  if (current === cacheName && await isSetUp()) return ready();
+  const todo = await toDownload(current);
+  const size = mb(todo.reduce((a, f) => a + f.size, 0));
+  if (current && await caches.has(current)) {  // set up before: this is an update
+    $("setup-what").textContent = `A new version is ready: ${size} to download. The version you have keeps `
+      + "working until you update.";
+    $("setup-go").textContent = "Update";
+    ready(true);
+  } else {
+    $("setup-what").textContent = `One-time download, ${size}. After this, Taxonymous works with no internet `
+      + "connection, and your documents never leave this computer.";
+  }
   $("setup-go").hidden = false;
+}
+
+async function currentVersion() {
+  const r = await (await caches.open("taxonymous-current")).match("version");
+  return r ? r.text() : null;
 }
 
 async function isSetUp() {
@@ -31,17 +48,34 @@ async function isSetUp() {
   return manifest.files.every((f) => keys.has(f.path));
 }
 
-// every file fetched, checked against its fingerprint, and kept; a changed file is refused
+// what this version needs that the version set up (if any) doesn't already have, by fingerprint
+async function toDownload(current) {
+  if (!current || !(await caches.has(current))) return manifest.files;
+  const old = await (await caches.open(current)).match("manifest.json");
+  const had = new Map(old ? (await old.json()).files.map((f) => [f.path, f.sha256]) : []);
+  return manifest.files.filter((f) => had.get(f.path) !== f.sha256);
+}
+
+// every new or changed file fetched from the site itself (?fresh: never a kept copy), checked
+// against its fingerprint and kept; unchanged files are copied from the version set up. A file
+// that doesn't match is refused, and the version set up stays in use.
 async function setUp() {
   $("setup-go").hidden = true;
   $("progress").hidden = false;
+  const current = await currentVersion();
   const cache = await caches.open(cacheName);
-  const total = manifest.files.reduce((a, f) => a + f.size, 0);
+  const todo = new Set((await toDownload(current)).map((f) => f.path));
+  const oldCache = current && current !== cacheName && await caches.has(current) ? await caches.open(current) : null;
+  const total = manifest.files.filter((f) => todo.has(f.path)).reduce((a, f) => a + f.size, 0) || 1;
   let done = 0;
   for (const f of manifest.files) {
-    if (await cache.match(f.path)) { done += f.size; continue; }  // kept from an interrupted setup
+    if (await cache.match(f.path)) { if (todo.has(f.path)) done += f.size; continue; }  // kept from an interrupted setup
+    if (!todo.has(f.path) && oldCache) {  // unchanged: the copy already on this computer
+      const kept = await oldCache.match(f.path);
+      if (kept) { await cache.put(f.path, kept); continue; }
+    }
     $("progress-text").textContent = `${f.path.split("/").pop()}: ${mb(done)} of ${mb(total)}`;
-    const res = await fetch(f.path, { cache: "no-store" });
+    const res = await fetch(`${f.path}?fresh=${f.sha256.slice(0, 12)}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`${f.path}: ${res.status}`);
     const reader = res.body.getReader();
     const parts = [];
@@ -58,17 +92,19 @@ async function setUp() {
     await cache.put(f.path, new Response(buf, { headers: { "Content-Type": res.headers.get("Content-Type") || "" } }));
     done += f.size;
   }
-  await cache.addAll(["./", "index.html"]);  // the page too, so it opens with no connection
   await cache.put("manifest.json", new Response(manifestText, { headers: { "Content-Type": "application/json" } }));
+  // this version is the one in use from now on; the one before goes
+  await (await caches.open("taxonymous-current")).put("version", new Response(cacheName));
   for (const k of await caches.keys()) if (k.startsWith(CACHE_PREFIX) && k !== cacheName) await caches.delete(k);
   if (navigator.storage?.persist) await navigator.storage.persist();  // not cleared to make room
+  if (current && current !== cacheName) return location.reload();  // an update: start on the new version
   ready();
 }
 
-function ready() {
+function ready(updateWaiting = false) {
   $("progress").hidden = true;
-  $("setup-go").hidden = true;
-  $("setup-what").textContent = "Everything Taxonymous needs is on this computer.";
+  $("setup-go").hidden = !updateWaiting;
+  if (!updateWaiting) $("setup-what").textContent = "Everything Taxonymous needs is on this computer.";
   $("ready").hidden = false;
   $("remove").hidden = false;
   $("file").hidden = false;
