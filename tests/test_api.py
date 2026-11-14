@@ -647,3 +647,31 @@ def test_quitting_while_cleaning_records_nothing_and_the_app_resumes_it(corpus, 
     assert {d["id"]: d["status"] for d in client.get("/api/documents").json()} == {
         "brokerage_consolidated": "passed", "k1_statement": "passed", "w2": "passed"}
     assert ws.outputs("w2")["report"].stat().st_mtime_ns == passed_at  # not cleaned again
+
+
+def test_saving_an_unchanged_profile_cleans_nothing_again(corpus, network_attempts, tmp_path):
+    src, _, profile = corpus
+    ws = Workspace(tmp_path)
+    ws.init()
+    shutil.copy(src / "w2.pdf", ws.inbox / "w2.pdf")
+    app = create_app(ws, TOKEN, ocr=False)
+    client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: TOKEN})
+    assert client.put("/api/profile", json=profile).json()["changed"] is True
+    client.post("/api/run")
+    app.state.worker.wait()
+    saved = client.get("/api/profile").json()["profile"]
+    file_at, report_at = ws.profile_path.stat().st_mtime_ns, ws.outputs("w2")["report"].stat().st_mtime_ns
+    # as the form sends it back: the same details, typed differently, plus an empty row
+    form = {**saved, "people": [{**p, "ssn": p["ssn"].replace("-", "")} for p in saved["people"]],
+            "addresses": [*saved["addresses"], {"street": "", "city": "", "state": "", "zip": ""}]}
+    r = client.put("/api/profile", json=form).json()
+    assert r["changed"] is False and r["processed"] == []
+    app.state.worker.wait()
+    assert ws.profile_path.stat().st_mtime_ns == file_at  # not even written
+    assert ws.outputs("w2")["report"].stat().st_mtime_ns == report_at  # not cleaned again
+    # a real change is saved, and the cleaned document is cleaned again
+    form["people"][0]["occupation"] = "Pilot"
+    r = client.put("/api/profile", json=form).json()
+    assert r["changed"] is True and r["processed"] == ["w2"]
+    app.state.worker.wait()
+    assert ws.outputs("w2")["report"].stat().st_mtime_ns != report_at

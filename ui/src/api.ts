@@ -218,7 +218,8 @@ export interface ProfileState {
   profile: Profile;
   errors: Record<string, string>;
   path: string;
-  processed?: string[]; // documents redacted before this save
+  processed?: string[]; // documents cleaned before this save: cleaned again now
+  changed?: boolean; // false: saved as it was, nothing done
 }
 
 async function call<T>(method: string, path: string, body?: unknown, form?: FormData): Promise<T> {

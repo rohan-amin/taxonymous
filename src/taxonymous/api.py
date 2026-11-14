@@ -482,6 +482,10 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
             errors["people.0.name"] = "Add at least yourself."
         if errors:
             raise HTTPException(422, {"message": "Some details need fixing.", "fields": errors})
+        before = clean(json.loads(ws.profile_path.read_text()))[0] if ws.profile_path.exists() else None
+        if profile == before:  # saved as it was: nothing to write, relabel or clean again
+            return {"exists": True, "profile": profile, "errors": {}, "path": str(ws.profile_path),
+                    "processed": [], "changed": False}
         save_profile(profile, ws.profile_path)
         ws.upgrade()  # a person whose role changed gets their new labels
         stems = [ws.stem(src) for src in ws.pending()]
@@ -490,7 +494,7 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
             if not worker.busy(stem):
                 worker.submit(Job(stem, "process"))
         return {"exists": True, "profile": profile, "errors": {}, "path": str(ws.profile_path),
-                "processed": processed}
+                "processed": processed, "changed": True}
 
     @app.post("/api/profile/items")
     def add_to_profile(body: Detail):

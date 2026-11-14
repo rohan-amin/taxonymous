@@ -50,8 +50,9 @@ export function Details({ onSaved, onRunAll }: { onSaved: () => void; onRunAll: 
       const s = await api.saveProfile(form);
       setErrors({});
       const n = s.processed?.length ?? 0;
-      setMessage(n ? { tone: "ok", text: `Saved. Cleaning ${n} document${n === 1 ? "" : "s"} again with these details.` }
-                   : { tone: "ok", text: "Saved." });
+      setMessage(s.changed === false ? { tone: "ok", text: "No changes to save." }
+        : n ? { tone: "ok", text: `Saved. Cleaning ${n} document${n === 1 ? "" : "s"} again with these details.` }
+          : { tone: "ok", text: "Saved." });
       onSaved();
     } catch (err) {
       const e = err as ApiError;
