@@ -21,6 +21,8 @@ STREET_LINE = re.compile(STREET.pattern + r"\.?(?:,?\s+(?:apt|unit|suite|ste|#)\
 CITY_LINE = re.compile(r"^(?P<city>[A-Za-z][A-Za-z .'-]*?),?\s+(?P<state>[A-Z]{2})\s+"
                        r"(?P<zip>\d{5}(?:-\d{4})?)$")
 PHONE = re.compile(r"^(?:\+?1[\s.-]?)?(?:\(\d{3}\)\s?|\d{3}[\s.-])\d{3}[\s.-]\d{4}$")  # punctuated like one
+STATES = set("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH "
+             "NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR GU VI AS MP".split())
 MONEY = re.compile(r"^\(?-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)?$")
 EIN = re.compile(r"^\d{2}-\d{7}$")
 SSN = re.compile(r"^\d{3}-\d{2}-\d{4}$")
@@ -162,6 +164,8 @@ COMPANY = re.compile(r"\b(?:bank|inc|llc|llp|lp|corp|corporation|co|company|fund
                      r"association|foundation|university|college|hospital)\b\.?", re.I)
 ORG = ("This looks like a company's name. Companies stay readable, so your AI knows who paid you "
        "or holds your account. Add it only if it identifies you.")
+STATE = ("A state on its own stays readable: it's removed next to your ZIP, as part of your address. "
+         "Add your whole address instead, and it's removed wherever it's printed.")
 MASKED = ("Only the last 4 digits are printed. Add the full SSN to this person and it is removed "
           "in every form it's printed, this one included.")
 THEIR_EIN = "An employer's or bank's EIN usually stays readable. Add it only if it's yours."
@@ -179,6 +183,8 @@ def suggest(text: str, label: str = "", has_people: bool = True) -> tuple[str, d
         note = ORG
     elif MASKED_SSN.fullmatch(text):
         note = MASKED
+    elif kind == "address" and text in STATES:
+        note = STATE
     elif kind == "ein" and not re.search(r"\byour\b|\bhousehold\b|\btrust\b", label, re.I):
         note = THEIR_EIN
     return kind, item, note
@@ -220,6 +226,8 @@ def _suggest(text: str, label: str, has_people: bool) -> tuple[str, dict]:
         return "phone", {"value": text}
     if "dob" in says and DOB_RE.fullmatch(text):
         return "person", {"name": "", "dob": text, **you}
+    if text in STATES:  # "CA" in a W-2's state box: part of an address, never a name
+        return "address", {"street": "", "city": "", "state": text, "zip": ""}
     if m := CITY_LINE.fullmatch(text):
         return "address", {"street": "", **m.groupdict()}
     if STREET.match(text):

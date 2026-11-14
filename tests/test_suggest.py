@@ -2,7 +2,7 @@
 
 import pytest
 
-from taxonymous.suggest import AMOUNT, MASKED, ORG, THEIR_EIN, grow, label_for, suggest
+from taxonymous.suggest import AMOUNT, MASKED, ORG, STATE, THEIR_EIN, grow, label_for, suggest
 from taxonymous.words import PageWord
 
 
@@ -33,6 +33,7 @@ def row(*texts: str, y: float = 100, x: float = 40, line: int = 1, gap: float = 
     ("Okafor & Co CPAs", "Firm's name", "preparer", {"name": "", "firm": "Okafor & Co CPAs"}),
     ("A1B2C3D4", "Client ID", "number", {"number": "A1B2C3D4", "description": "Client ID"}),
     ("4/7/1984", "Date of birth", "person", {"name": "", "dob": "4/7/1984", "role": "other"}),
+    ("CA", "15 State", "address", {"street": "", "city": "", "state": "CA", "zip": ""}),
 ])
 def test_a_value_is_suggested_by_its_shape_and_label(text, label, kind, item):
     assert suggest(text, label)[:2] == (kind, item)
@@ -47,6 +48,7 @@ def test_cautions_for_what_usually_stays_readable():
     assert suggest("00-8907406", "PAYER’S TIN")[2] == THEIR_EIN
     assert suggest("00-4869454", "Your household employer EIN")[2] is None
     assert suggest("Contoso Bank, N.A.")[2] == ORG
+    assert suggest("CA", "State")[2] == STATE  # removed next to the ZIP, not on its own
     kind, item, note = suggest("XXX-XX-4323", "Partner's identifying number")
     assert (kind, item["ssn"], note) == ("person", "", MASKED)  # the full SSN covers every form of it
 
