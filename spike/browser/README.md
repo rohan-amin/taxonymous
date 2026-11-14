@@ -14,6 +14,15 @@ Deploy it (Cloudflare Pages, static; `_headers` carries the content-security pol
     npx wrangler login
     npx wrangler pages deploy spike/browser/dist --project-name taxonymous-spike
 
+Your Taxonymous file: your profile and the vault (each label and the real value it stands
+for) live in one file you keep where you like (keyfile.js). The page reads it into memory when
+you open it and writes it only when you choose Save: in place in Chrome and Edge, as a
+download in Safari and Firefox. Nothing is kept in the browser (no localStorage, IndexedDB or
+file system storage; the cache holds only the app's own files). By default the file is
+protected with a passphrase: AES-256-GCM, the key from PBKDF2-SHA-256 with 600,000 rounds,
+all WebCrypto; a wrong passphrase or a changed file fails to open. Unprotected is an option,
+and the page says what that means.
+
 What's in dist/: the page, a service worker (offline), a worker running the engine, the
 pinned Pyodide runtime and packages, the engine's own Python from src/taxonymous, and the
 synthetic sample documents. manifest.json lists every downloaded file with its SHA-256;

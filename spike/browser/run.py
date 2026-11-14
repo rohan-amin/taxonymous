@@ -44,9 +44,12 @@ from taxonymous.redact import redact_file  # noqa: E402
 from taxonymous.vault import Vault  # noqa: E402
 from taxonymous.verify import verify  # noqa: E402
 
+VAULT = Path("/work/vault.json")
 
-def run(profile_json: str, name: str, pdf: bytes) -> dict:
-    """One document: its safe copy, its text, its labels, and what was checked."""
+
+def run(profile_json: str, vault_json: str, name: str, pdf: bytes) -> dict:
+    """One document: its safe copy, its text, its labels, what was checked, and the vault
+    after it (the labels and what they stand for: saved in the Taxonymous file, never here)."""
     # a profile without permanent ids gets them as the app gives them (each entry its place),
     # so every document in the session sees the same people: one label each
     profile, errors = clean(with_ids(json.loads(profile_json))[0])
@@ -58,7 +61,9 @@ def run(profile_json: str, name: str, pdf: bytes) -> dict:
     src.write_bytes(pdf)
     unread["images"] = 0
     matcher = ProfileMatcher(Profile.from_dict(profile))
-    vault = Vault(Path("/work/vault.json"))  # one vault for the session: labels shared across documents
+    VAULT.parent.mkdir(parents=True, exist_ok=True)
+    VAULT.write_text(vault_json or '{"placeholders": {}}')  # from the open file: labels as before
+    vault = Vault(VAULT)
     t0 = time.perf_counter()
     result = redact_file(src, work / "out", matcher, vault)
     t1 = time.perf_counter()
@@ -74,4 +79,5 @@ def run(profile_json: str, name: str, pdf: bytes) -> dict:
         "passed": report.passed,
         "issues": [f"{i.kind} ({i.check}, page {i.page})" for i in report.issues],
         "pictures_unread": unread["images"],
+        "vault": VAULT.read_text(),
     }

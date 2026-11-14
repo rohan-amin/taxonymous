@@ -20,10 +20,10 @@ const ready = (async () => {
 
 onmessage = async (e) => {
   const { py, run } = await ready;
-  const { id, profile, name, bytes } = e.data;
+  const { id, profile, vault, name, bytes } = e.data;
   let result;
   try {
-    const r = run.run(profile, name, py.toPy(bytes));
+    const r = run.run(profile, vault || "", name, py.toPy(bytes));
     result = r.toJs({ dict_converter: Object.fromEntries });
     r.destroy();
   } catch (err) {

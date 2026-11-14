@@ -29,20 +29,50 @@
     </div>
   </section>
 
+  <section id="file" class="card" hidden>
+    <h2>Your Taxonymous file</h2>
+    <p class="muted">Your details and labels live in one file that you keep where you like. Taxonymous reads it
+      when you open it, and writes it only when you choose Save. Nothing is kept in this browser.</p>
+    <div id="file-closed">
+      <div class="row">
+        <button id="open-file">Open your Taxonymous file…</button>
+        <span class="muted">or start a new one from</span>
+        <label class="button">your profile.json…<input id="new-from-profile" type="file" accept=".json,application/json" hidden></label>
+        <button id="new-from-sample">the sample household</button>
+      </div>
+      <input id="open-input" type="file" accept=".taxonymous,application/json" hidden>
+    </div>
+    <div id="file-open" hidden>
+      <div class="row">
+        <strong id="file-name"></strong>
+        <span id="file-lock" class="muted"></span>
+        <span id="dirty" class="warn" hidden>Unsaved changes</span>
+      </div>
+      <div class="row">
+        <button id="save" class="primary">Save</button>
+        <button id="save-as">Save as…</button>
+        <button id="close-file" class="quiet">Close</button>
+      </div>
+    </div>
+  </section>
+
+  <dialog id="pass">
+    <form method="dialog" id="pass-form">
+      <h2 id="pass-title"></h2>
+      <p id="pass-hint" class="muted"></p>
+      <label class="stack">Passphrase<input id="pass-1" type="password" autocomplete="new-password"></label>
+      <label class="stack" id="pass-2-row">Again<input id="pass-2" type="password" autocomplete="new-password"></label>
+      <label id="protect-row"><input id="protect" type="checkbox" checked> Protect this file with a passphrase (recommended)</label>
+      <p id="pass-error" class="warn"></p>
+      <div class="row"><button id="pass-ok" class="primary" value="ok">OK</button><button value="cancel" formnovalidate>Cancel</button></div>
+    </form>
+  </dialog>
+
   <section id="try" class="card" hidden>
     <h2>Try it</h2>
     <p class="muted">Text PDFs only for now. Scans and pictures need OCR, which isn't in this test yet: a document
       with pictures is cleaned, but it says so and isn't marked checked. Barcodes aren't checked yet either, so
       don't use it on a state return (its barcode can hold the whole return).</p>
-    <div class="row">
-      <label>Profile
-        <select id="profile-choice">
-          <option value="sample">The sample household (fake people)</option>
-          <option value="file">A profile.json on this computer…</option>
-        </select>
-      </label>
-      <input id="profile-file" type="file" accept=".json,application/json" hidden>
-    </div>
     <div class="row">
       <button id="samples">Clean the sample documents</button>
       <span class="muted">or</span>
@@ -52,6 +82,7 @@
     <div id="results"></div>
   </section>
 </main>
+<script src="keyfile.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
