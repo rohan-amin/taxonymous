@@ -414,3 +414,9 @@
 .ws-hintbar.where { background: #fbefd5; color: #5a3d00; }
 @media (prefers-color-scheme: dark) { .ws-hintbar.where { background: #3a2c10; color: #f2d79a; } }
 .ws-labels-note .wbtn { height: 22px; margin-left: 6px; font-size: 12px; }
+/* the documents list's status line: opens the summary */
+.ws .ws-status { width: 100%; padding: 4px 6px; margin: 0 -6px; border: 0; border-radius: 6px; background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.ws .ws-status:hover:not(:disabled) { background: var(--w-sunk); }
+.ws .ws-status:disabled { cursor: default; }
+.ws .ws-status > span { display: inline-flex; align-items: center; gap: 6px; }
+.ws .ws-status.done { color: var(--w-ok); font-weight: 600; }

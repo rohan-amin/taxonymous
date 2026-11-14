@@ -524,7 +524,7 @@ def test_workspace_click_a_value_to_add_it_to_my_profile(corpus, browser, tmp_pa
         assert pg.locator(".ws-mark").count() == 0
         pg.get_by_role("button", name="Save 1 safe copy…").first.click()
         pg.get_by_test_id("save-all").click()
-        pg.get_by_text("All saved").wait_for()
+        pg.get_by_text("All saved", exact=True).wait_for()
         pg.get_by_role("button", name="1 saved · Show in Finder").first.wait_for()
         assert (ws.ready / "w2.redacted.pdf").exists() or any(ws.ready.iterdir())
         pg.get_by_role("button", name="Close").click()

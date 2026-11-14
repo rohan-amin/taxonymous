@@ -785,10 +785,7 @@ export function Workspace() {
                   <button type="button" className="wbtn quiet" onClick={() => setLeftOpen(false)} aria-label="Hide the document list">‹ Hide</button>
                 </div>
                 <div className="ws-drawer-tools">
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button type="button" className="wbtn primary" style={{ flex: 1 }} onClick={() => fileInput.current?.click()}>Add documents…</button>
-                    <button type="button" className="wbtn" style={{ flex: 1 }} onClick={() => setSafeOpen(true)}>Safe copies · {nChecked}</button>
-                  </div>
+                  <button type="button" className="wbtn primary" onClick={() => fileInput.current?.click()}>Add documents…</button>
                   <input className="search" type="search" placeholder="Find a document" aria-label="Find a document" value={q} onChange={(e) => setQ(e.target.value)} />
                   {batch ? <div className="ws-progress" data-testid="batch">
                     <span>Cleaning · {batch.finished} of {batch.jobs} done{batch.left ? ` · ${batch.left}` : ""}</span>
@@ -796,13 +793,16 @@ export function Workspace() {
                          aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(batch.fraction * 100)}>
                       <div style={{ width: `${batch.fraction * 100}%` }} />
                     </div>
-                  </div> : allDone ? <div className="ws-done" data-testid="done">
-                    <span><span className="ws-dot ok" aria-hidden="true" /> All {total} checked</span>
-                    <button type="button" className="wbtn primary" onClick={finish}>{finishLabel}</button>
-                  </div> : total > 0 && <div className="ws-progress">
-                    <span>{ready.length} of {total} checked</span>
-                    <div className="ws-bar"><div style={{ width: `${(nChecked / total) * 100}%` }} /></div>
-                  </div>}
+                  </div> : total > 0 && (
+                    // where things stand; it opens the summary (saving is the document header's button)
+                    <button type="button" className={`ws-progress ws-status${allDone ? " done" : ""}`} data-testid="done"
+                            onClick={() => setSafeOpen(true)} disabled={!nChecked}>
+                      <span>{allDone && <span className="ws-dot ok" aria-hidden="true" />}
+                        {allDone ? (total === 1 ? "Checked" : `All ${total} checked`) : `${nChecked} of ${total} checked`}
+                        {nChecked > unsaved && ` · ${unsaved ? `${nChecked - unsaved} saved` : "all saved"}`}</span>
+                      {!allDone && <div className="ws-bar"><div style={{ width: `${(nChecked / total) * 100}%` }} /></div>}
+                    </button>
+                  )}
                 </div>
                 <div className="ws-drawer-scroll">
                   {GROUPS.map((g) => {
@@ -894,7 +894,7 @@ export function Workspace() {
               <p className="small">Only what's in My profile, and anything shaped like an SSN, is removed. Have a quick look
                 at each copy before you share it.</p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {ready.some((d) => !d.exported) ? (
+                {unsaved ? (
                   <button type="button" className="wbtn primary" data-testid="save-all"
                           onClick={async () => {
                             const todo = ready.filter((x) => !x.exported);
@@ -905,10 +905,12 @@ export function Workspace() {
                             refresh();
                           }}>Save {ready.filter((d) => !d.exported).length} safe
                     cop{ready.filter((d) => !d.exported).length === 1 ? "y" : "ies"}</button>
-                ) : ready.length > 0 && <span className="ws-saved"><span className="ws-dot ok" aria-hidden="true" /> All saved</span>}
-                <button type="button" className={`wbtn${ready.length && ready.every((d) => d.exported) ? " primary" : ""}`}
-                        onClick={() => api.reveal().catch(() => setToast("Choose File › Show Safe Copies in Finder."))}>
-                  Show in Finder</button>
+                ) : ready.length > 0 && <>
+                  <span className="ws-saved"><span className="ws-dot ok" aria-hidden="true" /> All saved</span>
+                  <button type="button" className="wbtn primary"
+                          onClick={() => api.reveal().catch(() => setToast("Choose File › Show Safe Copies in Finder."))}>
+                    Show in Finder</button>
+                </>}
               </div>
             </div>
             <div className="ws-drawer-scroll" style={{ padding: "4px 10px 20px" }}>
