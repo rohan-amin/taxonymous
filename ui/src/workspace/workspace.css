@@ -440,3 +440,5 @@
 .ws-confirm-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .ws .wbtn.danger { background: #b3261e; border-color: #b3261e; color: #fff; }
 .ws .wbtn.danger:hover:not(:disabled) { background: #8c1d18; }
+/* a working document's spinner on the selected row: no ring (a full ring hides the turning gap), drawn in white */
+.ws-file.sel .ws-dot.work { box-shadow: none; border-color: var(--w-accent-ink); border-top-color: transparent; }
