@@ -22,7 +22,20 @@ CACHE = HERE / ".downloads"  # pinned files, fetched once (gitignored with dist)
 PYODIDE = "0.28.3"
 CDN = f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE}/full"
 PACKAGES = ["pymupdf", "numpy", "pillow"]
-SAMPLES = ["household.json", "w2.pdf", "1099_int.pdf", "k1_statement.pdf", "brokerage_consolidated.pdf"]
+SAMPLES = ["household.json", "w2.pdf", "1099_int.pdf", "k1_statement.pdf", "brokerage_consolidated.pdf",
+           "w2_scan.pdf", "1099_int_scan.pdf", "receipt_photo.jpg"]
+NPM = "https://cdn.jsdelivr.net/npm"
+# OCR (Tesseract, the same engine and English model as natively: tessdata_fast 4.1.0) and
+# barcodes (ZXing, the same C++ library as natively), each pinned
+EXTRA = {
+    "ocr/tesseract.min.js": f"{NPM}/tesseract.js@5.1.1/dist/tesseract.min.js",
+    "ocr/worker.min.js": f"{NPM}/tesseract.js@5.1.1/dist/worker.min.js",
+    "ocr/tesseract-core-simd-lstm.wasm.js": f"{NPM}/tesseract.js-core@5.1.1/tesseract-core-simd-lstm.wasm.js",
+    "ocr/tesseract-core-lstm.wasm.js": f"{NPM}/tesseract.js-core@5.1.1/tesseract-core-lstm.wasm.js",
+    "ocr/eng.traineddata": "https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@4.1.0/eng.traineddata",
+    "barcode/zxing-reader.js": f"{NPM}/zxing-wasm@2.2.4/dist/iife/reader/index.js",
+    "barcode/zxing_reader.wasm": f"{NPM}/zxing-wasm@2.2.4/dist/reader/zxing_reader.wasm",
+}
 
 
 def fetch(url: str) -> bytes:
@@ -50,6 +63,9 @@ def main() -> None:
     files += [lock["packages"][n]["file_name"] for n in sorted(needed)]
     for name in files:
         (DIST / "pyodide" / name).write_bytes(fetch(f"{CDN}/{name}"))
+    for path, url in EXTRA.items():
+        (DIST / path).parent.mkdir(parents=True, exist_ok=True)
+        (DIST / path).write_bytes(fetch(url))
     # the engine, as it is in the repo
     (DIST / "engine" / "taxonymous").mkdir(parents=True)
     for py in sorted((ROOT / "src" / "taxonymous").glob("*.py")):

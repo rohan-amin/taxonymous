@@ -71,18 +71,21 @@
 
   <section id="try" class="card" hidden>
     <h2>Try it</h2>
-    <p class="muted">Text PDFs only for now. Scans and pictures need OCR, which isn't in this test yet: a document
-      with pictures is cleaned, but it says so and isn't marked checked. Barcodes aren't checked yet either, so
-      don't use it on a state return (its barcode can hold the whole return).</p>
+    <p class="muted">PDFs and photos, scans included: Tesseract reads the pictures and ZXing the barcodes, here in
+      this page. One thing the Mac app has that this doesn't yet: a second OCR engine (Apple's Vision), which
+      catches what Tesseract misreads. Have a close look at scans.</p>
     <div class="row">
       <button id="samples">Clean the sample documents</button>
       <span class="muted">or</span>
-      <label class="button">Choose PDFs on this computer…<input id="pdfs" type="file" accept=".pdf,application/pdf" multiple hidden></label>
+      <label class="button">Choose PDFs or photos on this computer…<input id="pdfs" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" multiple hidden></label>
     </div>
     <p id="engine" class="muted"></p>
     <div id="results"></div>
   </section>
 </main>
+<script src="ocr/tesseract.min.js"></script>
+<script src="barcode/zxing-reader.js"></script>
+<script src="bridge.js"></script>
 <script src="keyfile.js"></script>
 <script src="app.js"></script>
 </body>

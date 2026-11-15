@@ -265,6 +265,8 @@ async function removeAll() {
 function engine() {
   if (!workerReady) {
     worker = new Worker("worker.js");
+    worker.postMessage({ type: "shared", ctrl: BRIDGE.ctrl, data: BRIDGE.data });
+    worker.addEventListener("message", (e) => { if (e.data.type === "call") BRIDGE.answer(worker, e.data); });
     $("engine").textContent = "Starting the engine…";
     workerReady = new Promise((resolve, reject) => {
       worker.onmessage = (e) => {
@@ -333,17 +335,17 @@ function show(doc, r) {
   const card = doc.card;
   card.innerHTML = "";
   if (r.error) { card.textContent = r.error; return; }
-  const checked = r.passed && !r.pictures_unread;
+  const checked = r.passed;
   const title = document.createElement("strong");
   title.textContent = r.name;
   const status = document.createElement("p");
   status.className = checked ? "ok" : "warn";
   status.textContent = !r.passed ? `Not checked: ${r.issues.join(", ")}`
-    : r.pictures_unread ? `Cleaned, but ${r.pictures_unread} picture${r.pictures_unread === 1 ? "" : "s"} weren't read (OCR isn't in this test). Don't share this copy.`
-      : `Cleaned: ${r.labels.length} kind${r.labels.length === 1 ? "" : "s"} of detail removed · Checked again: none left`;
+    : `Cleaned: ${r.labels.length} kind${r.labels.length === 1 ? "" : "s"} of detail removed · Checked again: none left`;
   const meta = document.createElement("p");
   meta.className = "muted";
-  meta.textContent = `Labels: ${r.labels.join(" ")} · cleaned in ${r.clean_s}s, checked in ${r.check_s}s`;
+  meta.textContent = `Labels: ${r.labels.join(" ")} · cleaned in ${r.clean_s}s, checked in ${r.check_s}s`
+    + (r.ocr_reads ? ` · ${r.ocr_reads} picture reads by OCR (Tesseract only: the Mac app adds a second engine)` : "");
   const row = document.createElement("div");
   row.className = "row";
   const dl = document.createElement("a");
@@ -462,7 +464,8 @@ $("save").onclick = () => save().catch((e) => { if (e.name !== "AbortError") $("
 $("save-as").onclick = () => save(true).catch((e) => { if (e.name !== "AbortError") $("engine").textContent = e.message; });
 $("close-file").onclick = closeFile;
 $("samples").onclick = async () => {
-  const names = ["w2.pdf", "1099_int.pdf", "k1_statement.pdf", "brokerage_consolidated.pdf"];
+  const names = ["w2.pdf", "1099_int.pdf", "k1_statement.pdf", "brokerage_consolidated.pdf",
+                 "w2_scan.pdf", "1099_int_scan.pdf", "receipt_photo.jpg"];
   run(await Promise.all(names.map(async (name) => ({ name, bytes: new Uint8Array(await (await fetch(`samples/${name}`)).arrayBuffer()) }))));
 };
 $("pdfs").onchange = async (e) => {

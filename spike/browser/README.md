@@ -1,8 +1,13 @@
 # Taxonymous in the browser (spike)
 
 The engine (Python, PyMuPDF) running inside a web page via Pyodide and WebAssembly: a
-one-time, checked download, then everything works offline. Text PDFs only: no OCR and no
-barcode reading yet (the page says so, and never marks such a document checked).
+one-time, checked download, then everything works offline. OCR is Tesseract (tesseract.js,
+the same engine and tessdata_fast model as natively, on a pool of workers) and barcodes are
+ZXing (zxing-wasm), reached from the engine through a synchronous bridge: the engine's
+worker posts the work to the page and waits on shared memory (worker.js syncCall,
+bridge.js), so the engine code is unchanged. That needs cross-origin isolation (the
+COOP/COEP headers in _headers, and added by the service worker to what it serves).
+Not yet: a second OCR engine (the Mac app's Vision), which catches what Tesseract misreads.
 
 Run it locally (in your own browser):
 
@@ -34,5 +39,6 @@ pinned Pyodide runtime and packages, the engine's own Python from src/taxonymous
 synthetic sample documents. manifest.json lists every downloaded file with its SHA-256;
 the page checks each before keeping it.
 
-Measured (M4, single core, no OCR): the same as native within ~10-40%; engine start ~1.8s;
-first setup 35.6 MB.
+Measured (M4): the whole synthetic corpus, Tesseract only, cleaned and checked with OCR:
+35 of 35 pass with labels identical to native; 140 s in the browser, 74 s natively (1.9x).
+Engine start ~1.8 s; first setup 48.8 MB.

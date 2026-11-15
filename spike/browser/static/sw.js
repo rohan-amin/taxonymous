@@ -11,6 +11,17 @@ self.addEventListener("install", (e) => {
 });
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 
+// the page is cross-origin isolated (its shared memory needs it), and then a worker only
+// starts if its own script says so too: everything served from here carries the headers
+function isolated(res) {
+  if (!res || res.type === "error") return res;
+  const headers = new Headers(res.headers);
+  headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+  headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  headers.set("Cross-Origin-Resource-Policy", "same-origin");
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 async function currentCache() {
   const r = await (await caches.open(CURRENT)).match("version");
   return r ? caches.open(await r.text()) : null;
@@ -29,9 +40,11 @@ self.addEventListener("fetch", (e) => {
         return live;
       } catch { /* offline: what's kept */ }
       const cache = await currentCache();
-      return (cache && await cache.match(path)) || (await caches.open(SHELL)).match(path) || Response.error();
+      return isolated((cache && await cache.match(path)) || await (await caches.open(SHELL)).match(path))
+        || Response.error();
     }
     const cache = await currentCache();
-    return (cache && await cache.match(path)) || fetch(e.request);
+    const kept = cache && await cache.match(path);
+    return kept ? isolated(kept) : fetch(e.request);
   })());
 });

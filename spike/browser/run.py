@@ -1,7 +1,8 @@
 """The engine's entry point in the browser worker: clean and check one PDF with a profile.
 
-OCR is not in this spike: a page with pictures (or a scan) has its pictures counted and
-reported, never passed as checked.
+OCR runs on the page: Tesseract (tesseract.js, on a pool of workers) and barcodes (zxing-wasm),
+reached through a synchronous bridge (worker.js, bridge.js). No second OCR engine yet: the
+Mac's Vision isn't in a browser.
 """
 
 import hashlib
@@ -19,26 +20,55 @@ except ImportError:  # one tab: nothing to lock against
     sys.modules["fcntl"] = types.SimpleNamespace(flock=lambda *a: None, LOCK_EX=2, LOCK_UN=8)
 
 
-class _NoBarcodes(types.ModuleType):  # zxing-wasm in the real thing
-    def __getattr__(self, name):
-        return 0
+def _call(kind: str, payload: dict, blobs: list[bytes] = ()):
+    """A synchronous call to the page (worker.js syncCall, bridge.js): OCR or barcodes."""
+    from js import syncCall
+    from pyodide.ffi import to_js
+    return json.loads(syncCall(kind, json.dumps(payload), to_js(list(blobs))))
 
 
-sys.modules["zxingcpp"] = _NoBarcodes("zxingcpp")
-sys.modules["zxingcpp"].read_barcodes = lambda *a, **k: []
+# barcode.py's formats, as zxing-wasm names them
+BARCODES = ["PDF417", "QRCode", "MicroQRCode", "rMQRCode", "DataMatrix", "Aztec", "MaxiCode", "Code128",
+            "Code39", "Code93", "ITF"]
+
+
+class _Barcodes(types.ModuleType):
+    """zxingcpp, as the engine calls it, read by zxing-wasm (the same ZXing C++) on the page."""
+
+    def __getattr__(self, name):  # the format constants: the reader is told its own list
+        return name
+
+    @staticmethod
+    def read_barcodes(img, formats=None):
+        import io
+        buf = io.BytesIO()
+        img.save(buf, "PNG", compress_level=1)
+        found = _call("barcodes", {"formats": BARCODES}, [buf.getvalue()])
+        point = lambda p: types.SimpleNamespace(x=p["x"], y=p["y"])  # noqa: E731
+        return [types.SimpleNamespace(position=types.SimpleNamespace(
+            top_left=point(p["topLeft"]), top_right=point(p["topRight"]),
+            bottom_left=point(p["bottomLeft"]), bottom_right=point(p["bottomRight"]))) for p in found]
+
+
+sys.modules["zxingcpp"] = _Barcodes("zxingcpp")
 
 from taxonymous import ocr  # noqa: E402
 
-unread = {"images": 0}
+reads = {"ocr": 0}  # pictures read by OCR for the document being cleaned
 
 
-def _no_ocr(jobs, tsv=False, done=None):
+def _ocr(jobs, tsv=False, done=None):
+    """Every (picture, psm) read by Tesseract on the page's pool, in order."""
     jobs = list(jobs)
-    unread["images"] += len(jobs)
-    return ["level\tpage_num\n" if tsv else "" for _ in jobs]
+    reads["ocr"] += len(jobs)
+    out = _call("ocr", {"psms": [psm for _, psm in jobs], "tsv": tsv}, [pic.data for pic, _ in jobs])
+    if done is not None:
+        for i in range(len(jobs)):
+            done(i)
+    return out
 
 
-ocr.run_all, ocr.vision_on, ocr.require = _no_ocr, (lambda: False), (lambda: None)
+ocr.run_all, ocr.vision_on, ocr.require = _ocr, (lambda: False), (lambda: None)
 
 from taxonymous.detect import ProfileMatcher  # noqa: E402
 from taxonymous.profile import Profile, clean, with_ids  # noqa: E402
@@ -66,7 +96,7 @@ def run(profile_json: str, vault_json: str, name: str, pdf: bytes, fingerprint: 
     work.mkdir(parents=True)
     src = work / name
     src.write_bytes(pdf)
-    unread["images"] = 0
+    reads["ocr"] = 0
     matcher = ProfileMatcher(Profile.from_dict(profile))
     VAULT.parent.mkdir(parents=True, exist_ok=True)
     VAULT.write_text(vault_json or '{"placeholders": {}}')  # from the open file: labels as before
@@ -82,7 +112,8 @@ def run(profile_json: str, vault_json: str, name: str, pdf: bytes, fingerprint: 
     known = [Known(f.kind, f.text) for f in result.findings]
     here = {r.placeholder for r in result.regions} & vault.entries.keys()
     known += [Known(vault.entries[ph]["kind"], v) for ph in here for v in vault.entries[ph]["values"]]
-    report = verify(result.pdf, matcher, known, txt=result.text, ocr=False)
+    # pictures read again by OCR, as the app does
+    report = verify(result.pdf, matcher, known, txt=result.text, ocr=True)
     t2 = time.perf_counter()
     return {
         "name": name,
@@ -93,7 +124,7 @@ def run(profile_json: str, vault_json: str, name: str, pdf: bytes, fingerprint: 
         "check_s": round(t2 - t1, 2),
         "passed": report.passed,
         "issues": [f"{i.kind} ({i.check}, page {i.page})" for i in report.issues],
-        "pictures_unread": unread["images"],
+        "ocr_reads": reads["ocr"],
         "vault": VAULT.read_text(),
     }
 
