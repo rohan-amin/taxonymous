@@ -1,22 +1,30 @@
 // The page: setup (download, check, keep for offline), your Taxonymous file, the engines, and
-// then the workspace UI, the same one the Mac app shows. The UI talks to "the server" as it
-// always does (/api/...); here the service worker hands each request to this page, and this
-// page to the home engine (home.py), which runs the app's own server code in memory.
+// the workspace UI, the same one the Mac app shows. The UI draws everything, the start screen
+// too; this is its "host" (window.taxonymousHost, ui/src/workspace/host.ts): it says what
+// stage things are at and does what the UI asks. The UI talks to "the server" as it always
+// does (/api/...); here the service worker hands each request to this page, and this page to
+// the home engine (home.py), which runs the app's own server code in memory.
 "use strict";
 
-const $ = (id) => document.getElementById(id);
 const CACHE_PREFIX = "taxonymous-v-";  // one per version; the service worker keeps the page in "taxonymous-shell"
 let manifest, manifestText, cacheName;
 
 const mb = (n) => (n < 2 ** 20 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 const sha256 = async (buf) => hex(await crypto.subtle.digest("SHA-256", buf));
-const say = (text) => { $("boot-message").textContent = text; };
+
+// what the UI shows: a new object on every change (it compares them)
+let state = { stage: "checking", size: "", update: false, progress: null, error: "", file: null };
+const listeners = new Set();
+function set(patch) {
+  state = { ...state, ...patch };
+  for (const l of listeners) l();
+}
+const say = (error) => set({ error });
 
 // ---------------------------------------------------------------- setup
 
 async function start() {
-  document.body.classList.add("booting");
   // a new offline layer took over: start again on it, so the page, the workers and the
   // engine are always one version (an old page talking to a new engine breaks)
   const had = !!navigator.serviceWorker.controller;
@@ -33,16 +41,12 @@ async function start() {
   if (current === cacheName && await isSetUp()) return ready();
   const todo = await toDownload(current);
   const size = mb(todo.reduce((a, f) => a + f.size, 0));
-  if (current && await caches.has(current)) {  // set up before: this is an update
-    $("setup-what").textContent = `A new version is ready: ${size} to download. The version you have keeps `
-      + "working until you update.";
-    $("setup-go").textContent = "Update";
-    ready(true);
+  if (current && await caches.has(current)) {  // set up before: this is an update, when you like
+    set({ size, update: true });
+    ready();
   } else {
-    $("setup-what").textContent = `One-time download, ${size}. After this, Taxonymous works with no internet `
-      + "connection, and your documents never leave this computer.";
+    set({ stage: "setup", size });
   }
-  $("setup-go").hidden = false;
 }
 
 async function currentVersion() {
@@ -68,8 +72,7 @@ async function toDownload(current) {
 // against its fingerprint and kept; unchanged files are copied from the version set up. A file
 // that doesn't match is refused, and the version set up stays in use.
 async function setUp() {
-  $("setup-go").hidden = true;
-  $("progress").hidden = false;
+  set({ stage: "downloading", error: "", progress: { fraction: 0, text: "Starting…" } });
   const current = await currentVersion();
   const cache = await caches.open(cacheName);
   const todo = new Set((await toDownload(current)).map((f) => f.path));
@@ -82,7 +85,6 @@ async function setUp() {
       const kept = await oldCache.match(f.path);
       if (kept) { await cache.put(f.path, kept); continue; }
     }
-    $("progress-text").textContent = `${f.path.split("/").pop()}: ${mb(done)} of ${mb(total)}`;
     const res = await fetch(`${f.path}?fresh=${f.sha256.slice(0, 12)}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`${f.path}: ${res.status}`);
     const reader = res.body.getReader();
@@ -93,7 +95,7 @@ async function setUp() {
       if (end) break;
       parts.push(value);
       got += value.length;
-      $("bar").style.width = `${((done + got) / total) * 100}%`;
+      set({ progress: { fraction: (done + got) / total, text: `${mb(done + got)} of ${mb(total)}` } });
     }
     const buf = await new Blob(parts).arrayBuffer();
     if (await sha256(buf) !== f.sha256) throw new Error(`${f.path} isn't the file it should be: not kept`);
@@ -106,16 +108,12 @@ async function setUp() {
   for (const k of await caches.keys()) if (k.startsWith(CACHE_PREFIX) && k !== cacheName) await caches.delete(k);
   if (navigator.storage?.persist) await navigator.storage.persist();  // not cleared to make room
   if (current && current !== cacheName) return location.reload();  // an update: start on the new version
+  set({ update: false });
   ready();
 }
 
-function ready(updateWaiting = false) {
-  $("progress").hidden = true;
-  $("setup-go").hidden = !updateWaiting;
-  if (!updateWaiting) $("setup-what").textContent = "Everything Taxonymous needs is on this computer.";
-  $("ready").hidden = false;
-  $("remove").hidden = false;
-  $("file").hidden = false;
+function ready() {
+  set({ stage: "ready", progress: null });
   engines();  // starting now, while you open your file
 }
 
@@ -133,11 +131,8 @@ const FS = "showOpenFilePicker" in window && !new URLSearchParams(location.searc
 const TYPES = [{ description: "Taxonymous file", accept: { "application/json": [".taxonymous"] } }];
 
 function showFile() {
-  $("filebar").hidden = !session || !opened;
-  if (!session) return;
-  $("file-name").textContent = session.name + (session.passphrase ? "" : " (not protected)");
-  $("dirty").hidden = !session.dirty;
-  $("save").textContent = FS && session.handle ? "Save" : "Save (downloads it)";
+  set({ file: session && { name: session.name, protected: !!session.passphrase, dirty: session.dirty,
+                           inPlace: FS && !!session.handle } });
 }
 
 function changed() {
@@ -146,36 +141,8 @@ function changed() {
   showFile();
 }
 
-// the passphrase: to protect a new file ("create"), or to open a protected one ("open")
-function askPass(mode, name) {
-  const d = $("pass");
-  $("pass-title").textContent = mode === "create" ? "Protect your Taxonymous file" : `Open ${name}`;
-  $("pass-hint").textContent = mode === "create"
-    ? "It holds your SSN and account numbers. With a passphrase, a copy that gets out can't be read. "
-      + "If you forget it, the file can't be opened: you'd start again from your profile.json."
-    : "Enter the passphrase this file was saved with.";
-  $("pass-2-row").hidden = $("protect-row").hidden = mode !== "create";
-  $("protect").checked = true;
-  $("pass-1").value = $("pass-2").value = "";
-  $("pass-error").textContent = "";
-  return new Promise((resolve) => {
-    $("pass-form").onsubmit = (e) => {
-      if (e.submitter?.value === "cancel") return;
-      const p1 = $("pass-1").value;
-      if (mode === "create" && $("protect").checked) {
-        if (p1.length < 8) { e.preventDefault(); $("pass-error").textContent = "Use at least 8 characters."; return; }
-        if (p1 !== $("pass-2").value) { e.preventDefault(); $("pass-error").textContent = "The two don't match."; return; }
-      }
-    };
-    $("protect").onchange = () => { $("pass-1").disabled = $("pass-2").disabled = !$("protect").checked; };
-    $("pass-1").disabled = $("pass-2").disabled = false;
-    d.onclose = () => {
-      if (d.returnValue !== "ok") return resolve(null);
-      resolve({ passphrase: mode === "create" && !$("protect").checked ? "" : $("pass-1").value });
-    };
-    d.showModal();
-  });
-}
+// the passphrase: to protect a new file ("create"), or to open a protected one ("open"); the UI asks
+const askPass = (mode, name = "", error = "") => window.taxonymousHost.askPass(mode, name, error);
 
 async function newFrom(profileText) {
   const profile = profileText ? JSON.parse(profileText) : null;
@@ -191,12 +158,12 @@ async function readPicked() {
     return { text: await (await handle.getFile()).text(), name: handle.name, handle };
   }
   return new Promise((resolve) => {
-    $("open-input").onchange = async (e) => {
-      const f = e.target.files[0];
-      e.target.value = "";
+    const input = Object.assign(document.createElement("input"), { type: "file", accept: ".taxonymous,application/json" });
+    input.onchange = async () => {
+      const f = input.files[0];
       if (f) resolve({ text: await f.text(), name: f.name, handle: null });
     };
-    $("open-input").click();
+    input.click();
   });
 }
 
@@ -204,18 +171,19 @@ async function openFile() {
   const { text, name, handle } = await readPicked();
   let passphrase = "";
   let contents;
+  let error = "";
   for (;;) {
     try {
       if (KEYFILE.isProtected(text)) {
-        const pass = await askPass("open", name);
+        const pass = await askPass("open", name, error);
         if (!pass) return;
         passphrase = pass.passphrase;
       }
       contents = await KEYFILE.open(text, passphrase);
       break;
     } catch (e) {
-      if (!KEYFILE.isProtected(text)) throw e;
-      setTimeout(() => { $("pass-error").textContent = e.message; }, 0);  // at the top of the next prompt
+      if (!KEYFILE.isProtected(text)) throw new Error(`${name} isn't a Taxonymous file this can open (${e.message}).`);
+      error = e.message;  // shown in the next prompt
     }
   }
   session = { vault: contents.vault, decisions: contents.decisions || {}, name, handle, passphrase, dirty: false };
@@ -261,7 +229,12 @@ async function save(as = false) {
   const text = await KEYFILE.seal({ profile: await currentProfile(), vault: session.vault,
                                     decisions: await currentDecisions() }, session.passphrase);
   if (FS && (as || !session.handle)) {
-    session.handle = await window.showSaveFilePicker({ suggestedName: session.name, types: TYPES });
+    try {
+      session.handle = await window.showSaveFilePicker({ suggestedName: session.name, types: TYPES });
+    } catch (e) {
+      if (e.name === "AbortError") return null;
+      throw e;
+    }
     session.name = session.handle.name;
   }
   if (FS && session.handle) {
@@ -276,10 +249,10 @@ async function save(as = false) {
   }
   session.dirty = false;
   showFile();
+  return { name: session.name, downloaded: !(FS && session.handle) };
 }
 
-function closeFile() {
-  if (session?.dirty && !confirm("Close without saving? Your changes since the last save will be lost.")) return;
+function closeFile() {  // the UI has asked about unsaved changes
   session = null;
   location.reload();  // the documents go with it: they were only ever in this page
 }
@@ -408,6 +381,18 @@ async function onServiceWorker(e) {
 // or downloaded (Safari, Firefox). Folders of documents are kept.
 
 window.taxonymousHost = {
+  get state() { return state; },
+  subscribe(l) { listeners.add(l); return () => listeners.delete(l); },
+  setUp() { setUp().catch((e) => set({ stage: "setup", progress: null, error: `Setup stopped: ${e.message}. Try again to carry on.` })); },
+  remove: () => removeAll(),
+  openFile() { act(openFile); },
+  newFile(from) {
+    act(async () => newFrom(from === "empty" ? null
+      : from === "sample" ? await (await fetch("samples/household.json")).text() : from.profile));
+  },
+  save: (as = false) => save(as),
+  close: () => closeFile(),
+  askPass: null,  // the UI's
   async saveCopies(ids) {
     let dir = null;
     if (FS && "showDirectoryPicker" in window) {
@@ -448,50 +433,44 @@ window.taxonymousHost = {
 
 // ---------------------------------------------------------------- the workspace
 
-let opened = false;
 let begin;
 const started = new Promise((resolve) => { begin = resolve; });
 
 async function open(profile) {
-  say("Starting the engine…");
+  set({ stage: "starting", error: "" });
   await engines();
-  const token = hex(crypto.getRandomValues(new Uint8Array(16)));
   await new Promise((resolve) => {
     const done = (e) => { if (e.data.type === "started") { home.worker.removeEventListener("message", done); resolve(); } };
     home.worker.addEventListener("message", done);
     home.worker.postMessage({ type: "start", token, lanes: LANES, profile: profile ? JSON.stringify(profile) : null });
   });
   begin();
-  // the workspace UI, as the Mac app opens it: the new workspace, this token
-  sessionStorage.setItem("taxonymous-token", token);
-  sessionStorage.setItem("taxonymous-ui", "workspace");
-  $("boot").hidden = true;
-  document.body.classList.remove("booting");
-  opened = true;
   showFile();
-  const assets = $("app-assets").content;
-  for (const el of assets.querySelectorAll("link, script")) {
-    const copy = document.createElement(el.tagName);
-    for (const a of el.attributes) copy.setAttribute(a.name, a.value);
-    document.head.append(copy);
+  set({ stage: "open" });
+}
+
+// what the start screen asks for: one at a time; a cancelled picker is no error
+let acting = false;
+async function act(fn) {
+  if (acting) return;
+  acting = true;
+  set({ error: "" });
+  try {
+    await fn();
+  } catch (e) {
+    if (e.name !== "AbortError") set({ stage: state.stage === "starting" ? "ready" : state.stage, error: e.message });
+  } finally {
+    acting = false;
   }
 }
 
-$("setup-go").onclick = () => setUp().catch((e) => {
-  $("progress-text").textContent = `Setup stopped: ${e.message}. Try again to resume.`;
-  $("setup-go").hidden = false;
-});
-$("remove").onclick = removeAll;
-const report = (e) => { if (e.name !== "AbortError") say(e.message); };
-$("open-file").onclick = () => openFile().catch(report);
-$("new-empty").onclick = () => newFrom(null).catch(report);
-$("new-from-sample").onclick = async () => newFrom(await (await fetch("samples/household.json")).text()).catch(report);
-$("new-from-profile").onchange = async (e) => {
-  const f = e.target.files[0];
-  e.target.value = "";
-  if (f) newFrom(await f.text()).catch(report);
-};
-$("save").onclick = () => save().catch(report);
-$("save-as").onclick = () => save(true).catch(report);
-$("close-file").onclick = closeFile;
-start().catch((e) => { $("setup-what").textContent = `That didn't work: ${e.message}`; });
+// the token the UI shows the server (the app's own check); made now, as the UI reads it once
+const token = hex(crypto.getRandomValues(new Uint8Array(16)));
+sessionStorage.setItem("taxonymous-token", token);
+// the workspace UI's files (build.py puts their tags in the template); it shows the start screen
+for (const el of document.getElementById("app-assets").content.querySelectorAll("link, script")) {
+  const copy = document.createElement(el.tagName);
+  for (const a of el.attributes) copy.setAttribute(a.name, a.value);
+  document.head.append(copy);
+}
+start().catch((e) => set({ stage: "setup", error: `That didn't work: ${e.message}` }));

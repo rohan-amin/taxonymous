@@ -1,44 +1,4 @@
-/* The start screen (setup, your Taxonymous file) and the file bar; the workspace has its own styles. */
-#boot, #filebar, #pass {
-  --b-bg: #f6f5f1; --b-surface: #fff; --b-ink: #1d1d1b; --b-muted: #63625d; --b-line: #e4e2dc;
-  --b-accent: #1f4e43; --b-ok: #17533b; --b-warn: #6f3b00;
-  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; color: var(--b-ink);
-}
-@media (prefers-color-scheme: dark) {
-  #boot, #filebar, #pass {
-    --b-bg: #1b1c1a; --b-surface: #242522; --b-ink: #edebe6; --b-muted: #a8a59d; --b-line: #34352f;
-    --b-accent: #7cc4a8; --b-ok: #8fd6b2; --b-warn: #f2c27a;
-  }
-}
-body.booting { margin: 0; background: var(--b-bg, #f6f5f1); }
-@media (prefers-color-scheme: dark) { body.booting { background: #1b1c1a; } }
-#boot { max-width: 720px; margin: 0 auto; padding: 48px 16px 64px; display: flex; flex-direction: column; gap: 16px; }
-#boot[hidden] { display: none; }
-#boot h1 { font-size: 22px; margin: 0 0 4px; }
-#boot h2, #pass h2 { font-size: 15px; margin: 0 0 6px; }
-.muted { color: var(--b-muted); margin: 4px 0; }
-.warn { color: var(--b-warn); }
-.card { background: var(--b-surface); border: 1px solid var(--b-line); border-radius: 10px; padding: 16px 18px; }
-.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; }
-#boot button, #boot .button, #filebar button, #pass button {
-  font: inherit; padding: 4px 11px; border-radius: 6px; border: 1px solid var(--b-line); background: var(--b-surface);
-  color: var(--b-ink); cursor: pointer;
-}
-#boot button.primary, #pass button.primary { background: var(--b-accent); border-color: var(--b-accent); color: var(--b-surface); font-weight: 600; }
-#boot button.quiet, #filebar button.quiet { border-color: transparent; background: transparent; color: var(--b-accent); }
-.bar { height: 6px; background: var(--b-line); border-radius: 3px; overflow: hidden; margin-top: 8px; }
-.bar > div { height: 100%; width: 0; background: var(--b-accent); transition: width 0.2s; }
-#ready { color: var(--b-ok); font-weight: 600; }
-#pass { border: 1px solid var(--b-line); border-radius: 12px; background: var(--b-surface); max-width: 420px; padding: 18px 20px; }
-#pass::backdrop { background: rgba(0, 0, 0, 0.3); }
-.stack { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
-#pass input[type=password] { font: inherit; padding: 5px 8px; border: 1px solid var(--b-line); border-radius: 6px; background: var(--b-bg); color: var(--b-ink); }
-label { display: inline-flex; gap: 8px; align-items: center; }
-/* your file, while the workspace is open: small, out of the way, bottom left */
-#filebar {
-  position: fixed; left: 12px; bottom: 12px; z-index: 50; display: flex; align-items: center; gap: 6px;
-  background: var(--b-surface); border: 1px solid var(--b-line); border-radius: 8px; padding: 4px 6px 4px 10px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
-}
-#filebar[hidden] { display: none; }
-#filebar #dirty { color: var(--b-warn); }
+/* Before the workspace UI has drawn: the page's own ground, no white flash. */
+html, body, #root { height: 100%; margin: 0; }
+body { background: #f6f5f1; }
+@media (prefers-color-scheme: dark) { body { background: #1b1c1a; } }

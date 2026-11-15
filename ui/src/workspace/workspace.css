@@ -459,3 +459,25 @@
 .ws-viewer { align-items: flex-start; }
 .ws-viewer > .ws-page, .ws-viewer > .ws-legend, .ws-viewer > .ws-empty { margin-left: auto; margin-right: auto; }
 .ws-viewer::after { content: ""; flex: none; height: 1px; width: 1px; }
+
+/* the browser app: the start screen (set up, open your file) and your file in the top bar */
+.ws-start { flex: 1; overflow-y: auto; display: flex; justify-content: center; padding: 40px 24px 48px; }
+.ws-start h1 { font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+.ws-start-card { display: flex; flex-direction: column; gap: 10px; padding: 20px 22px; border-radius: 12px; background: var(--w-surface); border: 1px solid var(--w-line-strong); }
+.ws-start-card h2 { font-size: 17px; }
+.ws-start-muted { color: var(--w-muted); }
+.ws-start-muted.small { font-size: 12px; }
+.ws-start-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 4px; }
+.ws .wbtn.big { height: 34px; padding: 0 18px; font-size: 14px; }
+.ws-start-progress { display: flex; flex-direction: column; gap: 6px; max-width: 480px; }
+.ws-start-progress .ws-bar { height: 6px; }
+.ws-start-error { color: var(--w-look); }
+.ws-start-foot { text-align: center; }
+.ws .ws-link { border: 0; padding: 0; background: none; color: var(--w-accent); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ws .ws-link:disabled { opacity: 0.45; cursor: default; }
+.ws-pass label { display: flex; flex-direction: column; gap: 4px; font-weight: 500; }
+.ws-pass label.inline { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
+.ws-pass input[type=password] { height: 30px; padding: 0 8px; border: 1px solid var(--w-line-strong); border-radius: 6px; background: var(--w-ground); color: var(--w-ink); font: 13px -apple-system, system-ui, sans-serif; }
+.ws-keyfile { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; padding-right: 12px; border-right: 1px solid var(--w-line); }
+.ws .ws-keyfile-name { color: var(--w-ink); max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.ws-keyfile-dirty { color: var(--w-muted); font-size: 12px; }

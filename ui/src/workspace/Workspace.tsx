@@ -7,6 +7,8 @@ import type { Box, DocDetail, DocSummary, FoundEntries, Profile } from "../api";
 import { Details } from "../Details";
 import { ACCOUNT_TYPES, ADDRESS_TYPES } from "../fields";
 import { AddForm, WordLayer, popoverPlace, usePageWords } from "./ClickToAdd";
+import { FileControls } from "./FileControls";
+import { HOST } from "./host";
 import type { Picked } from "./ClickToAdd";
 import { DOT, checked, plain, removedList, timeLeft } from "./messages";
 import type { Tone } from "./messages";
@@ -46,12 +48,9 @@ const GROUPS: { tone: Tone[]; title: string }[] = [
 
 // in the Mac app's window (tools/native_window.py): its toolbar has the buttons and drags
 // the window, so the page's top band holds nothing clickable. Kept for this tab, like the token.
-// in the browser app (web/static/boot.js): saving safe copies goes through the page, which
-// writes them to a folder you choose (Chrome, Edge) or downloads them (Safari, Firefox)
-interface Host {
-  saveCopies(ids: string[]): Promise<string | null>; // where they went; null: you cancelled
-}
-const HOST = (window as unknown as { taxonymousHost?: Host }).taxonymousHost;
+// in the browser app (web/static/boot.js, ./host.ts): your Taxonymous file is in the top bar,
+// and saving safe copies goes through the page, which writes them to a folder you choose
+// (Chrome, Edge) or downloads them (Safari, Firefox)
 
 const NATIVE = (() => {
   const asked = new URL(window.location.href).searchParams.get("native") === "1";
@@ -97,15 +96,35 @@ function Grip({ label, width, setWidth, side }: { label: string; width: number; 
               onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onKeyDown={key} />;
 }
 
+export const WELCOME_STEPS: [string, string][] = [
+  ["Tell it what to protect, once", "Add a document and click your name, SSN and account numbers on it. Or type them into My profile."],
+  ["Removed from every document", "Each document you add is cleaned of them automatically, however they're printed, scans and photos included."],
+  ["Review", "Spot something else of yours? Click to remove it everywhere, or draw a box to remove it from that document only."],
+  ["Checked again", "Every copy is read again from scratch, the way a person or an AI would. It's only ready when none of your details turn up."],
+  ["Share the safe copies", "Save them and drag them into your AI assistant. Your originals never change."],
+];
+
+export function LocalBanner() {
+  return (
+    <div className="ws-local-banner">
+      <span className="ws-lock" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 16 16">
+          <rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        </svg>
+      </span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <strong>Everything stays on this computer</strong>
+        <p>Your documents and details are never uploaded. You can even turn off your Wi-Fi and Taxonymous will still work.</p>
+        <p className="strong">You're always in control of your sensitive information: only the safe copies you choose to share ever leave this computer.</p>
+      </div>
+    </div>
+  );
+}
+
 function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
   const [hide, setHide] = useState(store.get("welcome-hidden", false));
-  const steps: [string, string][] = [
-    ["Tell it what to protect, once", "Add a document and click your name, SSN and account numbers on it. Or type them into My profile."],
-    ["Removed from every document", "Each document you add is cleaned of them automatically, however they're printed, scans and photos included."],
-    ["Review", "Spot something else of yours? Click to remove it everywhere, or draw a box to remove it from that document only."],
-    ["Checked again", "Every copy is read again from scratch, the way a person or an AI would. It's only ready when none of your details turn up."],
-    ["Share the safe copies", "Save them and drag them into your AI assistant. Your originals never change."],
-  ];
+  const steps = WELCOME_STEPS;
   return (
     <div className={`ws-welcome${NATIVE ? " native" : ""}`} role="dialog" aria-label="Welcome to Taxonymous">
       <div className="ws-welcome-inner">
@@ -115,19 +134,7 @@ function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
             Remove your identity. Preserve your financial context.
           </p>
         </div>
-        <div className="ws-local-banner">
-          <span className="ws-lock" aria-hidden="true">
-            <svg width="24" height="24" viewBox="0 0 16 16">
-              <rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" strokeWidth="1.3" />
-            </svg>
-          </span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <strong>Everything stays on this computer</strong>
-            <p>Your documents and details are never uploaded. You can even turn off your Wi-Fi and Taxonymous will still work.</p>
-            <p className="strong">You're always in control of your sensitive information: only the safe copies you choose to share ever leave this computer.</p>
-          </div>
-        </div>
+        <LocalBanner />
         <ol className="ws-steps">
           {steps.map(([t, b], i) => (
             <li key={t}><span className="n">{i + 1}</span><strong>{t}</strong><p>{b}</p></li>
@@ -136,10 +143,12 @@ function Welcome({ onClose }: { onClose: (hide: boolean) => void }) {
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
           <button type="button" className="wbtn primary" style={{ height: 34, padding: "0 20px", fontSize: 14 }}
                   onClick={() => onClose(hide)}>Get started</button>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" checked={hide} onChange={(e) => setHide(e.target.checked)} />
-            Don't show this when Taxonymous opens
-          </label>
+          {HOST ? null : (  // the browser app opens on its start screen, not this
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" checked={hide} onChange={(e) => setHide(e.target.checked)} />
+              Don't show this when Taxonymous opens
+            </label>
+          )}
         </div>
         <p style={{ color: "var(--w-muted)", fontSize: 12 }}>You can see this again from How it works, at the top of the window.</p>
       </div>
@@ -597,7 +606,7 @@ export function Workspace() {
   const [side, setSide] = useState<"redacted" | "original">("redacted");
   const [q, setQ] = useState("");
   const [safeOpen, setSafeOpen] = useState(false);
-  const [welcome, setWelcome] = useState(() => !store.get("welcome-hidden", false));
+  const [welcome, setWelcome] = useState(() => !HOST && !store.get("welcome-hidden", false));
   const [dropping, setDropping] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   // removing a document: the right-click menu, then the confirmation
@@ -800,6 +809,7 @@ export function Workspace() {
             Taxonymous
           </div>
           <nav aria-label="App">
+            {HOST && <FileControls say={setToast} />}
             <button type="button" className="wbtn quiet" onClick={() => setWelcome(true)}>How it works</button>
             <button type="button" className={`wbtn${view === "profile" ? " on" : ""}`} onClick={() => setView(view === "profile" ? "work" : "profile")}>My profile</button>
           </nav>
