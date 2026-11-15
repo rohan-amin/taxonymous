@@ -132,6 +132,14 @@ def main() -> None:
     shutil.copytree(ROOT / "ui" / "dist" / "assets", DIST / "assets")
     page = (DIST / "index.html").read_text()
     page = page.replace("<!-- the workspace UI's files (build.py) -->", "".join(tags))
+    # the page's own files named by their contents: a page always loads the files made with it,
+    # even from a site or an offline layer that still has an older version's under the old name
+    for name in ("boot.css", "bridge.js", "keyfile.js", "boot.js"):
+        data = (DIST / name).read_bytes()
+        named = f"{Path(name).stem}.{hashlib.sha256(data).hexdigest()[:10]}{Path(name).suffix}"
+        (DIST / name).rename(DIST / named)
+        assert page.count(f'"{name}"') == 1, name
+        page = page.replace(f'"{name}"', f'"{named}"')
     (DIST / "index.html").write_text(page)
     # what the setup step downloads: everything, the page too (a version's page and its scripts
     # always go together), but the site's own headers

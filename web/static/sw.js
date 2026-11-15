@@ -60,7 +60,9 @@ self.addEventListener("fetch", (e) => {
       if (kept) return isolated(kept);
     }
     try {
-      const live = await fetch(e.request, { cache: page || path === "manifest.json" ? "no-store" : "default" });
+      // the page by its address (a navigation's own request can't be refetched with options)
+      const live = page ? await fetch(new URL("index.html", location.href), { cache: "no-store" })
+        : await fetch(e.request, path === "manifest.json" ? { cache: "no-store" } : undefined);
       if (live.ok && page) (await caches.open(SHELL)).put("index.html", live.clone());
       return page ? isolated(live) : live;
     } catch (err) {  // offline
