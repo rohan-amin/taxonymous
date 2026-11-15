@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Taxonymous</title>
+<link rel="stylesheet" href="boot.css">
+<link rel="manifest" href="app.webmanifest">
+</head>
+<body>
+<main id="boot">
+  <header>
+    <h1>Taxonymous</h1>
+    <p class="muted">Removes your personal details from tax documents, here in this page. Nothing you add is
+      uploaded: the page can only talk to the site it came from, and after setup it works with no connection.</p>
+  </header>
+
+  <section id="setup" class="card">
+    <h2>Set up Taxonymous on this computer</h2>
+    <p id="setup-what" class="muted">Checking…</p>
+    <div id="progress" hidden>
+      <div class="bar"><div id="bar"></div></div>
+      <p id="progress-text" class="muted"></p>
+    </div>
+    <div class="row">
+      <button id="setup-go" class="primary" hidden>Download and set up</button>
+      <span id="ready" hidden>Ready offline ✓</span>
+      <button id="remove" class="quiet" hidden>Remove from this computer</button>
+    </div>
+  </section>
+
+  <section id="file" class="card" hidden>
+    <h2>Your Taxonymous file</h2>
+    <p class="muted">Your details and labels live in one file that you keep where you like. Taxonymous reads it
+      when you open it, and writes it only when you choose Save. Nothing is kept in this browser.</p>
+    <div class="row">
+      <button id="open-file" class="primary">Open your Taxonymous file…</button>
+      <span class="muted">or start a new one from</span>
+      <label class="button">your profile.json…<input id="new-from-profile" type="file" accept=".json,application/json" hidden></label>
+      <button id="new-empty">nothing yet</button>
+      <button id="new-from-sample" class="quiet">the sample household</button>
+    </div>
+    <input id="open-input" type="file" accept=".taxonymous,application/json" hidden>
+    <p id="boot-message" class="warn"></p>
+  </section>
+</main>
+
+<div id="filebar" hidden>
+  <span id="file-name"></span>
+  <span id="dirty" hidden>· unsaved changes</span>
+  <button id="save">Save</button>
+  <button id="save-as" class="quiet">Save as…</button>
+  <button id="close-file" class="quiet">Close</button>
+</div>
+
+<dialog id="pass">
+  <form method="dialog" id="pass-form">
+    <input type="text" autocomplete="username" value="Taxonymous file" hidden aria-hidden="true">
+    <h2 id="pass-title"></h2>
+    <p id="pass-hint" class="muted"></p>
+    <label class="stack">Passphrase<input id="pass-1" type="password" autocomplete="new-password"></label>
+    <label class="stack" id="pass-2-row">Again<input id="pass-2" type="password" autocomplete="new-password"></label>
+    <label id="protect-row"><input id="protect" type="checkbox" checked> Protect this file with a passphrase (recommended)</label>
+    <p id="pass-error" class="warn"></p>
+    <div class="row"><button id="pass-ok" class="primary" value="ok">OK</button><button value="cancel" formnovalidate>Cancel</button></div>
+  </form>
+</dialog>
+
+<div id="root"></div>
+<template id="app-assets"><!-- the workspace UI's files (build.py) --></template>
+<script src="ocr/tesseract.min.js"></script>
+<script src="barcode/zxing-reader.js"></script>
+<script src="bridge.js"></script>
+<script src="keyfile.js"></script>
+<script src="boot.js"></script>
+</body>
+</html>

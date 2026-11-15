@@ -444,11 +444,12 @@ def unfinished(ws: Workspace) -> list[str]:
 
 
 def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None = UI_DIR,
-               lanes: int | None = None, resume: bool = False) -> FastAPI:
-    """`resume`: clean what was left unfinished (the app, not tests or the command line)."""
+               lanes: int | None = None, resume: bool = False, worker: Worker | None = None) -> FastAPI:
+    """`resume`: clean what was left unfinished (the app, not tests or the command line).
+    `worker`: one made elsewhere (the browser's, whose lanes are workers of the page's)."""
     ws.init()
     relabelled = ws.upgrade()  # permanent ids, and labels as each person's role says
-    worker = Worker(ws, ocr, lanes)
+    worker = worker or Worker(ws, ocr, lanes)
     if resume and ws.profile_path.exists():
         stems = unfinished(ws)
         if relabelled:  # every cleaned document still has the old labels

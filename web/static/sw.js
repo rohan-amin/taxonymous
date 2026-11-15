@@ -1,4 +1,6 @@
-// Offline: the files of the version you set up are served from this computer.
+// Offline: the files of the version you set up are served from this computer. And the
+// workspace UI's requests (/api/...) never leave it either: each goes to the page that made
+// it, which has the home engine answer it (boot.js, home.py).
 //  - setup's own downloads (?fresh) always go to the site: they are what gets checked and kept
 //  - the page and its file list come from the site when it's reachable, from here when not
 //  - everything else comes from the version that's set up ("current"), never a stale mix
@@ -27,9 +29,24 @@ async function currentCache() {
   return r ? caches.open(await r.text()) : null;
 }
 
+async function api(e, url) {
+  const client = await self.clients.get(e.clientId);
+  if (!client) return new Response("no page to answer", { status: 503 });
+  const body = ["GET", "HEAD"].includes(e.request.method) ? null : await e.request.arrayBuffer();
+  const channel = new MessageChannel();
+  const answer = new Promise((resolve) => { channel.port1.onmessage = (m) => resolve(m.data); });
+  client.postMessage({ type: "api", method: e.request.method, path: url.pathname, query: url.search.slice(1),
+                       headers: [...e.request.headers], body }, [channel.port2, ...(body ? [body] : [])]);
+  const a = await answer;
+  const empty = a.status === 204 || a.status === 304;
+  return isolated(new Response(empty ? null : a.body, { status: a.status, headers: a.headers }));
+}
+
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== location.origin) return;
+  if (url.origin !== location.origin) return;
+  if (url.pathname.startsWith("/api/")) return e.respondWith(api(e, url));
+  if (e.request.method !== "GET") return;
   if (url.searchParams.has("fresh")) return;  // setup: straight to the site
   e.respondWith((async () => {
     const path = url.pathname.replace(/^\//, "") || "index.html";
