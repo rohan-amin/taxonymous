@@ -2,8 +2,10 @@
 // workspace UI's requests (/api/...) never leave it either: each goes to the page that made
 // it, which has the home engine answer it (boot.js, home.py).
 //  - setup's own downloads (?fresh) always go to the site: they are what gets checked and kept
-//  - the page and its file list come from the site when it's reachable, from here when not
-//  - everything else comes from the version that's set up ("current"), never a stale mix
+//  - the file list (manifest.json) comes from the site when it's reachable: it says whether
+//    there's a new version
+//  - the page and everything else come from the version that's set up ("current"), never a
+//    mix of versions; until one is set up whole (the page among its files), from the site
 "use strict";
 const SHELL = "taxonymous-shell";
 const CURRENT = "taxonymous-current";  // one entry: the name of the version cache in use
@@ -50,18 +52,21 @@ self.addEventListener("fetch", (e) => {
   if (url.searchParams.has("fresh")) return;  // setup: straight to the site
   e.respondWith((async () => {
     const path = url.pathname.replace(/^\//, "") || "index.html";
-    if (path === "manifest.json" || path === "index.html" || e.request.mode === "navigate") {
-      try {
-        const live = await fetch(e.request, { cache: "no-store" });
-        if (live.ok && path !== "manifest.json") (await caches.open(SHELL)).put(path, live.clone());
-        return live;
-      } catch { /* offline: what's kept */ }
-      const cache = await currentCache();
-      return isolated((cache && await cache.match(path)) || await (await caches.open(SHELL)).match(path))
-        || Response.error();
-    }
+    const page = path === "index.html" || e.request.mode === "navigate";
     const cache = await currentCache();
-    const kept = cache && await cache.match(path);
-    return kept ? isolated(kept) : fetch(e.request);
+    const whole = cache && await cache.match("index.html");  // a version set up with its page
+    if (path !== "manifest.json" && whole) {
+      const kept = page ? whole : await cache.match(path);
+      if (kept) return isolated(kept);
+    }
+    try {
+      const live = await fetch(e.request, { cache: page || path === "manifest.json" ? "no-store" : "default" });
+      if (live.ok && page) (await caches.open(SHELL)).put("index.html", live.clone());
+      return page ? isolated(live) : live;
+    } catch (err) {  // offline
+      const kept = (cache && await cache.match(path)) || (page && await (await caches.open(SHELL)).match("index.html"));
+      if (kept) return isolated(kept);
+      throw err;
+    }
   })());
 });

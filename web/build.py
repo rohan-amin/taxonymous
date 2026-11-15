@@ -133,8 +133,9 @@ def main() -> None:
     page = (DIST / "index.html").read_text()
     page = page.replace("<!-- the workspace UI's files (build.py) -->", "".join(tags))
     (DIST / "index.html").write_text(page)
-    # what the setup step downloads: everything but the page itself
-    keep = [p for p in sorted(DIST.rglob("*")) if p.is_file() and p.name not in ("index.html", "_headers")]
+    # what the setup step downloads: everything, the page too (a version's page and its scripts
+    # always go together), but the site's own headers
+    keep = [p for p in sorted(DIST.rglob("*")) if p.is_file() and p.relative_to(DIST).as_posix() != "_headers"]
     manifest = [{"path": p.relative_to(DIST).as_posix(), "size": p.stat().st_size,
                  "sha256": hashlib.sha256(p.read_bytes()).hexdigest()} for p in keep]
     (DIST / "manifest.json").write_text(json.dumps({"version": PYODIDE, "files": manifest}, indent=1))
