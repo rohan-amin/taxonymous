@@ -25,6 +25,8 @@ PACKAGES = ["pymupdf", "numpy", "pillow"]
 SAMPLES = ["household.json", "w2.pdf", "1099_int.pdf", "k1_statement.pdf", "brokerage_consolidated.pdf",
            "w2_scan.pdf", "1099_int_scan.pdf", "receipt_photo.jpg"]
 NPM = "https://cdn.jsdelivr.net/npm"
+# a mirror of PaddleOCR's own models in ONNX (not pinned to a commit yet: the real build should)
+HF = "https://huggingface.co/snowfluke/ppu-paddle-ocr-models/resolve/main"
 # OCR (Tesseract, the same engine and English model as natively: tessdata_fast 4.1.0) and
 # barcodes (ZXing, the same C++ library as natively), each pinned
 EXTRA = {
@@ -35,6 +37,14 @@ EXTRA = {
     "ocr/eng.traineddata": "https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@4.1.0/eng.traineddata",
     "barcode/zxing-reader.js": f"{NPM}/zxing-wasm@2.2.4/dist/iife/reader/index.js",
     "barcode/zxing_reader.wasm": f"{NPM}/zxing-wasm@2.2.4/dist/reader/zxing_reader.wasm",
+    # the second OCR engine, in place of the Mac's Vision: PaddleOCR v5 (Apache 2.0, the
+    # official models in ONNX), run by onnxruntime-web
+    "paddle/ort.wasm.min.js": f"{NPM}/onnxruntime-web@1.22.0/dist/ort.wasm.min.js",
+    "paddle/ort-wasm-simd-threaded.wasm": f"{NPM}/onnxruntime-web@1.22.0/dist/ort-wasm-simd-threaded.wasm",
+    "paddle/ort-wasm-simd-threaded.mjs": f"{NPM}/onnxruntime-web@1.22.0/dist/ort-wasm-simd-threaded.mjs",
+    "paddle/det.onnx": f"{HF}/detection/PP-OCRv5_mobile_det_infer.onnx",
+    "paddle/rec.onnx": f"{HF}/recognition/multi/en/v5/en_PP-OCRv5_mobile_rec_infer.onnx",
+    "paddle/dict.txt": f"{HF}/recognition/multi/en/v5/ppocrv5_en_dict.txt",
 }
 
 

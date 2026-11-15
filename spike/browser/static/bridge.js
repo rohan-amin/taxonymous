@@ -11,6 +11,26 @@ const BRIDGE = (() => {
   const HEADER = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext";
   let pool = null;
   let zxing = null;
+  let paddle = null;  // the second engine (paddle-worker.js), one page at a time
+  let paddleNext = 0;
+  const paddleWaiting = new Map();
+
+  function paddleRead(png) {
+    if (!paddle) {
+      paddle = new Worker("paddle-worker.js");
+      paddle.onmessage = (e) => {
+        const { id, tsv, error } = e.data;
+        const w = paddleWaiting.get(id);
+        paddleWaiting.delete(id);
+        if (error) w.reject(new Error(error)); else w.resolve(tsv);
+      };
+    }
+    return new Promise((resolve, reject) => {
+      const id = paddleNext++;
+      paddleWaiting.set(id, { resolve, reject });
+      paddle.postMessage({ id, png }, [png.buffer]);
+    });
+  }
 
   function ocrPool() {
     if (!pool) {
@@ -23,14 +43,24 @@ const BRIDGE = (() => {
     return pool;
   }
 
-  // jobs: [{psm, png}] -> each one's TSV (or text), in order
+  // jobs: [{psm, png}] -> each one's TSV (or text), in order; psm "vision" is the second
+  // engine's read (Paddle, standing in for the Mac's Vision), at the same time as Tesseract's
   async function ocr({ psms, tsv }, blobs) {
-    const workers = await ocrPool();
     const out = new Array(psms.length);
+    const second = [];
+    psms.forEach((psm, i) => { if (psm === "vision") second.push(i); });
+    const paddleDone = (async () => {
+      for (const i of second) {
+        const t = await paddleRead(blobs[i]);
+        out[i] = tsv ? t : t.split("\n").slice(1).map((r) => r.split("\t")[11] || "").join(" ");
+      }
+    })();
+    const todo = psms.map((_, i) => i).filter((i) => psms[i] !== "vision");
+    const workers = todo.length ? await ocrPool() : [];
     let next = 0;
-    await Promise.all(workers.map(async (w) => {
-      while (next < psms.length) {
-        const i = next++;
+    const tessDone = Promise.all(workers.map(async (w) => {
+      while (next < todo.length) {
+        const i = todo[next++];
         await w.setParameters({ tessedit_pageseg_mode: psms[i] });
         const r = await w.recognize(new Blob([blobs[i]], { type: "image/png" }), {}, { tsv, text: !tsv });
         let t = tsv ? r.data.tsv : r.data.text;
@@ -38,6 +68,7 @@ const BRIDGE = (() => {
         out[i] = t;
       }
     }));
+    await Promise.all([paddleDone, tessDone]);
     return out;
   }
 

@@ -345,7 +345,7 @@ function show(doc, r) {
   const meta = document.createElement("p");
   meta.className = "muted";
   meta.textContent = `Labels: ${r.labels.join(" ")} · cleaned in ${r.clean_s}s, checked in ${r.check_s}s`
-    + (r.ocr_reads ? ` · ${r.ocr_reads} picture reads by OCR (Tesseract only: the Mac app adds a second engine)` : "");
+    + (r.ocr_reads ? ` · ${r.ocr_reads} picture reads by OCR (Tesseract and Paddle)` : "");
   const row = document.createElement("div");
   row.className = "row";
   const dl = document.createElement("a");

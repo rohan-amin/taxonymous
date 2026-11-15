@@ -1,8 +1,8 @@
 """The engine's entry point in the browser worker: clean and check one PDF with a profile.
 
 OCR runs on the page: Tesseract (tesseract.js, on a pool of workers) and barcodes (zxing-wasm),
-reached through a synchronous bridge (worker.js, bridge.js). No second OCR engine yet: the
-Mac's Vision isn't in a browser.
+reached through a synchronous bridge (worker.js, bridge.js). The second OCR engine, where the
+Mac has Vision, is PaddleOCR v5 (paddle-worker.js).
 """
 
 import hashlib
@@ -68,7 +68,9 @@ def _ocr(jobs, tsv=False, done=None):
     return out
 
 
-ocr.run_all, ocr.vision_on, ocr.require = _ocr, (lambda: False), (lambda: None)
+# the second engine is on (Paddle on the page reads where the Mac's Vision does): its reads are
+# psm "vision", and the engine handles them exactly as Vision's
+ocr.run_all, ocr.vision_on, ocr.require = _ocr, (lambda: True), (lambda: None)
 
 from taxonymous.detect import ProfileMatcher  # noqa: E402
 from taxonymous.profile import Profile, clean, with_ids  # noqa: E402
