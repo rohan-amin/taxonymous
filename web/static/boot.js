@@ -124,15 +124,47 @@ async function removeAll() {
 }
 
 // ---------------------------------------------------------------- your Taxonymous file
-// opened into memory, saved only when you say: { profile, vault, decisions }
+// opened into memory: { profile, vault, decisions }. In Chrome and Edge, once it has a place on
+// disk you've let the page write to, it's saved there by itself a moment after it changes. In
+// Safari and Firefox a save is a download, so it's saved when you choose.
 
-let session = null;  // { vault, decisions, name, handle, passphrase, dirty }
+let session = null;  // { vault, decisions, name, handle, writable, passphrase, dirty, savedAt, saving, error }
 const FS = "showOpenFilePicker" in window && !new URLSearchParams(location.search).has("nofs");
 const TYPES = [{ description: "Taxonymous file", accept: { "application/json": [".taxonymous"] } }];
 
 function showFile() {
   set({ file: session && { name: session.name, protected: !!session.passphrase, dirty: session.dirty,
-                           inPlace: FS && !!session.handle } });
+                           inPlace: FS && !!session.handle, auto: FS && !!session.handle && session.writable,
+                           savedAt: session.savedAt, saving: !!session.saving, error: session.error || "" } });
+}
+
+// saving by itself: a moment after the last change, one write at a time
+const AUTOSAVE_MS = 2000;
+let autoTimer = null;
+function autosave() {
+  clearTimeout(autoTimer);
+  if (!session?.dirty || !FS || !session.handle || !session.writable) return;
+  autoTimer = setTimeout(async () => {
+    if (!session || session.saving) return autosave();
+    try {
+      await write();
+    } catch (e) {  // shown in the bar, with Save to try again
+      if (session) { session.error = e.message; session.writable = false; showFile(); }
+    }
+  }, AUTOSAVE_MS);
+}
+
+// may this page write to the file? asked once, on a click (Chrome asks you the first time)
+async function allowWriting(ask) {
+  if (!FS || !session?.handle) return false;
+  const opts = { mode: "readwrite" };
+  let state = await session.handle.queryPermission(opts);
+  if (state === "prompt" && ask) state = await session.handle.requestPermission(opts).catch(() => "denied");
+  session.writable = state === "granted";
+  if (session.writable) session.error = "";
+  showFile();
+  autosave();
+  return session.writable;
 }
 
 // "Unsaved changes" means saving now would write something the file doesn't have: your profile,
@@ -155,6 +187,7 @@ async function recheck() {
       const now = canonical(await contents());
       if (session) session.dirty = saved === null || now !== saved;
       showFile();
+      autosave();
     } while (recheckAgain);
   })().finally(() => { checking = null; });
   return checking;
@@ -167,27 +200,29 @@ async function newFrom(profileText) {
   const profile = profileText ? JSON.parse(profileText) : null;
   const pass = await askPass("create");
   if (!pass) return;
-  session = { vault: null, decisions: {}, name: "my.taxonymous", handle: null, passphrase: pass.passphrase, dirty: true };
+  session = { vault: null, decisions: {}, name: "my.taxonymous", handle: null, writable: false,
+              passphrase: pass.passphrase, dirty: true, savedAt: null };
   await open(profile);
 }
 
 async function readPicked() {
   if (FS) {
     const [handle] = await window.showOpenFilePicker({ types: TYPES });
-    return { text: await (await handle.getFile()).text(), name: handle.name, handle };
+    const f = await handle.getFile();
+    return { text: await f.text(), name: handle.name, handle, modified: f.lastModified };
   }
   return new Promise((resolve) => {
     const input = Object.assign(document.createElement("input"), { type: "file", accept: ".taxonymous,application/json" });
     input.onchange = async () => {
       const f = input.files[0];
-      if (f) resolve({ text: await f.text(), name: f.name, handle: null });
+      if (f) resolve({ text: await f.text(), name: f.name, handle: null, modified: f.lastModified });
     };
     input.click();
   });
 }
 
 async function openFile() {
-  const { text, name, handle } = await readPicked();
+  const { text, name, handle, modified } = await readPicked();
   let passphrase = "";
   let contents;
   let error = "";
@@ -205,7 +240,9 @@ async function openFile() {
       error = e.message;  // shown in the next prompt
     }
   }
-  session = { vault: contents.vault, decisions: contents.decisions || {}, name, handle, passphrase, dirty: false };
+  session = { vault: contents.vault, decisions: contents.decisions || {}, name, handle, writable: false, passphrase,
+              dirty: false, savedAt: modified };
+  await allowWriting(true).catch(() => false);  // still your click: Chrome asks whether it may save
   await open(contents.profile);
 }
 
@@ -246,9 +283,8 @@ async function restoreDecisions(d) {
   await homeAsk({ type: "write", path: `vault/overrides/${d.id}.json`, data: bytes.buffer }, [bytes.buffer]);
 }
 
+// Save (⌘S, the button): where it goes first if it has no place yet, or "Save as…"; then written
 async function save(as = false) {
-  const now = await contents();
-  const text = await KEYFILE.seal({ ...now, vault: now.vault || null }, session.passphrase);
   if (FS && (as || !session.handle)) {
     try {
       session.handle = await window.showSaveFilePicker({ suggestedName: session.name, types: TYPES });
@@ -257,20 +293,38 @@ async function save(as = false) {
       throw e;
     }
     session.name = session.handle.name;
+    session.writable = true;  // you chose it to save to
+  } else if (FS && !session.writable && !(await allowWriting(true))) {
+    throw new Error("Taxonymous wasn't allowed to save to it. Choose Save as… to save it somewhere else.");
   }
-  if (FS && session.handle) {
-    const w = await session.handle.createWritable();
-    await w.write(text);
-    await w.close();
-  } else {  // Safari, Firefox: a new copy, downloaded; replace your old one with it
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
-    a.download = session.name;
-    a.click();
+  await write();
+  return { name: session.name, downloaded: !FS };
+}
+
+async function write() {
+  clearTimeout(autoTimer);
+  session.saving = true;
+  showFile();
+  try {
+    const now = await contents();
+    const text = await KEYFILE.seal({ ...now, vault: now.vault || null }, session.passphrase);
+    if (FS) {
+      const w = await session.handle.createWritable();
+      await w.write(text);
+      await w.close();
+    } else {  // Safari, Firefox: a new copy, downloaded; replace your old one with it
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+      a.download = session.name;
+      a.click();
+    }
+    saved = canonical(now);
+    session.savedAt = Date.now();
+    session.error = "";
+  } finally {
+    session.saving = false;
   }
-  saved = canonical(now);
   await recheck();  // anything that changed while it was being written
-  return { name: session.name, downloaded: !(FS && session.handle) };
 }
 
 function closeFile() {  // the UI has asked about unsaved changes
@@ -414,6 +468,7 @@ window.taxonymousHost = {
       : from === "sample" ? await (await fetch("samples/household.json")).text() : from.profile));
   },
   save: (as = false) => save(as),
+  allowSaving: () => allowWriting(true),
   close: () => closeFile(),
   askPass: null,  // the UI's
   async saveCopies(ids) {

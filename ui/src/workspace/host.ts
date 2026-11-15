@@ -17,6 +17,10 @@ export interface HostFile {
   protected: boolean;  // with a passphrase
   dirty: boolean;      // changed since it was opened or saved
   inPlace: boolean;    // Save writes over it (Chrome, Edge); otherwise a new copy is downloaded
+  auto: boolean;       // saved by itself when it changes (Chrome, Edge, once it has a place you let it write to)
+  savedAt: number | null;  // when it was last saved (ms), as far as this page knows; null: never
+  saving: boolean;
+  error: string;       // the last save by itself didn't work
 }
 
 export interface HostState {
@@ -40,6 +44,7 @@ export interface Host {
   openFile(): void;
   newFile(from: "empty" | "sample" | { profile: string }): void;
   save(as?: boolean): Promise<{ name: string; downloaded: boolean } | null>;
+  allowSaving(): Promise<boolean>;  // ask (on a click) to save to the opened file
   close(): void;
   saveCopies(ids: string[]): Promise<string | null>; // where they went; null: you cancelled
   // set by the UI: ask for a passphrase (to protect a new file, or to open one)

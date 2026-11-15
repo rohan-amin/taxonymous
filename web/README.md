@@ -38,8 +38,11 @@ Deploy (Cloudflare Pages, static; `_headers` carries the content-security policy
 
 Your profile and the vault (each label and the real value it stands for) live in one file
 you keep where you like (`static/keyfile.js`). The page reads it into memory when you open
-it and writes it only when you choose Save: in place in Chrome and Edge, as a download in
-Safari and Firefox. Nothing is kept in the browser (no localStorage, IndexedDB or file
+it. In Chrome and Edge it then saves itself in place a moment after anything in it changes
+(a new file once you've chosen where it goes with Save…; an opened one once you've let the
+page write to it, which Chrome asks as you open it), and the top bar says "Saved". In Safari
+and Firefox a save is a download, so you save when you choose, and the bar says when you last
+did. Nothing is kept in the browser (no localStorage, IndexedDB or file
 system storage; the cache holds only the app's own files). By default it's protected with a
 passphrase: AES-256-GCM, the key from PBKDF2-SHA-256 with 600,000 rounds, all WebCrypto.
 

@@ -1,20 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 import { HOST, useHost } from "./host";
 
-// Your Taxonymous file, in the browser app's top bar: its name (a menu: Save as…, Close),
-// whether it has changes you haven't saved, and Save (also ⌘S / Ctrl+S).
+// Your Taxonymous file, in the browser app's top bar: its name (a menu: Save as…, Close) and
+// whether it's saved. In Chrome and Edge it saves itself once it has a place on disk: "Saved".
+// Otherwise (a new file, Safari, Firefox) Save, also ⌘S / Ctrl+S, with when it was last saved.
+
+const ago = (t: number, now: number) => {
+  const min = Math.floor((now - t) / 60_000);
+  return min < 1 ? "just now" : min < 60 ? `${min} min ago` : min < 60 * 24 ? `${Math.floor(min / 60)} h ago`
+    : new Date(t).toLocaleDateString();
+};
 export function FileControls({ say }: { say: (text: string) => void }) {
   const s = useHost();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [closing, setClosing] = useState(false);
   const keepRef = useRef<HTMLButtonElement>(null);
   const file = s?.file;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   const save = async (as = false) => {
     setMenu(null);
     try {
+      const wasAuto = HOST!.state.file?.auto;
       const r = await HOST!.save(as);
-      if (r) say(r.downloaded ? `Downloaded ${r.name}. Keep it in place of your old copy.` : `Saved ${r.name}.`);
+      if (r?.downloaded) say(`Downloaded ${r.name}. Keep it in place of your old copy.`);
+      else if (r && (as || !wasAuto)) say(`Saved ${r.name}. From now on, changes are saved as you go.`);
     } catch (e) {
       if ((e as Error).name !== "AbortError") say(`Your file wasn't saved: ${(e as Error).message}`);
     }
@@ -35,9 +49,10 @@ export function FileControls({ say }: { say: (text: string) => void }) {
   useEffect(() => { if (closing) keepRef.current?.focus(); }, [closing]);
 
   if (!file) return null;
-  const close = () => {
+  const close = async () => {
     setMenu(null);
-    if (file.dirty) setClosing(true);
+    if (file.dirty && file.auto) await save();  // about to save itself anyway: save, then close
+    if (HOST!.state.file?.dirty) setClosing(true);
     else HOST!.close();
   };
   return (
@@ -50,11 +65,27 @@ export function FileControls({ say }: { say: (text: string) => void }) {
                 }}>
           {file.name}{file.protected ? "" : " (no passphrase)"} <span aria-hidden="true">▾</span>
         </button>
-        {file.dirty && <span className="ws-keyfile-dirty">Unsaved changes</span>}
-        <button type="button" className={`wbtn${file.dirty ? " primary" : ""}`} onClick={() => save()}
-                title={file.inPlace ? "Save your Taxonymous file (⌘S)" : "Downloads your Taxonymous file (⌘S)"}>
-          Save
-        </button>
+        {(() => {
+          const when = file.savedAt ? new Date(file.savedAt).toLocaleString() : "";
+          if (file.saving || (file.auto && file.dirty)) return <span className="ws-keyfile-dirty">Saving…</span>;
+          if (file.auto) {
+            return <span className="ws-keyfile-dirty" title={`Saved at ${when}. Changes are saved as you go.`}>Saved</span>;
+          }
+          const status = file.error ? "Couldn't save"
+            : !file.savedAt ? "Not saved yet"
+            : file.dirty ? `Last saved ${ago(file.savedAt, now)}` : "Saved";
+          return (
+            <>
+              <span className="ws-keyfile-dirty" title={file.error || (when && `Saved at ${when}`)}>{status}</span>
+              {(file.dirty || file.error) && (
+                <button type="button" className="wbtn primary" onClick={() => save()}
+                        title={file.inPlace ? "Save your Taxonymous file (⌘S)" : "Downloads your Taxonymous file (⌘S)"}>
+                  {HOST!.folder && !file.inPlace ? "Save…" : "Save"}
+                </button>
+              )}
+            </>
+          );
+        })()}
       </span>
       {menu && (
         <div className="ws-menu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
