@@ -54,14 +54,16 @@ sys.modules["zxingcpp"] = _Barcodes("zxingcpp")
 
 from taxonymous import ocr  # noqa: E402
 
-reads = {"ocr": 0}  # pictures read by OCR for the document being cleaned
+reads = {"ocr": 0, "ocr_s": 0.0}  # pictures read by OCR for the document being cleaned, and the wait
 
 
 def _ocr(jobs, tsv=False, done=None):
     """Every (picture, psm) read by Tesseract on the page's pool, in order."""
     jobs = list(jobs)
     reads["ocr"] += len(jobs)
+    t = time.perf_counter()
     out = _call("ocr", {"psms": [psm for _, psm in jobs], "tsv": tsv}, [pic.data for pic, _ in jobs])
+    reads["ocr_s"] += time.perf_counter() - t
     if done is not None:
         for i in range(len(jobs)):
             done(i)
@@ -98,7 +100,7 @@ def run(profile_json: str, vault_json: str, name: str, pdf: bytes, fingerprint: 
     work.mkdir(parents=True)
     src = work / name
     src.write_bytes(pdf)
-    reads["ocr"] = 0
+    reads["ocr"], reads["ocr_s"] = 0, 0.0
     matcher = ProfileMatcher(Profile.from_dict(profile))
     VAULT.parent.mkdir(parents=True, exist_ok=True)
     VAULT.write_text(vault_json or '{"placeholders": {}}')  # from the open file: labels as before
@@ -127,6 +129,7 @@ def run(profile_json: str, vault_json: str, name: str, pdf: bytes, fingerprint: 
         "passed": report.passed,
         "issues": [f"{i.kind} ({i.check}, page {i.page})" for i in report.issues],
         "ocr_reads": reads["ocr"],
+        "ocr_s": round(reads["ocr_s"], 2),
         "vault": VAULT.read_text(),
     }
 
