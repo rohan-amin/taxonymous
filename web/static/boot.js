@@ -382,6 +382,7 @@ async function onServiceWorker(e) {
 
 window.taxonymousHost = {
   get state() { return state; },
+  folder: FS && "showDirectoryPicker" in window,
   subscribe(l) { listeners.add(l); return () => listeners.delete(l); },
   setUp() { setUp().catch((e) => set({ stage: "setup", progress: null, error: `Setup stopped: ${e.message}. Try again to carry on.` })); },
   remove: () => removeAll(),
@@ -397,7 +398,7 @@ window.taxonymousHost = {
     let dir = null;
     if (FS && "showDirectoryPicker" in window) {
       try {
-        dir = await window.showDirectoryPicker({ id: "taxonymous-safe-copies", mode: "readwrite" });
+        dir = await window.showDirectoryPicker({ id: "taxonymous-safe-copies", mode: "readwrite", startIn: "documents" });
       } catch (e) {
         if (e.name === "AbortError") return null;
         throw e;

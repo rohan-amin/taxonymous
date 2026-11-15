@@ -33,6 +33,7 @@ export type PassAnswer = { passphrase: string } | null;  // null: cancelled
 
 export interface Host {
   readonly state: HostState;
+  readonly folder: boolean;  // safe copies go to a folder you choose (Chrome, Edge); otherwise downloaded
   subscribe(listener: () => void): () => void;
   setUp(): void;
   remove(): void;

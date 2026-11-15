@@ -944,7 +944,7 @@ export function Workspace() {
                               : `Saved ${todo.length} safe cop${todo.length === 1 ? "y" : "ies"}.`);
                             refresh();
                           }}>Save {ready.filter((d) => !d.exported).length} safe
-                    cop{ready.filter((d) => !d.exported).length === 1 ? "y" : "ies"}</button>
+                    cop{ready.filter((d) => !d.exported).length === 1 ? "y" : "ies"}{HOST?.folder ? "…" : ""}</button>
                 ) : ready.length > 0 && <>
                   <span className="ws-saved"><span className="ws-dot ok" aria-hidden="true" /> All saved</span>
                   {HOST ? (
@@ -957,6 +957,10 @@ export function Workspace() {
                   )}
                 </>}
               </div>
+              {HOST?.folder && (  // Chrome refuses Downloads, Desktop, Documents and the home folder themselves
+                <p className="small">You'll choose a folder for them. Make a new one, such as "Safe copies": the
+                  browser won't save straight into Downloads, Desktop or Documents.</p>
+              )}
             </div>
             <div className="ws-drawer-scroll" style={{ padding: "4px 10px 20px" }}>
               <span className="ws-group-title">Checked · {ready.length}</span>
