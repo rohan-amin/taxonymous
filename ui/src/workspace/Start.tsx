@@ -123,6 +123,13 @@ function Start({ s }: { s: HostState }) {
           {s.stage === "downloading" && s.update && s.progress && (
             <p className="ws-start-muted small ws-start-foot">Updating: {s.progress.text}</p>
           )}
+          <p className="ws-start-muted small ws-start-foot">
+            Free and open source:{" "}
+            <a className="ws-link" href="https://github.com/rohan-amin/taxonymous" target="_blank" rel="noopener noreferrer">
+              source code
+            </a>{" "}
+            (AGPL-3.0)
+          </p>
         </div>
       </div>
       {ask && <PassPrompt {...ask} onDone={(a) => { setAsk(null); ask.done(a); }} />}
