@@ -7,10 +7,16 @@
 //   read:   each line cropped to 48 px high, read; CTC greedy decoding; each character's
 //           position from the step it was read at, so each word gets its own box (the engine
 //           then shrinks it to the ink, as it does Vision's)
+//
+// On the graphics card (WebGPU) when the browser has one, about 4x faster; otherwise the
+// processor. The two read the same (a letter's case can differ, which matching ignores).
 "use strict";
-importScripts("paddle/ort.wasm.min.js");
+const ASKED = new URL(location.href).searchParams;
+const GPU = !ASKED.has("cpu") && !!self.navigator.gpu;
+importScripts("paddle/ort.webgpu.min.js");
 ort.env.wasm.wasmPaths = new URL("paddle/", location.href).href;
-ort.env.wasm.numThreads = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+ort.env.wasm.numThreads = Number(ASKED.get("threads")) || Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+const REC = ASKED.get("rec") || "rec.onnx";
 
 const MAX_SIDE = 1600;  // the detector's input: big enough for form-sized print on a page
 const THRESH = 0.3, BOX_SCORE = 0.6, UNCLIP = 1.5;
@@ -21,10 +27,10 @@ const MEAN = [0.406, 0.456, 0.485], STD = [0.225, 0.224, 0.229];  // BGR, as Pad
 const HEADER = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext";
 
 const ready = (async () => {
-  const opts = { executionProviders: ["wasm"], graphOptimizationLevel: "all" };
+  const opts = { executionProviders: GPU ? ["webgpu", "wasm"] : ["wasm"], graphOptimizationLevel: "all" };
   const [det, rec, dict] = await Promise.all([
     ort.InferenceSession.create("paddle/det.onnx", opts),
-    ort.InferenceSession.create("paddle/rec.onnx", opts),
+    ort.InferenceSession.create("paddle/" + REC, opts),
     fetch("paddle/dict.txt").then((r) => r.text()),
   ]);
   const lines = dict.replace(/\r/g, "").split("\n");
@@ -105,34 +111,69 @@ async function detect(det, img) {
   return boxes;
 }
 
-// one line: its text, and each character's place across it
-async function read(rec, chars, img, box) {
-  const bw = box.x1 - box.x0, bh = box.y1 - box.y0;
-  const H = 48, W = Math.max(16, Math.min(3200, Math.ceil((STRETCH * H * bw) / bh)));
-  const input = tensor(draw(img.bmp, box.x0, box.y0, bw, bh, W, H), W, H, [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]);
-  const out = await rec.run({ [rec.inputNames[0]]: input });
-  const t = out[rec.outputNames[0]];
-  const [, T, C] = t.dims;
-  const p = t.data;
-  const got = [];
-  let last = 0;
-  for (let i = 0; i < T; i++) {
-    let best = 0, bp = -1;
-    for (let c = 0; c < C; c++) if (p[i * C + c] > bp) { bp = p[i * C + c]; best = c; }
-    if (best !== 0 && best !== last) got.push({ ch: chars[best] ?? "", step: i, conf: bp });
-    last = best;
+// the lines, read in batches (sorted by width, padded to the widest in each, as PaddleOCR
+// batches): each line's characters, and each one's place across it
+let BATCH = 16;  // lines per run: what lets the graphics card help (the processor doesn't care)
+let TIMES = {};
+async function readAll(rec, chars, img, boxes) {
+  const H = 48;
+  const lines = boxes.map((box, i) => {
+    const bw = box.x1 - box.x0, bh = box.y1 - box.y0;
+    return { i, box, bw, W: Math.max(16, Math.min(3200, Math.ceil((STRETCH * H * bw) / bh))) };
+  });
+  lines.sort((a, b) => a.W - b.W);
+  const out = new Array(boxes.length);
+  for (let s = 0; s < lines.length; s += BATCH) {
+    const batch = lines.slice(s, s + BATCH);
+    const Wmax = batch[batch.length - 1].W;
+    const n = batch.length;
+    const data = new Float32Array(n * 3 * H * Wmax);  // 0 is mid-grey once normalized: the padding
+    batch.forEach((ln, k) => {
+      const px = draw(img.bmp, ln.box.x0, ln.box.y0, ln.bw, ln.box.y1 - ln.box.y0, ln.W, H);
+      const plane = H * Wmax;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < ln.W; x++) {
+          const q = 4 * (y * ln.W + x), o = k * 3 * plane + y * Wmax + x;
+          data[o] = (px[q + 2] / 255 - 0.5) / 0.5;  // B
+          data[o + plane] = (px[q + 1] / 255 - 0.5) / 0.5;  // G
+          data[o + 2 * plane] = (px[q] / 255 - 0.5) / 0.5;  // R
+        }
+      }
+    });
+    const res = await rec.run({ [rec.inputNames[0]]: new ort.Tensor("float32", data, [n, 3, H, Wmax]) });
+    const t = res[rec.outputNames[0]];
+    const [, T, C] = t.dims;
+    const p = t.data;
+    batch.forEach((ln, k) => {
+      const steps = Math.min(T, Math.ceil((T * ln.W) / Wmax));  // past its own width is padding
+      const got = [];
+      let last = 0;
+      for (let i = 0; i < steps; i++) {
+        let best = 0, bp = -1;
+        const base = (k * T + i) * C;
+        for (let c = 0; c < C; c++) if (p[base + c] > bp) { bp = p[base + c]; best = c; }
+        if (best !== 0 && best !== last) got.push({ ch: chars[best] ?? "", step: i, conf: bp });
+        last = best;
+      }
+      // a step's place: across the padded width, then back onto the line as it is on the page
+      const xOf = (step) => ln.box.x0 + (((step + 0.5) * Wmax) / T / ln.W) * ln.bw;
+      out[ln.i] = { got, half: ((Wmax / T) / ln.W) * ln.bw / 2, xOf };
+    });
   }
-  const xOf = (step) => box.x0 + ((step + 0.5) / T) * bw;
-  return { got, half: bw / T / 2, xOf };
+  return out;
 }
 
 async function page(png) {
   const { det, rec, chars } = await ready;
   const img = await pixels(png);
   const rows = [HEADER];
+  const t0 = performance.now();
   const boxes = await detect(det, img);
+  const t1 = performance.now();
+  const read = await readAll(rec, chars, img, boxes);
+  TIMES = { gpu: GPU, detect: Math.round(t1 - t0), read: Math.round(performance.now() - t1) };
   for (let b = 0; b < boxes.length; b++) {
-    const { got, half, xOf } = await read(rec, chars, img, boxes[b]);
+    const { got, half, xOf } = read[b];
     let word = [];
     let n = 0;
     const flush = () => {
@@ -156,10 +197,11 @@ async function page(png) {
 }
 
 onmessage = async (e) => {
-  const { id, png, stretch } = e.data;
+  const { id, png, stretch, batch } = e.data;
   if (stretch) STRETCH = stretch;  // for trying values
+  if (batch) BATCH = batch;
   try {
-    postMessage({ id, tsv: await page(png) });
+    postMessage({ id, tsv: await page(png), times: TIMES });
   } catch (err) {
     postMessage({ id, error: String(err) });
   }
