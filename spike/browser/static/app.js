@@ -174,7 +174,7 @@ async function newFrom(profileText) {
   const profile = JSON.parse(profileText);
   const pass = await askPass("create");
   if (!pass) return;
-  session = { profile, vault: null, decisions: {}, name: "My taxes.taxonymous", handle: null,
+  session = { profile, vault: null, decisions: {}, name: "my.taxonymous", handle: null,
               passphrase: pass.passphrase, dirty: true };
   showFile();
 }
