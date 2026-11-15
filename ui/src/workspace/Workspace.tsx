@@ -46,6 +46,13 @@ const GROUPS: { tone: Tone[]; title: string }[] = [
 
 // in the Mac app's window (tools/native_window.py): its toolbar has the buttons and drags
 // the window, so the page's top band holds nothing clickable. Kept for this tab, like the token.
+// in the browser app (web/static/boot.js): saving safe copies goes through the page, which
+// writes them to a folder you choose (Chrome, Edge) or downloads them (Safari, Firefox)
+interface Host {
+  saveCopies(ids: string[]): Promise<string | null>; // where they went; null: you cancelled
+}
+const HOST = (window as unknown as { taxonymousHost?: Host }).taxonymousHost;
+
 const NATIVE = (() => {
   const asked = new URL(window.location.href).searchParams.get("native") === "1";
   try {
@@ -755,9 +762,19 @@ export function Workspace() {
   // the finish, in one place: save the checked copies (after a look at the summary), then find them
   const unsaved = ready.filter((d) => !d.exported).length;
   const copies = (n: number) => `${n} safe cop${n === 1 ? "y" : "ies"}`;
-  const finishLabel = unsaved ? `Save ${copies(unsaved)}…` : `${nChecked} saved · Show in Finder`;
-  const finish = () => (unsaved ? setSafeOpen(true)
+  const finishLabel = unsaved ? `Save ${copies(unsaved)}…` : HOST ? `${nChecked} saved` : `${nChecked} saved · Show in Finder`;
+  const finish = () => (unsaved || HOST ? setSafeOpen(true)
     : api.reveal().catch(() => setToast("Choose File › Show Safe Copies in Finder.")));
+  // the browser app: the page writes them where you choose (it exports each first)
+  const saveThrough = async (ids: string[]) => {
+    try {
+      const where = await HOST!.saveCopies(ids);
+      if (where !== null) setToast(`Saved ${copies(ids.length)} to ${where}.`);
+    } catch (e) {
+      setToast((e as Error).message);
+    }
+    refresh();
+  };
   const removedAll = removedList(ready.reduce((acc, d) => {
     for (const [k, n] of Object.entries(d.redactions ?? {})) acc[k] = (acc[k] ?? 0) + n;
     return acc;
@@ -910,6 +927,7 @@ export function Workspace() {
                   <button type="button" className="wbtn primary" data-testid="save-all"
                           onClick={async () => {
                             const todo = ready.filter((x) => !x.exported);
+                            if (HOST) return saveThrough(todo.map((d) => d.id));
                             let failed = 0;
                             for (const d of todo) await api.export(d.id).catch(() => { failed += 1; });
                             setToast(failed ? `${failed} couldn't be saved. Open them to see why.`
@@ -919,9 +937,14 @@ export function Workspace() {
                     cop{ready.filter((d) => !d.exported).length === 1 ? "y" : "ies"}</button>
                 ) : ready.length > 0 && <>
                   <span className="ws-saved"><span className="ws-dot ok" aria-hidden="true" /> All saved</span>
-                  <button type="button" className="wbtn primary"
-                          onClick={() => api.reveal().catch(() => setToast("Choose File › Show Safe Copies in Finder."))}>
-                    Show in Finder</button>
+                  {HOST ? (
+                    <button type="button" className="wbtn" onClick={() => saveThrough(ready.map((d) => d.id))}>
+                      Save again…</button>
+                  ) : (
+                    <button type="button" className="wbtn primary"
+                            onClick={() => api.reveal().catch(() => setToast("Choose File › Show Safe Copies in Finder."))}>
+                      Show in Finder</button>
+                  )}
                 </>}
               </div>
             </div>

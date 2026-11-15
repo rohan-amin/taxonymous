@@ -87,6 +87,11 @@ onmessage = async (e) => {
       // as home.py takes it (a dict): what's missing left out, not null (Python would see JsNull)
       const outputs = Object.fromEntries(Object.entries(m.result.outputs).filter(([, v]) => v));
       j.resolve(m.result.error ? { outputs, error: m.result.error } : { outputs });
+    } else if (m.type === "write") {  // home: a file the page restores (the boxes you drew, from your file)
+      const path = "/ws/" + m.path;
+      py.FS.mkdirTree(path.slice(0, path.lastIndexOf("/")));
+      py.FS.writeFile(path, new Uint8Array(m.data));
+      postMessage({ type: "file", id: m.id, data: null });
     } else if (m.type === "read") {  // home: a file of the workspace, for the page (saving your file)
       const path = "/ws/" + m.path;
       const exists = py.FS.analyzePath(path).exists;

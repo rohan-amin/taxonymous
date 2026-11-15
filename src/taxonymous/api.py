@@ -738,7 +738,9 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         released = export(ws, stem)
         if not released:
             raise HTTPException(409, "cannot export: verification has not passed")
-        return {"released": [p.name for p in released]}
+        # "paths": where each is in ready-to-upload/ (the browser app writes them where you choose)
+        return {"released": [p.name for p in released],
+                "paths": [p.relative_to(ws.ready).as_posix() for p in released]}
 
     @app.post("/api/reveal", status_code=204)
     def reveal():

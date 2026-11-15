@@ -128,7 +128,7 @@ async function removeAll() {
 // ---------------------------------------------------------------- your Taxonymous file
 // opened into memory, saved only when you say: { profile, vault, decisions }
 
-let session = null;  // { vault, name, handle, passphrase, dirty }
+let session = null;  // { vault, decisions, name, handle, passphrase, dirty }
 const FS = "showOpenFilePicker" in window && !new URLSearchParams(location.search).has("nofs");
 const TYPES = [{ description: "Taxonymous file", accept: { "application/json": [".taxonymous"] } }];
 
@@ -181,7 +181,7 @@ async function newFrom(profileText) {
   const profile = profileText ? JSON.parse(profileText) : null;
   const pass = await askPass("create");
   if (!pass) return;
-  session = { vault: null, name: "my.taxonymous", handle: null, passphrase: pass.passphrase, dirty: true };
+  session = { vault: null, decisions: {}, name: "my.taxonymous", handle: null, passphrase: pass.passphrase, dirty: true };
   await open(profile);
 }
 
@@ -218,7 +218,7 @@ async function openFile() {
       setTimeout(() => { $("pass-error").textContent = e.message; }, 0);  // at the top of the next prompt
     }
   }
-  session = { vault: contents.vault, name, handle, passphrase, dirty: false };
+  session = { vault: contents.vault, decisions: contents.decisions || {}, name, handle, passphrase, dirty: false };
   await open(contents.profile);
 }
 
@@ -228,9 +228,38 @@ async function currentProfile() {
   return data ? JSON.parse(new TextDecoder().decode(data)) : null;
 }
 
+// what you decided on each document (the boxes you drew, what you kept or showed), by its
+// fingerprint: the SHA-256 of its bytes. No names, no contents: add the same file again (to the
+// byte, any name) and they come back. Documents not open now keep what the file had for them.
+const inboxPath = (d) => `inbox/${d.folder ? d.folder + "/" : ""}${d.name}`;
+async function currentDecisions() {
+  const out = { ...session.decisions };
+  const headers = { "X-Taxonymous-Token": sessionStorage.getItem("taxonymous-token") || "" };
+  for (const d of await (await fetch("/api/documents", { headers })).json()) {
+    const fp = await sha256(await homeRead(inboxPath(d)));
+    const ov = await homeRead(`vault/overrides/${d.id}.json`);
+    const decided = ov && JSON.parse(new TextDecoder().decode(ov));
+    if (decided && Object.values(decided).some((v) => Array.isArray(v) ? v.length : v && Object.keys(v).length)) {
+      out[fp] = decided;
+    } else {
+      delete out[fp];
+    }
+  }
+  return out;
+}
+
+// a document just added: what your file has for it, put back before it's cleaned
+async function restoreDecisions(d) {
+  const data = await homeRead(inboxPath(d));
+  const decided = data && session?.decisions[await sha256(data)];
+  if (!decided) return;
+  const bytes = new TextEncoder().encode(JSON.stringify(decided));
+  await homeAsk({ type: "write", path: `vault/overrides/${d.id}.json`, data: bytes.buffer }, [bytes.buffer]);
+}
+
 async function save(as = false) {
-  const text = await KEYFILE.seal({ profile: await currentProfile(), vault: session.vault, decisions: {} },
-                                  session.passphrase);
+  const text = await KEYFILE.seal({ profile: await currentProfile(), vault: session.vault,
+                                    decisions: await currentDecisions() }, session.passphrase);
   if (FS && (as || !session.handle)) {
     session.handle = await window.showSaveFilePicker({ suggestedName: session.name, types: TYPES });
     session.name = session.handle.name;
@@ -367,8 +396,55 @@ async function onServiceWorker(e) {
   if (r.method !== "GET" && !r.path.endsWith("/words") && !r.path.endsWith("/suggest")) changed();
   const res = await homeAsk({ type: "request", method: r.method, path: r.path, query: r.query, headers: r.headers,
                               body: r.body }, r.body ? [r.body] : []);
+  if (r.method === "POST" && r.path === "/api/documents" && res.status === 201) {
+    await restoreDecisions(JSON.parse(new TextDecoder().decode(res.body))).catch(() => {});
+  }
   port.postMessage({ status: res.status, headers: res.headers, body: res.body }, [res.body]);
 }
+
+// ---------------------------------------------------------------- safe copies
+// the workspace's Save: each document exported (the server checks it passed), then its safe
+// copy written to a folder you choose (Chrome, Edge: asked first, while it's still your click)
+// or downloaded (Safari, Firefox). Folders of documents are kept.
+
+window.taxonymousHost = {
+  async saveCopies(ids) {
+    let dir = null;
+    if (FS && "showDirectoryPicker" in window) {
+      try {
+        dir = await window.showDirectoryPicker({ id: "taxonymous-safe-copies", mode: "readwrite" });
+      } catch (e) {
+        if (e.name === "AbortError") return null;
+        throw e;
+      }
+    }
+    const headers = { "X-Taxonymous-Token": sessionStorage.getItem("taxonymous-token") || "" };
+    for (const id of ids) {
+      const path = id.split("/").map(encodeURIComponent).join("/");
+      const r = await fetch(`/api/documents/${path}/export`, { method: "POST", headers });
+      if (!r.ok) throw new Error(`${id.split("/").pop()} couldn't be saved. Open it to see why.`);
+      for (const rel of (await r.json()).paths) {
+        const data = await homeRead(`ready-to-upload/${rel}`);
+        const parts = rel.split("/");
+        const name = parts.pop();
+        if (dir) {
+          let here = dir;
+          for (const p of parts) here = await here.getDirectoryHandle(p, { create: true });
+          const w = await (await here.getFileHandle(name, { create: true })).createWritable();
+          await w.write(data);
+          await w.close();
+        } else {
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(new Blob([data], { type: "application/pdf" }));
+          a.download = name;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
+        }
+      }
+    }
+    return dir ? `“${dir.name}”` : "your Downloads folder";
+  },
+};
 
 // ---------------------------------------------------------------- the workspace
 

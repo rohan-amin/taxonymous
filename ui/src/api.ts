@@ -283,7 +283,7 @@ export const api = {
     call("DELETE", `${doc(id)}/kept?placeholder=${encodeURIComponent(placeholder)}`),
   verify: (id: string) => call("POST", `${doc(id)}/verify`),
   reveal: () => call("POST", "/api/reveal"),
-  export: (id: string) => call<{ released: string[] }>("POST", `${doc(id)}/export`),
+  export: (id: string) => call<{ released: string[]; paths: string[] }>("POST", `${doc(id)}/export`),
   merge: (folder: string, maxMb: number | null) =>
     call("POST", `/api/merge?folder=${encodeURIComponent(folder)}`, { max_mb: maxMb }),
   mergeState: (folder: string) => call<MergeState>("GET", `/api/merge?folder=${encodeURIComponent(folder)}`),
