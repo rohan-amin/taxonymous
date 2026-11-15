@@ -1,13 +1,15 @@
-// The main page's side of the engine's synchronous calls. The engine (Python, in its worker)
-// calls OCR and the barcode reader as ordinary functions; its worker posts the work here and
-// waits on shared memory; the work runs here (OCR on a pool of Tesseract workers, one per
-// core, up to 6) and the answer is written back, which wakes the engine.
+// The main page's side of the engines' synchronous calls. An engine (Python, in its worker)
+// calls OCR, the barcode reader and the vault's lock as ordinary functions; its worker posts
+// the work here and waits on shared memory of its own (a channel); the work runs here (OCR
+// on a pool of Tesseract workers, one per core, up to 6, shared by every engine, a read at a
+// time each) and the answer is written back, which wakes that engine.
 "use strict";
 
 const BRIDGE = (() => {
   const SIZE = 64 * 2 ** 20;  // the longest answer: a batch of pages' OCR, as text
-  const ctrl = new Int32Array(new SharedArrayBuffer(8));  // [state: 0 waiting / 1 answered, length]
-  const data = new Uint8Array(new SharedArrayBuffer(SIZE));
+  // one per engine: [state: 0 waiting / 1 answered, length], and the answer
+  const channel = () => ({ ctrl: new Int32Array(new SharedArrayBuffer(8)), data: new Uint8Array(new SharedArrayBuffer(SIZE)) });
+  const handlers = {};  // more calls the page answers (the vault's lock: app.js)
   const HEADER = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext";
   let pool = null;
   let zxing = null;
@@ -32,44 +34,49 @@ const BRIDGE = (() => {
     });
   }
 
+  // Tesseract: every engine's reads in one queue, each worker taking the next when it's free
+  // (a worker's layout mode is set before each read, so it only ever has one)
+  const tessQueue = [];
   function ocrPool() {
     if (!pool) {
       const n = Math.max(1, Math.min(6, (navigator.hardwareConcurrency || 2) - 1));
       pool = Promise.all(Array.from({ length: n }, () => Tesseract.createWorker("eng", 1, {
         workerPath: "ocr/worker.min.js", corePath: "ocr/", langPath: "ocr/", gzip: false,
         workerBlobURL: false, cacheMethod: "none",  // nothing kept in the browser
-      })));
+      }))).then((ws) => { ws.forEach((w) => { w.idle = true; }); return ws; });
     }
     return pool;
+  }
+  async function pump() {
+    for (const w of await ocrPool()) {
+      if (!w.idle || !tessQueue.length) continue;
+      const job = tessQueue.shift();
+      w.idle = false;
+      (async () => {
+        try {
+          await w.setParameters({ tessedit_pageseg_mode: job.psm });
+          const r = await w.recognize(new Blob([job.png], { type: "image/png" }), {}, { tsv: job.tsv, text: !job.tsv });
+          let t = job.tsv ? r.data.tsv : r.data.text;
+          if (job.tsv && !t.startsWith("level")) t = HEADER + "\n" + t;  // as the command-line tool gives it
+          job.resolve(t);
+        } catch (e) {
+          job.reject(e);
+        }
+        w.idle = true;
+        pump();
+      })();
+    }
+  }
+  function tessRead(psm, png, tsv) {
+    return new Promise((resolve, reject) => { tessQueue.push({ psm, png, tsv, resolve, reject }); pump(); });
   }
 
   // jobs: [{psm, png}] -> each one's TSV (or text), in order; psm "vision" is the second
   // engine's read (Paddle, standing in for the Mac's Vision), at the same time as Tesseract's
   async function ocr({ psms, tsv }, blobs) {
-    const out = new Array(psms.length);
-    const second = [];
-    psms.forEach((psm, i) => { if (psm === "vision") second.push(i); });
-    const paddleDone = (async () => {
-      for (const i of second) {
-        const t = await paddleRead(blobs[i]);
-        out[i] = tsv ? t : t.split("\n").slice(1).map((r) => r.split("\t")[11] || "").join(" ");
-      }
-    })();
-    const todo = psms.map((_, i) => i).filter((i) => psms[i] !== "vision");
-    const workers = todo.length ? await ocrPool() : [];
-    let next = 0;
-    const tessDone = Promise.all(workers.map(async (w) => {
-      while (next < todo.length) {
-        const i = todo[next++];
-        await w.setParameters({ tessedit_pageseg_mode: psms[i] });
-        const r = await w.recognize(new Blob([blobs[i]], { type: "image/png" }), {}, { tsv, text: !tsv });
-        let t = tsv ? r.data.tsv : r.data.text;
-        if (tsv && !t.startsWith("level")) t = HEADER + "\n" + t;  // as the command-line tool gives it
-        out[i] = t;
-      }
-    }));
-    await Promise.all([paddleDone, tessDone]);
-    return out;
+    const asText = (t) => (tsv ? t : t.split("\n").slice(1).map((r) => r.split("\t")[11] || "").join(" "));
+    return Promise.all(psms.map(async (psm, i) => (
+      psm === "vision" ? asText(await paddleRead(blobs[i])) : tessRead(psm, blobs[i], tsv))));
   }
 
   async function barcodes({ formats }, blobs) {
@@ -82,10 +89,10 @@ const BRIDGE = (() => {
     return found.filter((r) => r.isValid).map((r) => r.position);
   }
 
-  async function answer(worker, { kind, payload, blobs }) {
+  async function answer({ ctrl, data }, { kind, payload, blobs }) {
     let result;
     try {
-      result = { ok: await ({ ocr, barcodes })[kind](JSON.parse(payload), blobs) };
+      result = { ok: await ({ ocr, barcodes, ...handlers })[kind](JSON.parse(payload), blobs) };
     } catch (e) {
       result = { error: String(e) };
     }
@@ -97,5 +104,5 @@ const BRIDGE = (() => {
     Atomics.notify(ctrl, 0);
   }
 
-  return { ctrl, data, answer };
+  return { channel, answer, handlers };
 })();

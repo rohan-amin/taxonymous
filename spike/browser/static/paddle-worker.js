@@ -196,13 +196,17 @@ async function page(png) {
   return rows.join("\n") + "\n";
 }
 
-onmessage = async (e) => {
+// a page at a time: every engine's pages come here, and a model runs one thing at a time
+let queue = Promise.resolve();
+onmessage = (e) => {
   const { id, png, stretch, batch } = e.data;
   if (stretch) STRETCH = stretch;  // for trying values
   if (batch) BATCH = batch;
-  try {
-    postMessage({ id, tsv: await page(png), times: TIMES });
-  } catch (err) {
-    postMessage({ id, error: String(err) });
-  }
+  queue = queue.then(async () => {
+    try {
+      postMessage({ id, tsv: await page(png), times: TIMES });
+    } catch (err) {
+      postMessage({ id, error: String(err) });
+    }
+  });
 };

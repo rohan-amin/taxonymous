@@ -3,7 +3,7 @@
 
 const $ = (id) => document.getElementById(id);
 const CACHE_PREFIX = "taxonymous-v-";  // one per version; the service worker keeps the page in "taxonymous-shell"
-let manifest, manifestText, cacheName, worker, workerReady;
+let manifest, manifestText, cacheName, enginesReady;
 
 const mb = (n) => (n < 2 ** 20 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -261,38 +261,91 @@ async function removeAll() {
   location.reload();
 }
 
-// ---- the engine
+// ---- the engines: like the app's lanes, one below 8 cores, 2 from 8, 3 from 12, at most one
+// per 4 GB (?lanes= overrides). Each is a worker with Python in it; documents go to whichever
+// is free. While one cleans (the processor), another can be checking (the graphics card).
+const LANES = Number(new URL(location.href).searchParams.get("lanes")) || Math.max(1, Math.min(
+  (navigator.hardwareConcurrency || 2) >= 12 ? 3 : (navigator.hardwareConcurrency || 2) >= 8 ? 2 : 1,
+  Math.floor((navigator.deviceMemory || 8) / 4)));
+const engines = [];
+const waitingForEngine = [];
+
 function engine() {
-  if (!workerReady) {
-    worker = new Worker("worker.js");
-    worker.postMessage({ type: "shared", ctrl: BRIDGE.ctrl, data: BRIDGE.data });
-    worker.addEventListener("message", (e) => { if (e.data.type === "call") BRIDGE.answer(worker, e.data); });
+  if (!enginesReady) {
     $("engine").textContent = "Starting the engine…";
-    workerReady = new Promise((resolve, reject) => {
-      worker.onmessage = (e) => {
-        if (e.data.type === "ready") {
-          $("engine").textContent = `Engine ready in ${e.data.seconds}s (PyMuPDF ${e.data.pymupdf}, in this page).`;
-          resolve();
-        } else if (e.data.type === "fatal") reject(new Error(e.data.error));
-      };
+    const t0 = performance.now();
+    enginesReady = Promise.all(Array.from({ length: LANES }, () => {
+      const channel = BRIDGE.channel();
+      const worker = new Worker("worker.js");
+      worker.postMessage({ type: "shared", ctrl: channel.ctrl, data: channel.data });
+      worker.addEventListener("message", (e) => { if (e.data.type === "call") BRIDGE.answer(channel, e.data); });
+      return new Promise((resolve, reject) => {
+        worker.onmessage = (e) => {
+          if (e.data.type === "ready") {
+            engines.push({ worker, busy: false, pymupdf: e.data.pymupdf });
+            resolve();
+          } else if (e.data.type === "fatal") reject(new Error(e.data.error));
+        };
+      });
+    })).then(() => {
+      const s = ((performance.now() - t0) / 1000).toFixed(1);
+      $("engine").textContent = `Engine ready in ${s}s (PyMuPDF ${engines[0].pymupdf}, in this page`
+        + (LANES > 1 ? `; ${LANES} documents at a time).` : ").");
     });
   }
-  return workerReady;
+  return enginesReady;
+}
+
+async function freeEngine() {
+  await engine();
+  const e = engines.find((x) => !x.busy);
+  if (e) { e.busy = true; return e; }
+  return new Promise((resolve) => waitingForEngine.push(resolve));
+}
+
+function done(e) {
+  const next = waitingForEngine.shift();
+  if (next) next(e); else e.busy = false;
 }
 
 let nextId = 0;
-function ask(message, transfer = []) {
-  return new Promise((resolve) => {
-    const id = nextId++;
-    const listen = (e) => {
-      if (e.data.id !== id) return;
-      worker.removeEventListener("message", listen);
-      resolve(e.data.result);
-    };
-    worker.addEventListener("message", listen);
-    worker.postMessage({ id, ...message }, transfer);
-  });
+async function ask(message, transfer = []) {
+  const e = await freeEngine();
+  try {
+    return await new Promise((resolve) => {
+      const id = nextId++;
+      const listen = (m) => {
+        if (m.data.id !== id) return;
+        e.worker.removeEventListener("message", listen);
+        resolve(m.data.result);
+      };
+      e.worker.addEventListener("message", listen);
+      // the vault as it is now (another engine may have named labels while this one waited)
+      e.worker.postMessage({ id, ...message, ...(message.kind === "clean" ? { vault: session.vault } : {}) }, transfer);
+    });
+  } finally {
+    done(e);
+  }
 }
+
+// the vault, lent to one engine at a time (run.py's lock): whatever it named comes back here,
+// into the open file (kept in memory until you save)
+let vaultLent = false;
+const waitingForVault = [];
+BRIDGE.handlers.vault_lock = async () => {
+  while (vaultLent) await new Promise((resolve) => waitingForVault.push(resolve));
+  vaultLent = true;
+  return session.vault || "";
+};
+BRIDGE.handlers.vault_unlock = ({ vault }) => {
+  if (vault && vault !== session.vault) {
+    session.vault = vault;
+    changed();
+  }
+  vaultLent = false;
+  waitingForVault.shift()?.();
+  return true;
+};
 
 const docs = [];  // this session's documents, in memory only: { name, bytes, fp, pages, card }
 
@@ -304,20 +357,16 @@ async function add(name, bytes) {
   docs.push(doc);
   const before = session.decisions[fp]?.add?.length || 0;
   doc.restored = before;  // the same file as before (to the byte): its boxes come back
-  await cleanDoc(doc);
+  return doc;
 }
 
 async function cleanDoc(doc) {
   doc.card.textContent = `${doc.name}: cleaning…`;
   const copy = doc.bytes.slice();  // the original stays here; the worker gets a copy
-  const r = await ask({ kind: "clean", profile: JSON.stringify(session.profile), vault: session.vault, name: doc.name,
+  const r = await ask({ kind: "clean", profile: JSON.stringify(session.profile), name: doc.name,
                         bytes: copy, fingerprint: doc.fp, decisions: JSON.stringify(session.decisions[doc.fp] || {}) },
                       [copy.buffer]);
-  if (r.vault && r.vault !== session.vault) {  // new labels: kept in memory until you save
-    session.vault = r.vault;
-    changed();
-  }
-  show(doc, r);
+  show(doc, r);  // new labels went into the open file as they were named (the vault's lock)
 }
 
 async function run(list) {
@@ -325,7 +374,9 @@ async function run(list) {
   docs.length = 0;
   try {
     await engine();
-    for (const { name, bytes } of list) await add(name, bytes);
+    const added = [];
+    for (const { name, bytes } of list) added.push(await add(name, bytes));
+    await Promise.all(added.map(cleanDoc));  // as many at once as there are engines
   } catch (e) {
     $("engine").textContent = `That didn't work: ${e.message}`;
   }

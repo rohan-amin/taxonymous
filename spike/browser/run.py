@@ -14,10 +14,21 @@ import types
 from pathlib import Path
 
 sys.path.insert(0, "/engine")
-try:
-    import fcntl  # noqa: F401
-except ImportError:  # one tab: nothing to lock against
-    sys.modules["fcntl"] = types.SimpleNamespace(flock=lambda *a: None, LOCK_EX=2, LOCK_UN=8)
+
+
+def _flock(_file, op: int) -> None:
+    """The vault's lock, as several engines on the page share it: the page holds the vault
+    (the open Taxonymous file's), lends it to one engine at a time, and takes it back with
+    whatever that engine named. As the app's lanes share the vault file."""
+    if op == 2:
+        VAULT.parent.mkdir(parents=True, exist_ok=True)
+        VAULT.write_text(_call("vault_lock", {}) or '{"placeholders": {}}')
+    elif op == 8:
+        _call("vault_unlock", {"vault": VAULT.read_text() if VAULT.exists() else ""})
+
+
+if sys.platform == "emscripten":  # in the browser (natively, the real lock)
+    sys.modules["fcntl"] = types.SimpleNamespace(flock=_flock, LOCK_EX=2, LOCK_UN=8)
 
 
 def _call(kind: str, payload: dict, blobs: list[bytes] = ()):
