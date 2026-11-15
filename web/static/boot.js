@@ -135,10 +135,29 @@ function showFile() {
                            inPlace: FS && !!session.handle } });
 }
 
-function changed() {
-  if (!session) return;
-  session.dirty = true;
-  showFile();
+// "Unsaved changes" means saving now would write something the file doesn't have: your profile,
+// a label named, a box drawn or taken away. Not documents added or removed (they're never in
+// the file), nor safe copies saved. Worked out again after anything that could change it.
+let saved = null;  // the file's contents as last opened or saved, canonical; null: never saved
+const canonical = (v) => JSON.stringify(v, (k, x) => x && typeof x === "object" && !Array.isArray(x)
+  ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x);
+async function contents() {
+  return { profile: await currentProfile(), vault: session.vault || "", decisions: await currentDecisions() };
+}
+let checking = null;
+let recheckAgain = false;
+async function recheck() {
+  if (checking) { recheckAgain = true; return checking; }
+  checking = (async () => {
+    do {
+      recheckAgain = false;
+      if (!session) break;
+      const now = canonical(await contents());
+      if (session) session.dirty = saved === null || now !== saved;
+      showFile();
+    } while (recheckAgain);
+  })().finally(() => { checking = null; });
+  return checking;
 }
 
 // the passphrase: to protect a new file ("create"), or to open a protected one ("open"); the UI asks
@@ -200,11 +219,13 @@ async function currentProfile() {
 // fingerprint: the SHA-256 of its bytes. No names, no contents: add the same file again (to the
 // byte, any name) and they come back. Documents not open now keep what the file had for them.
 const inboxPath = (d) => `inbox/${d.folder ? d.folder + "/" : ""}${d.name}`;
+const fingerprints = new Map();  // a document's id -> its fingerprint, while it's here
 async function currentDecisions() {
   const out = { ...session.decisions };
   const headers = { "X-Taxonymous-Token": sessionStorage.getItem("taxonymous-token") || "" };
   for (const d of await (await fetch("/api/documents", { headers })).json()) {
-    const fp = await sha256(await homeRead(inboxPath(d)));
+    if (!fingerprints.has(d.id)) fingerprints.set(d.id, await sha256(await homeRead(inboxPath(d))));
+    const fp = fingerprints.get(d.id);
     const ov = await homeRead(`vault/overrides/${d.id}.json`);
     const decided = ov && JSON.parse(new TextDecoder().decode(ov));
     if (decided && Object.values(decided).some((v) => Array.isArray(v) ? v.length : v && Object.keys(v).length)) {
@@ -226,8 +247,8 @@ async function restoreDecisions(d) {
 }
 
 async function save(as = false) {
-  const text = await KEYFILE.seal({ profile: await currentProfile(), vault: session.vault,
-                                    decisions: await currentDecisions() }, session.passphrase);
+  const now = await contents();
+  const text = await KEYFILE.seal({ ...now, vault: now.vault || null }, session.passphrase);
   if (FS && (as || !session.handle)) {
     try {
       session.handle = await window.showSaveFilePicker({ suggestedName: session.name, types: TYPES });
@@ -247,8 +268,8 @@ async function save(as = false) {
     a.download = session.name;
     a.click();
   }
-  session.dirty = false;
-  showFile();
+  saved = canonical(now);
+  await recheck();  // anything that changed while it was being written
   return { name: session.name, downloaded: !(FS && session.handle) };
 }
 
@@ -353,7 +374,7 @@ BRIDGE.handlers.vault_lock = async () => {
 BRIDGE.handlers.vault_unlock = ({ vault }) => {
   if (session && vault && vault !== session.vault) {
     session.vault = vault;
-    changed();
+    recheck();
   }
   vaultLent = false;
   waitingForVault.shift()?.();
@@ -366,13 +387,14 @@ async function onServiceWorker(e) {
   const port = e.ports[0];
   const r = e.data;
   await started;
-  if (r.method !== "GET" && !r.path.endsWith("/words") && !r.path.endsWith("/suggest")) changed();
   const res = await homeAsk({ type: "request", method: r.method, path: r.path, query: r.query, headers: r.headers,
                               body: r.body }, r.body ? [r.body] : []);
   if (r.method === "POST" && r.path === "/api/documents" && res.status === 201) {
     await restoreDecisions(JSON.parse(new TextDecoder().decode(res.body))).catch(() => {});
   }
+  if (r.method !== "GET" && (r.method !== "POST" || r.path === "/api/documents")) fingerprints.clear();
   port.postMessage({ status: res.status, headers: res.headers, body: res.body }, [res.body]);
+  if (r.method !== "GET" && !r.path.endsWith("/words") && !r.path.endsWith("/suggest")) recheck();
 }
 
 // ---------------------------------------------------------------- safe copies
@@ -446,6 +468,7 @@ async function open(profile) {
     home.worker.postMessage({ type: "start", token, lanes: LANES, profile: profile ? JSON.stringify(profile) : null });
   });
   begin();
+  if (!session.dirty) saved = canonical(await contents());  // opened: what the file has, as the workspace reads it
   showFile();
   set({ stage: "open" });
 }
