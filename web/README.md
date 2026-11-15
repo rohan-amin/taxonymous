@@ -9,7 +9,7 @@ then everything works offline, and nothing you add leaves the computer.
 
 Deploy (Cloudflare Pages, static; `_headers` carries the content-security policy):
 
-    npx wrangler pages deploy web/dist --project-name taxonymous
+    npx wrangler pages deploy web/dist --project-name taxonymous --branch main   # https://taxonymous.pages.dev
 
 ## How it fits together
 

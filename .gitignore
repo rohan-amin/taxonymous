@@ -44,3 +44,6 @@ tests/fixtures/generated/
 
 # the browser spike: fetched files
 web/.downloads/
+
+# wrangler (Cloudflare) local state
+.wrangler/
