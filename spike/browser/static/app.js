@@ -14,6 +14,10 @@ async function sha256(buf) {
 
 async function start() {
   if ("serviceWorker" in navigator) {
+    // a new offline layer took over: start again on it, so the page, the worker and the
+    // engine are always one version (an old page talking to a new engine breaks)
+    const had = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => { if (had) location.reload(); });
     await navigator.serviceWorker.register("sw.js");
     await navigator.serviceWorker.ready;
   }

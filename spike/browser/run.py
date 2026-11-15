@@ -4,6 +4,7 @@ OCR is not in this spike: a page with pictures (or a scan) has its pictures coun
 reported, never passed as checked.
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -70,6 +71,7 @@ def run(profile_json: str, vault_json: str, name: str, pdf: bytes, fingerprint: 
     VAULT.parent.mkdir(parents=True, exist_ok=True)
     VAULT.write_text(vault_json or '{"placeholders": {}}')  # from the open file: labels as before
     vault = Vault(VAULT)
+    fingerprint = fingerprint or hashlib.sha256(pdf).hexdigest()  # never relies on the page for it
     decisions = json.loads(decisions_json or "{}")
     overrides = Overrides(add=[(int(b["page"]), tuple(b["rect"])) for b in decisions.get("add", [])])
     t0 = time.perf_counter()
