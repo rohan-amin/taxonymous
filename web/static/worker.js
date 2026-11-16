@@ -74,6 +74,8 @@ onmessage = async (e) => {
       if (m.profile) py.FS.writeFile("/ws/vault/profile.json", m.profile);
       mod.start(m.token, m.lanes);
       postMessage({ type: "started" });
+    } else if (m.type === "clean") {  // home: guided setup's details, as the app keeps them, and what to fix
+      postMessage({ type: "file", id: m.id, data: mod.clean_profile(m.profile) });
     } else if (m.type === "request") {
       const [status, headers, body] = await mod.request(m.method, m.path, m.query, JSON.stringify(m.headers),
                                                         m.body ? new Uint8Array(m.body) : undefined);

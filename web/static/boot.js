@@ -205,9 +205,48 @@ async function newFrom(profileText) {
   await open(profile);
 }
 
+// guided setup's last step: where your new file goes (asked first, while it's still your click),
+// then, once setup's download is done, the details you typed, as the app keeps them, opened
+// and saved there. { errors } (by field, as profile.clean names them) if something needs fixing.
+let chosen = null;  // the place picked for a new file, kept while you fix what setup's check found
+async function create(profile, passphrase) {
+  if (FS && !chosen) {
+    try {
+      chosen = await window.showSaveFilePicker({ suggestedName: "My taxes.taxonymous", types: TYPES, id: PICKER,
+                                                 startIn: "documents" });
+    } catch (e) {
+      if (e.name === "AbortError") return null;
+      throw e;
+    }
+  }
+  await whenReady();
+  await engines();
+  const checked = JSON.parse(await homeAsk({ type: "clean", profile: JSON.stringify(profile) }));
+  if (Object.keys(checked.errors).length) return { errors: checked.errors };
+  session = { vault: null, decisions: {}, name: chosen ? chosen.name : "My taxes.taxonymous", handle: chosen,
+              writable: !!chosen, passphrase, dirty: true, savedAt: null };
+  chosen = null;
+  await open(checked.profile);
+  await write().catch((e) => { session.error = e.message; showFile(); });  // the bar says so, with Save
+  return { name: session.name, downloaded: !FS };
+}
+
+// set up on this computer (now, or when setup's download finishes); fails if setup stopped
+function whenReady() {
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      if (["ready", "starting", "open"].includes(state.stage)) { listeners.delete(check); resolve(); }
+      else if (state.stage === "setup" && state.error) { listeners.delete(check); reject(new Error(state.error)); }
+    };
+    listeners.add(check);
+    check();
+  });
+}
+
+const PICKER = "taxonymous-file";  // the folder you last used for it, remembered by the browser
 async function readPicked() {
   if (FS) {
-    const [handle] = await window.showOpenFilePicker({ types: TYPES });
+    const [handle] = await window.showOpenFilePicker({ types: TYPES, id: PICKER, startIn: "documents" });
     const f = await handle.getFile();
     return { text: await f.text(), name: handle.name, handle, modified: f.lastModified };
   }
@@ -287,7 +326,8 @@ async function restoreDecisions(d) {
 async function save(as = false) {
   if (FS && (as || !session.handle)) {
     try {
-      session.handle = await window.showSaveFilePicker({ suggestedName: session.name, types: TYPES });
+      session.handle = await window.showSaveFilePicker({ suggestedName: session.name, types: TYPES, id: PICKER,
+                                                         startIn: "documents" });
     } catch (e) {
       if (e.name === "AbortError") return null;
       throw e;
@@ -463,6 +503,11 @@ window.taxonymousHost = {
   setUp() { setUp().catch((e) => set({ stage: "setup", progress: null, error: `Setup stopped: ${e.message}. Try again to carry on.` })); },
   remove: () => removeAll(),
   openFile() { act(openFile); },
+  create: (profile, passphrase) => create(profile, passphrase).catch((e) => {
+    chosen = null;
+    if (state.stage === "starting") set({ stage: "ready" });
+    throw e;
+  }),
   newFile(from) {
     act(async () => newFrom(from === "empty" ? null
       : from === "sample" ? await (await fetch("samples/household.json")).text() : from.profile));

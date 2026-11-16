@@ -125,6 +125,13 @@ def progress(job_id: int, snapshot: str) -> None:
         p.show(json.loads(snapshot))
 
 
+def clean_profile(text: str) -> str:
+    """Guided setup's details as the app keeps them, and what to fix: {"profile", "errors"}."""
+    from taxonymous.profile import clean
+    profile, errors = clean(json.loads(text))
+    return json.dumps({"profile": profile, "errors": errors})
+
+
 def start(token: str, lanes: int) -> None:
     global APP
     ws = Workspace(ROOT)

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { HOST, useHost } from "./host";
 import type { HostState, PassAnswer, PassMode } from "./host";
+import { Setup } from "./Setup";
 import { LocalBanner, WELCOME_STEPS, Workspace } from "./Workspace";
 import "./workspace.css";
 
-// The browser app: the start screen (set up on this computer, then open or start your
-// Taxonymous file), then the workspace.
+// The browser app: the start screen (a first visit: guided setup, its download behind it; after
+// that: open your Taxonymous file), then the workspace.
 export function Browser() {
   const s = useHost()!;
   return s.stage === "open" ? <Workspace /> : <Start s={s} />;
@@ -21,65 +22,92 @@ const Brand = () => (
 
 function Start({ s }: { s: HostState }) {
   const [ask, setAsk] = useState<{ mode: PassMode; name: string; error: string; done: (a: PassAnswer) => void } | null>(null);
+  const [guide, setGuide] = useState(false);
   const profileInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     HOST!.askPass = (mode, name, error) => new Promise((done) => setAsk({ mode, name, error, done }));
     return () => { HOST!.askPass = undefined; };
   }, []);
   const busy = s.stage === "starting";
+  const setUp = () => { if (s.stage === "setup") HOST!.setUp(); };  // the download, quietly, while you answer
+
+  if (guide) {
+    return (
+      <div className="ws">
+        <header className="ws-top"><Brand /></header>
+        <Setup s={s} onCancel={() => setGuide(false)} />
+      </div>
+    );
+  }
 
   let card;
+  const first = s.stage === "setup" || s.stage === "downloading";
   if (s.stage === "checking") {
-    card = <p className="ws-start-muted">Checking what's on this computer…</p>;
-  } else if (s.stage === "setup" || s.stage === "downloading") {
+    card = <p className="ws-start-muted">Getting ready…</p>;
+  } else if (first && s.stage === "downloading" && s.progress && !s.update) {
     card = (
       <>
-        <h2>Set up Taxonymous on this computer</h2>
+        <h2>Getting Taxonymous ready on your computer</h2>
         <p className="ws-start-muted">
-          A one-time download of {s.size}, checked file by file. After that Taxonymous opens with no internet
-          connection, and nothing you add to it ever leaves this computer.
+          A one-time download of {s.size}. After that, Taxonymous works with no internet connection.
         </p>
-        {s.stage === "downloading" && s.progress ? (
-          <div className="ws-start-progress">
-            <div className="ws-bar work" role="progressbar" aria-label="Setting up" aria-valuemin={0} aria-valuemax={100}
-                 aria-valuenow={Math.round(s.progress.fraction * 100)}>
-              <div style={{ width: `${s.progress.fraction * 100}%` }} />
-            </div>
-            <span className="ws-start-muted">{s.progress.text}</span>
+        <div className="ws-start-progress">
+          <div className="ws-bar work" role="progressbar" aria-label="Setting up" aria-valuemin={0} aria-valuemax={100}
+               aria-valuenow={Math.round(s.progress.fraction * 100)}>
+            <div style={{ width: `${s.progress.fraction * 100}%` }} />
           </div>
-        ) : (
-          <div className="ws-start-row">
-            <button type="button" className="wbtn primary big" onClick={() => HOST!.setUp()}>Download and set up</button>
-          </div>
-        )}
+          <span className="ws-start-muted">{s.progress.text}</span>
+        </div>
+        <div className="ws-start-row">
+          <button type="button" className="wbtn primary big" onClick={() => setGuide(true)}>Set up a new file</button>
+        </div>
+      </>
+    );
+  } else if (first) {
+    card = (
+      <>
+        <h2>Set up Taxonymous</h2>
+        <p>
+          It takes about five minutes. Have your Social Security number handy, and your spouse's if you file
+          together. Account numbers are optional.
+        </p>
+        <div className="ws-start-row">
+          <button type="button" className="wbtn primary big" onClick={() => { setUp(); setGuide(true); }}>
+            Get started
+          </button>
+        </div>
+        <p className="ws-start-muted">
+          Already have a Taxonymous file?{" "}
+          <button type="button" className="ws-link" onClick={setUp}>Open it</button>
+        </p>
       </>
     );
   } else {
     card = (
       <>
-        <h2>Your Taxonymous file</h2>
-        <p className="ws-start-muted">
-          Your details and the labels that stand for them live in one file you keep where you like, protected with a
-          passphrase. Taxonymous reads it when you open it and writes it only when you save. Nothing is kept in
-          this browser: close the page and your documents go with it.
+        <h2>Welcome back</h2>
+        <p>
+          Open your Taxonymous file to carry on. It's the file you saved when you set up: in your Documents folder,
+          unless you put it somewhere else.
         </p>
         <div className="ws-start-row">
           <button type="button" className="wbtn primary big" disabled={busy} onClick={() => HOST!.openFile()}>
-            Open your file…
-          </button>
-          <button type="button" className="wbtn big" disabled={busy} onClick={() => HOST!.newFile("empty")}>
-            Start a new file
+            Open my Taxonymous file
           </button>
           {busy && <span className="ws-start-muted">Opening…</span>}
         </div>
+        <p className="ws-start-muted">
+          New here, or starting over?{" "}
+          <button type="button" className="ws-link" disabled={busy} onClick={() => setGuide(true)}>Set up a new file</button>
+        </p>
         <p className="ws-start-muted small">
-          Have a profile.json from the Mac app?{" "}
-          <button type="button" className="ws-link" disabled={busy} onClick={() => profileInput.current?.click()}>
-            Start from it
-          </button>
-          . Just looking?{" "}
+          Just looking?{" "}
           <button type="button" className="ws-link" disabled={busy} onClick={() => HOST!.newFile("sample")}>
             Try a sample household
+          </button>
+          . Have a profile.json from the Mac app?{" "}
+          <button type="button" className="ws-link" disabled={busy} onClick={() => profileInput.current?.click()}>
+            Start from it
           </button>
           .
         </p>
@@ -99,25 +127,27 @@ function Start({ s }: { s: HostState }) {
         <div className="ws-welcome-inner">
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <h1>Share your tax documents with AI, without sharing who you are.</h1>
-            <p style={{ fontSize: 15, color: "var(--w-muted)" }}>Remove your identity. Preserve your financial context.</p>
+            <p className="ws-start-sub">Remove your identity. Preserve your financial context.</p>
           </div>
           <section className="ws-start-card" aria-live="polite">
             {card}
             {s.error && <p className="ws-start-error" role="alert">{s.error}</p>}
           </section>
           <LocalBanner />
-          <ol className="ws-steps">
-            {WELCOME_STEPS.map(([t, b], i) => (
-              <li key={t}><span className="n">{i + 1}</span><strong>{t}</strong><p>{b}</p></li>
-            ))}
-          </ol>
+          {first && (
+            <ol className="ws-steps">
+              {WELCOME_STEPS.map(([t, b], i) => (
+                <li key={t}><span className="n">{i + 1}</span><strong>{t}</strong><p>{b}</p></li>
+              ))}
+            </ol>
+          )}
           {(s.stage === "ready" || s.stage === "starting") && (
             <p className="ws-start-muted small ws-start-foot">
               {s.update ? (
                 <>A new version is ready ({s.size}).{" "}
                   <button type="button" className="ws-link" onClick={() => HOST!.setUp()}>Update</button> · </>
-              ) : <>Set up on this computer, works offline · </>}
-              <button type="button" className="ws-link" onClick={() => HOST!.remove()}>Remove from this computer</button>
+              ) : <>Set up on your computer, works offline · </>}
+              <button type="button" className="ws-link" onClick={() => HOST!.remove()}>Remove from your computer</button>
             </p>
           )}
           {s.stage === "downloading" && s.update && s.progress && (

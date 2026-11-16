@@ -115,9 +115,9 @@ export function LocalBanner() {
         </svg>
       </span>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <strong>Everything stays on this computer</strong>
+        <strong>Everything stays on your computer</strong>
         <p>Your documents and details are never uploaded. You can even turn off your Wi-Fi and Taxonymous will still work.</p>
-        <p className="strong">You're always in control of your sensitive information: only the safe copies you choose to share ever leave this computer.</p>
+        <p className="strong">You're always in control of your sensitive information: only the safe copies you choose to share ever leave your computer.</p>
       </div>
     </div>
   );
@@ -971,11 +971,11 @@ export function Workspace() {
                      )} />
           ) : (
             <section className="ws-doc" style={{ justifyContent: "center" }}>
-              <div className="ws-empty">
+              <div className={`ws-empty${docs ? " first" : ""}`}>
                 <strong>{docs ? "Add your first document" : "Loading…"}</strong>
                 {docs && <><span>Any document works. Your W-2 or 1040 is a good start: most of your details are at the top.</span>
                   <button type="button" className="wbtn primary" onClick={() => fileInput.current?.click()}>Add documents…</button>
-                  <span style={{ fontSize: 12 }}>Or drop PDFs and photos anywhere in this window.</span></>}
+                  <span className="small">Or drop PDFs and photos anywhere in this window.</span></>}
               </div>
             </section>
           )}

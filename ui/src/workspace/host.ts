@@ -43,6 +43,11 @@ export interface Host {
   remove(): void;
   openFile(): void;
   newFile(from: "empty" | "sample" | { profile: string }): void;
+  // guided setup's last step: where the file goes (a Save dialog, in Chrome and Edge), then, once
+  // setup's download is done, the details checked as the app keeps them, opened and saved there.
+  // { errors } by field ("people.0.ssn") if something needs fixing; null if you cancelled.
+  create(profile: object, passphrase: string): Promise<{ name: string; downloaded: boolean }
+    | { errors: Record<string, string> } | null>;
   save(as?: boolean): Promise<{ name: string; downloaded: boolean } | null>;
   allowSaving(): Promise<boolean>;  // ask (on a click) to save to the opened file
   close(): void;

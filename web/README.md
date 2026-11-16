@@ -19,7 +19,7 @@ that old install and unregisters itself.
 
 - **The page** (`static/boot.js`): setup, your Taxonymous file and the engines, as the UI's
   "host" (`ui/src/workspace/host.ts`): it reports what stage things are at and does what the UI
-  asks. Everything you see is the workspace UI: its start screen (`Start.tsx`), then the
+  asks. Everything you see is the workspace UI: its start screen (`Start.tsx`: guided setup, `Setup.tsx`, on a first visit; open your file after), then the
   workspace with your file in the top bar (`FileControls.tsx`). The UI talks to "the server" as it always does (`/api/...`): the service
   worker (`static/sw.js`) hands each request to the page, and the page to the home engine.
 - **The home engine** (`engine/home.py`, a worker): the app's server, `taxonymous.api`

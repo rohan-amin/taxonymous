@@ -84,7 +84,9 @@ export function Details({ onSaved, onRunAll, back }: { onSaved: () => void; onRu
           shaped like an SSN. Everything else stays readable, such as an employer's name and EIN. If a document
           shows something you want removed, add it here, or use <em>Add to my details</em> while reviewing it.
         </p>
-        <p className="muted small">Saved only on this computer, never uploaded: <code>{path}</code></p>
+        <p className="muted small">{"taxonymousHost" in window  // the browser app: it's in your Taxonymous file
+          ? "Kept in your Taxonymous file, never uploaded."
+          : <>Saved only on your computer, never uploaded: <code>{path}</code></>}</p>
         <label className="check">
           <input type="checkbox" checked={hide} onChange={(e) => setHide(e.target.checked)} />
           hide numbers on screen

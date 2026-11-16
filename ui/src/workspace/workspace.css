@@ -494,3 +494,59 @@
 .ws-keyfile { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; padding-right: 12px; border-right: 1px solid var(--w-line); }
 .ws .ws-keyfile-name { color: var(--w-ink); max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .ws-keyfile-dirty { color: var(--w-muted); font-size: 12px; }
+
+/* Guided setup and the start screen: read by people of every age, so large type, tall fields
+   and buttons, plain contrast. Nothing here under 15px. */
+.ws-start-card p { font-size: 15px; }
+.ws-start-card p.small { font-size: 13px; }
+.ws-start-card h2 { font-size: 21px; }
+.ws-start-sub { font-size: 17px; color: var(--w-muted); }
+.ws-start .wbtn.big { height: 46px; padding: 0 24px; font-size: 17px; border-radius: 8px; }
+.ws-start .ws-local-banner p { font-size: 15px; }
+.ws-start .ws-steps { font-size: 15px; }
+.ws-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.ws-setup { flex: 1; overflow-y: auto; display: flex; justify-content: center; padding: 32px 24px 56px; font-size: 17px; line-height: 1.5;
+  -webkit-user-select: text; user-select: text; }
+.ws-setup-inner { width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 18px; }
+.ws-setup-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; color: var(--w-muted); font-size: 15px; font-weight: 600; }
+.ws-setup h1 { font-size: 30px; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+.ws-setup .lede { color: var(--w-muted); font-size: 17px; }
+.ws-setup-body { display: flex; flex-direction: column; gap: 20px; }
+.ws-setup-behind { margin: 0; color: var(--w-muted); font-size: 15px; font-weight: 400; }
+.ws-setup-behind.problem { color: var(--w-look); font-weight: 600; }
+.ws-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ws-field label { font-weight: 600; font-size: 17px; }
+.ws-field .hint { padding: 0; margin: 0; border: 0; background: none; color: var(--w-muted); font-size: 15px; }
+.ws-setup .error, .ws-choices .error { color: #a3261b; font-size: 15px; font-weight: 600; }
+.ws-field input, .ws-field select { height: 48px; padding: 0 12px; border: 1.5px solid var(--w-line-strong); border-radius: 8px;
+  background: var(--w-surface); color: var(--w-ink); font: 18px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+.ws-field input.short { max-width: 260px; }
+.ws-field input:focus, .ws-field select:focus { outline: 3px solid color-mix(in srgb, var(--w-accent) 40%, transparent); outline-offset: 1px; border-color: var(--w-accent); }
+.ws-field input[aria-invalid=true], .ws-field select[aria-invalid=true] { border-color: #a3261b; }
+.ws-setup-row { display: flex; flex-wrap: wrap; gap: 16px; }
+.ws-setup-row > .ws-field { flex: 1 1 200px; }
+.ws-choices { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.ws-choices label { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border: 1.5px solid var(--w-line-strong); border-radius: 10px;
+  background: var(--w-surface); cursor: pointer; }
+.ws-choices label.on { border-color: var(--w-accent); background: var(--w-accent-soft); box-shadow: inset 0 0 0 1px var(--w-accent); }
+.ws-choices input { width: 22px; height: 22px; flex: none; accent-color: var(--w-accent); }
+.ws-choices strong { display: block; font-size: 18px; }
+.ws-choices small { display: block; color: var(--w-muted); font-size: 15px; }
+.ws-setup-group { display: flex; flex-direction: column; gap: 16px; margin: 0; padding: 16px 18px 18px; border: 1px solid var(--w-line-strong); border-radius: 10px; background: var(--w-sunk); }
+.ws-setup-group legend { padding: 0 6px; font-weight: 700; font-size: 17px; }
+.ws-setup-group > .ws-link { align-self: flex-start; font-size: 15px; }
+.ws-setup .wbtn.big { align-self: flex-start; height: 48px; padding: 0 24px; font-size: 17px; border-radius: 8px; }
+.ws-setup-check { display: flex; align-items: center; gap: 10px; font-size: 17px; cursor: pointer; }
+.ws-setup-check input { width: 22px; height: 22px; accent-color: var(--w-accent); }
+.ws-setup-warn { padding: 14px 16px; border-radius: 10px; background: var(--w-look-bg); color: var(--w-look); font-size: 17px; }
+.ws-setup-where { font-size: 17px; }
+.ws-setup-foot { display: flex; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid var(--w-line); }
+.ws-setup-foot .wbtn.big { min-width: 120px; }
+@media (prefers-color-scheme: dark) { .ws-setup .error, .ws-choices .error { color: #f2a19b; } .ws-field input[aria-invalid=true] { border-color: #f2a19b; } }
+/* no documents yet: the one thing to do, in large type */
+.ws-empty.first { gap: 12px; max-width: 460px; font-size: 16px; }
+.ws-empty.first strong { font-size: 24px; }
+.ws-empty.first .wbtn { height: 46px; padding: 0 26px; font-size: 17px; border-radius: 8px; }
+.ws-empty .small { font-size: 12px; }
+.ws-empty.first .small { font-size: 15px; }
