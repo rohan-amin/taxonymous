@@ -124,9 +124,9 @@ function Start({ s }: { s: HostState }) {
             <p className="ws-start-muted small ws-start-foot">Updating: {s.progress.text}</p>
           )}
           <p className="ws-start-muted small ws-start-foot">
-            Free and open source:{" "}
+            Beta ·{" "}
             <a className="ws-link" href="https://github.com/rohan-amin/taxonymous" target="_blank" rel="noopener noreferrer">
-              source code
+              Source code
             </a>{" "}
             (AGPL-3.0)
           </p>
