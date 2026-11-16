@@ -574,6 +574,55 @@ def test_click_a_value_on_a_document_to_add_it_to_your_details(corpus, network_a
     assert client.get(f"{W2}/pages/9/words").status_code == 404
 
 
+def test_values_and_boxes_collected_while_reviewing_are_applied_at_once(corpus, network_attempts, tmp_path):
+    """The reviewer clicks several values and draws a box, then cleans once: each detail is
+    checked as it's added (nothing saved), then all are saved together and each document is
+    cleaned again once, the one in front of them first."""
+    src, _, _ = corpus
+    ws = Workspace(tmp_path)
+    ws.init()
+    for name in ("w2.pdf", "k1_statement.pdf"):
+        shutil.copy(src / name, ws.inbox / name)
+    app = create_app(ws, TOKEN, ocr=False)
+    client = TestClient(app, base_url="http://127.0.0.1", headers={TOKEN_HEADER: TOKEN})
+    you = {"kind": "person", "item": {"name": "Avery F Abernathy", "ssn": "", "dob": ""}}
+    phone = {"kind": "phone", "item": {"value": "(555) 555-0100"}}
+
+    def changes(**body):
+        return client.post("/api/changes", json=body)
+
+    # no details yet: yourself first, whatever order they were clicked in
+    assert changes(details=[phone], check=True).status_code == 409
+    assert changes(boxes={"w2": [{"page": 0, "rect": [40, 40, 90, 60]}]}, check=True).status_code == 409
+    r = changes(details=[phone, you], check=True)
+    assert r.status_code == 200 and not ws.profile_path.exists()  # checked, nothing saved
+    r = changes(details=[phone, {"kind": "ein", "item": {"ein": "12345", "description": ""}}], check=True)
+    assert r.status_code == 409  # still no person
+    r = changes(details=[you, {"kind": "ein", "item": {"ein": "12345", "description": ""}}], check=True)
+    assert r.status_code == 422 and r.json()["detail"]["fields"] == {"ein": "An EIN has 9 digits."}
+    assert "12345" not in r.text and not ws.profile_path.exists()
+
+    r = changes(details=[phone, you], boxes={"w2": [{"page": 0, "rect": [40, 40, 90, 60]}]},
+                first="k1_statement")
+    assert r.status_code == 200
+    assert r.json()["queued"] == ["k1_statement", "w2"]  # the one in front first, each once
+    saved = json.loads(ws.profile_path.read_text())
+    assert saved["people"][0]["role"] == "taxpayer" and saved["phones"] == ["(555) 555-0100"]
+    assert Overrides.load(ws.overrides_path("w2")).add == [(0, (40, 40, 90, 60))]
+    app.state.worker.wait()
+    assert {d["id"]: d["status"] for d in client.get("/api/documents").json()} == \
+        {"w2": "passed", "k1_statement": "passed"}
+
+    # a box alone cleans only its document; a bad detail saves nothing
+    r = changes(boxes={"k1_statement": [{"page": 0, "rect": [10, 10, 30, 30]}]}, first="w2")
+    assert r.json()["queued"] == ["k1_statement"]
+    app.state.worker.wait()
+    bad = {"kind": "account", "item": {"institution": "", "number": "", "routing": "", "name": ""}}
+    assert changes(details=[bad]).status_code == 422
+    assert json.loads(ws.profile_path.read_text()) == saved
+    assert changes(boxes={"w2": [{"page": 9, "rect": [0, 0, 9, 9]}]}).status_code == 400
+
+
 def test_a_document_can_be_removed_entirely(corpus, network_attempts, tmp_path):
     """Removing a document takes everything Taxonymous holds for it: its copy, its cleaned
     files, the reviewer's boxes and its saved safe copy; nothing else."""

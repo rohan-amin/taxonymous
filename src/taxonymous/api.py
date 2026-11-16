@@ -12,7 +12,14 @@ the same browser can't drive it). It makes no outbound connections.
                                                 (422 names the fields); with rerun, that document is
                                                 cleaned again first, then every other cleaned one.
                                                 A person can be the first detail (it is you)
-  GET    /api/profile/found                     where each detail in your profile was removed:
+  POST   /api/changes                           {"details": [{"kind", "item"}], "boxes": {id: [box]},
+                                                 "first": id | null, "check": bool} what the reviewer
+                                                collected, applied at once: the profile saved once, each
+                                                document cleaned again once (`first` first, then those
+                                                with boxes, then every cleaned one if details were
+                                                added). With check, only says whether the details are
+                                                fine (422 names the fields of the one that isn't)
+  GET    /api/profile/found                    where each detail in your profile was removed:
                                                 {"entries": {"person:0": {"total", "placeholders",
                                                 "documents": [{"id", "name", "places", "pages"}]}}}
   GET    /api/documents                         every document in inbox/ and its folders, with its status
@@ -425,6 +432,19 @@ class Detail(BaseModel):
     rerun: str | None = None  # the document it was seen in: cleaned again first, then the others
 
 
+class Change(BaseModel):
+    kind: str  # one of profile.ITEMS
+    item: dict[str, str | bool]
+
+
+class Changes(BaseModel):
+    """What the reviewer collected while reviewing, applied together."""
+    details: list[Change] = []  # to add to the profile: removed from every document
+    boxes: dict[str, list[Box]] = {}  # drawn, by document: removed from that one only
+    first: str | None = None  # the document in front of the reviewer: cleaned first
+    check: bool = False  # only say whether the details are fine: nothing saved or cleaned
+
+
 class Chosen(BaseModel):
     words: list[int]  # indices into the page's words
 
@@ -529,6 +549,52 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
                     worker.submit(Job(stem, "process"))
                     queued.append(stem)
         return {"added": body.kind, "queued": queued}
+
+    @app.post("/api/changes")
+    def apply_changes(body: Changes):
+        first = not ws.profile_path.exists()
+        details = body.details
+        if first:  # no details yet: a person comes first, and the first person is you
+            details = sorted(details, key=lambda d: d.kind != "person")
+            if (details and details[0].kind != "person") or (not details and body.boxes):
+                raise HTTPException(409, "Start with your own name, so Taxonymous knows who you are.")
+        profile = {} if first else json.loads(ws.profile_path.read_text())
+        for n, d in enumerate(details):
+            item = {"role": "taxpayer", **d.item} if first and n == 0 else d.item
+            profile, errors = add_item(profile, d.kind, item)
+            if errors:
+                message = errors.pop("", "Some details need fixing.")
+                raise HTTPException(422, {"message": message, "fields": errors})
+        boxes: dict[str, list[tuple[int, tuple[float, float, float, float]]]] = {}
+        for stem, drawn in body.boxes.items():
+            sizes = _page_sizes(ws, _source(ws, stem), stem)
+            for box in drawn:
+                x0, y0, x1, y1 = box.rect
+                if not 0 <= box.page < len(sizes) or not (x0 < x1 and y0 < y1):
+                    raise HTTPException(400, "rect must be [x0, y0, x1, y1] on an existing page")
+                boxes.setdefault(stem, []).append((box.page, (x0, y0, x1, y1)))
+        if body.first is not None:
+            _source(ws, body.first)
+        if body.check:
+            return {"ok": True}
+        if details:
+            save_profile(profile, ws.profile_path)
+        for stem, drawn in boxes.items():
+            o = overrides(stem)
+            o.add.extend(drawn)
+            o.save(ws.overrides_path(stem))
+        stems = [ws.stem(src) for src in ws.pending()]
+        again = [*boxes]
+        if details:  # everything the first time (nothing could be cleaned before), else what was cleaned
+            again += [s for s in stems if first or ws.outputs(s)["report"].exists()]
+        if body.first is not None and (details or body.first in boxes):
+            again.insert(0, body.first)
+        queued = []
+        for stem in dict.fromkeys(again):
+            if not worker.waiting(stem):  # one being cleaned now goes again after
+                worker.submit(Job(stem, "process"))
+            queued.append(stem)
+        return {"added": len(details), "queued": queued}
 
     @app.get("/api/profile/found")
     def found():

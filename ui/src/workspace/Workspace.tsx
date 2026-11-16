@@ -1,15 +1,15 @@
 // The workspace: files on the left, the document in the middle, My profile on the right.
 // Talks to the same local API as the classic review screen (../App.tsx).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, DragEvent, KeyboardEvent, PointerEvent as RPointerEvent } from "react";
+import type { CSSProperties, DragEvent, KeyboardEvent, ReactNode, PointerEvent as RPointerEvent } from "react";
 import { api, pageImage } from "../api";
-import type { Box, DocDetail, DocSummary, FoundEntries, Profile } from "../api";
+import type { Box, DetailKind, DocDetail, DocSummary, FoundEntries, Profile } from "../api";
 import { Details } from "../Details";
-import { ACCOUNT_TYPES, ADDRESS_TYPES } from "../fields";
-import { AddForm, WordLayer, popoverPlace, usePageWords } from "./ClickToAdd";
+import { ACCOUNT_TYPES, ADDRESS_TYPES, DETAIL_FORMS, ROLE_NAME } from "../fields";
+import { AddForm, WordLayer, around, popoverPlace, usePageWords } from "./ClickToAdd";
 import { FileControls } from "./FileControls";
 import { HOST } from "./host";
-import type { Picked } from "./ClickToAdd";
+import type { Pending, Picked } from "./ClickToAdd";
 import { DOT, checked, plain, removedList, timeLeft } from "./messages";
 import type { Tone } from "./messages";
 import "./workspace.css";
@@ -62,6 +62,7 @@ const NATIVE = (() => {
   }
 })();
 
+const same = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
 const mask = (v: string) => v.replace(/[A-Za-z0-9](?=(?:[^A-Za-z0-9]*[A-Za-z0-9]){4})/g, "•");
 
 // a drawer edge you drag (or move with the arrow keys) to set its width
@@ -283,12 +284,14 @@ function ProfileDrawer({ profile, found, onShow }: {
   );
 }
 
-function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, onChanged, onAdded,
+function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, onChanged, pending, onPend, tray,
                    allDone, onFinish, finishLabel, highlight, onClearHighlight, showName }: {
   summary: DocSummary; hasProfile: boolean; zoom: Zoom; setZoom: (z: Zoom) => void;
   scaleNow: { current: number };
   side: "redacted" | "original"; setSide: (s: "redacted" | "original") => void;
-  onChanged: () => void; onAdded: (queued: string[]) => void;
+  onChanged: () => void;
+  // what's waiting to be removed (every document's), adding to it (a detail is checked first), and its bar
+  pending: Pending[]; onPend: (p: Pending) => Promise<void>; tray: ReactNode;
   allDone: boolean; onFinish: () => void; finishLabel: string; // all checked: the next step is saving them
   highlight: Highlight | null; onClearHighlight: () => void; // a profile entry's boxes, outlined
   showName: boolean; // the file name, only while the documents list (which shows it) is hidden
@@ -298,7 +301,6 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
   const [picking, setPicking] = useState(false);
   const [labelsKnown, setLabelsKnown] = useState(() => store.get("labels-known", false));
   const [picked, setPicked] = useState<Picked | null>(null);
-  const [pending, setPending] = useState<Box[]>([]);
   const [drag, setDrag] = useState<{ page: number; x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const id = summary.id;
@@ -308,7 +310,8 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
     api.document(id).then((d) => live && setDetail(d)).catch((e) => live && setError((e as Error).message));
     return () => { live = false; };
   }, [id, summary.version, summary.status]);
-  useEffect(() => { setPending([]); setDrawing(false); setPicking(false); setPicked(null); }, [id]);
+  useEffect(() => { setDrawing(false); setPicking(false); setPicked(null); }, [id]);
+  const mine = pending.filter((p) => p.doc === id);
   const { words, reading, failed } = usePageWords(id, detail?.pages.length ?? 0, picking);
   useEffect(() => { if (failed) setError(failed); }, [failed]);
 
@@ -417,18 +420,6 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
     const k = r.width / w;
     return [(e.clientX - r.left) / k, (e.clientY - r.top) / k];
   };
-  const apply = async () => {
-    try {
-      await api.addBoxes(id, pending);
-      // the saved boxes first, then the dashed ones go: never a moment without the box
-      setDetail(await api.document(id));
-      setPending([]);
-      setDrawing(false);
-      onChanged();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
   const clean = async () => {
     try {
       await api.run(id);
@@ -512,15 +503,12 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
           <button type="button" className="wbtn quiet" onClick={onClearHighlight}>Clear</button>
         </div>
       )}
+      {tray}
       {(drawing || picking) && (
         <div className="ws-hintbar" role="status">
-          <span>{drawing ? "Drag over anything. It's blacked out on this document only."
+          <span>{drawing ? "Drag over anything to black it out on this document only. Draw as many as you like, then clean once."
             : reading !== null && !words.has(reading) ? `Reading page ${reading + 1}…`
-              : "Click your name, an account number, or anything else of yours. Shift-click adds the next word."}</span>
-          {pending.length > 0 && <>
-            <button type="button" className="wbtn primary" onClick={apply}>Apply {pending.length} box{pending.length === 1 ? "" : "es"} and check again</button>
-            <button type="button" className="wbtn quiet" onClick={() => setPending(pending.slice(0, -1))}>Undo</button>
-          </>}
+              : "Click your name, an account number, or anything else of yours. Add as many as you like, then clean once."}</span>
           <button type="button" className="wbtn quiet" onClick={() => { setDrawing(false); setPicking(false); setPicked(null); }}>Done</button>
         </div>
       )}
@@ -552,24 +540,34 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
                    if (!drag) return;
                    const r: [number, number, number, number] = [Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1),
                      Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)];
-                   if (r[2] - r[0] > 4 && r[3] - r[1] > 4) setPending([...pending, { page: n, rect: r }]);
+                   if (r[2] - r[0] > 4 && r[3] - r[1] > 4) onPend({ type: "box", doc: id, page: n, rect: r });
                    setDrag(null);
                  }}>
               <img src={pageImage(id, n, showing, dpi, detail.version)} alt={`${showing === "original" ? "Original" : "Safe copy"}, page ${n + 1}`} draggable={false} />
               {others.map((r, i) => <div key={`o${i}`} className="ws-region mine" style={box(r.rect)} title={`Removed: ${r.kind}`} />)}
               {local.map((r, i) => <div key={`l${i}`} className="ws-local" style={box(r.rect)}>THIS DOC ONLY</div>)}
               {marks.filter((r) => r.page === n).map((r, i) => <div key={`h${i}`} className="ws-mark" style={box(r.rect)} />)}
-              {pending.filter((b) => b.page === n).map((b, i) => <div key={`p${i}`} className="ws-local pending" style={box(b.rect)}>THIS DOC ONLY</div>)}
+              {mine.filter((p) => p.page === n).map((p, i) => p.type === "box"
+                ? <div key={`p${i}`} className="ws-local pending" style={box(p.rect)}>THIS DOC ONLY</div>
+                : <div key={`p${i}`} className="ws-pend" style={box(p.rect)} title="Waiting to be removed" />)}
               {drag && drag.page === n && <div className="ws-drag" style={box([Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1),
                 Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)])} />}
               {picking && words.has(n) && <WordLayer words={words.get(n)!} size={[w, h]}
-                regions={detail.regions.filter((r) => r.page === n)}
+                covered={[...detail.regions.filter((r) => r.page === n).map((r) => r.rect),
+                  ...mine.filter((p) => p.type === "detail" && p.page === n).map((p) => p.rect)]}
                 picked={picked?.page === n ? picked.words : []} onPick={(i, extend) => pick(n, i, extend)} />}
               {picking && picked?.page === n && words.has(n) &&
-                <AddForm key={picked.words.join()} picked={picked} docId={id}
+                <AddForm key={picked.words.join()} picked={picked}
+                         already={!!picked.suggestion && pending.some((p) => p.type === "detail"
+                           && same(p.text) === same(picked.suggestion!.text))}
                          style={popoverPlace(words.get(n)!, picked.words, [w, h])}
                          onCancel={() => setPicked(null)}
-                         onAdded={(queued) => { setPicked(null); onAdded(queued); }} />}
+                         onAdd={async (kind, item) => {
+                           const rect = around(picked.words.map((i) => words.get(n)![i].rect));
+                           await onPend({ type: "detail", doc: id, page: n, rect, kind, item,
+                                          text: picked.suggestion?.text ?? "" });
+                           setPicked(null);
+                         }} />}
             </div>
           );
         })}
@@ -577,6 +575,7 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
           <div className="ws-legend">
             <span><span className="ws-swatch" style={{ background: "#1d1d1b" }} />From My profile: removed from all documents</span>
             <span><span className="ws-swatch" style={{ background: "repeating-linear-gradient(135deg,#1f4f80 0 3px,#3a7bc0 3px 6px)" }} />Drawn: this document only</span>
+            {mine.length > 0 && <span><span className="ws-swatch pend" />Dashed: waiting to be removed, when you clean again</span>}
             <span style={{ flexBasis: "100%" }}>In the safe copy both are solid black. The stripes are only here, so you can tell them apart.</span>
             {!labelsKnown && <span className="ws-labels-note" style={{ flexBasis: "100%" }}>
               Each box in the safe copy carries a label like &lt;TAXPAYER&gt; or &lt;SPOUSE_SSN&gt;. It tells your AI who
@@ -587,6 +586,46 @@ function DocView({ summary, hasProfile, zoom, setZoom, scaleNow, side, setSide, 
         )}
       </div>
     </section>
+  );
+}
+
+// what's waiting to be removed, from every document: each can be taken off the list, and one
+// button cleans them all at once
+const KIND_NAME: Record<string, string> = Object.fromEntries(DETAIL_FORMS.map(({ kind, label }) => [kind, label]));
+const MASKED = new Set<DetailKind>(["account", "card", "ein", "number"]);
+export const pendingName = (p: Pending, here: string, name: (id: string) => string) => p.type === "box"
+  ? `Box on ${p.doc === here ? "this document" : name(p.doc)}, page ${p.page + 1}`
+  : `${p.kind === "person" ? ROLE_NAME[p.item.role] ?? "Person" : KIND_NAME[p.kind]}: ${
+    MASKED.has(p.kind) ? mask(p.text) : p.text}`;
+
+function Tray({ pending, here, name, onRemove, onApply, applying, error }: {
+  pending: Pending[]; here: string; name: (id: string) => string; onRemove: (i: number) => void;
+  onApply: () => void; applying: boolean; error: string | null;
+}) {
+  const nDetails = pending.filter((p) => p.type === "detail").length;
+  return (
+    <div className="ws-tray" role="region" aria-label="Waiting to be removed" data-testid="pending">
+      <div className="ws-tray-text">
+        <strong>Waiting to be removed: {pending.length}</strong>
+        <span>{nDetails ? "Details go into My profile and come out of every document. " : ""}
+          Add everything you see, then clean once.</span>
+        <ul>
+          {pending.map((p, i) => {
+            const label = pendingName(p, here, name);
+            return (
+              <li key={i} className="ws-chip">
+                <span>{label}</span>
+                <button type="button" aria-label={`Take “${label}” off the list`} onClick={() => onRemove(i)}>×</button>
+              </li>
+            );
+          })}
+        </ul>
+        {error && <p className="ws-tray-error" role="alert">{error}</p>}
+      </div>
+      <button type="button" className="wbtn primary big" onClick={onApply} disabled={applying}>
+        {applying ? "Starting…" : "Clean again"}
+      </button>
+    </div>
   );
 }
 
@@ -615,6 +654,10 @@ export function Workspace() {
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { if (removing) cancelRef.current?.focus(); }, [removing]);  // once, as the question opens
   const [found, setFound] = useState<FoundEntries | null>(null);
+  // values clicked and boxes drawn, not applied yet: cleaned all at once
+  const [pending, setPending] = useState<Pending[]>([]);
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -679,6 +722,46 @@ export function Workspace() {
     return i > 0 ? order[i - 1] : null;
   }, [order, current]);
   const ready = (docs ?? []).filter((d) => d.status === "passed");
+
+  const detailsOf = (ps: Pending[]) => ps.flatMap((p) => (p.type === "detail" ? [{ kind: p.kind, item: p.item }] : []));
+  const boxesOf = (ps: Pending[]) => {
+    const out: Record<string, Box[]> = {};
+    for (const p of ps) if (p.type === "box") (out[p.doc] ??= []).push({ page: p.page, rect: p.rect });
+    return out;
+  };
+  // a detail is checked with the others already waiting (nothing saved), then waits with them
+  const pend = async (p: Pending) => {
+    if (p.type === "detail") {
+      await api.changes({ details: [...detailsOf(pending), { kind: p.kind, item: p.item }], boxes: {}, check: true });
+    }
+    setPending((ps) => [...ps, p]);
+    setApplyError(null);
+  };
+  const apply = async () => {
+    setApplying(true);
+    setApplyError(null);
+    try {
+      const details = detailsOf(pending);
+      const r = await api.changes({ details, boxes: boxesOf(pending), first: sel });
+      setPending([]);
+      loadProfile();
+      refresh();
+      const n = r.queued.length;
+      setToast([details.length ? `Added ${details.length} detail${details.length === 1 ? "" : "s"} to My profile.` : "",
+        n ? `Cleaning ${n} document${n === 1 ? "" : "s"} again.` : ""].filter(Boolean).join(" "));
+    } catch (e) {
+      setApplyError((e as Error).message);
+    } finally {
+      setApplying(false);
+    }
+  };
+  // closing the page with something waiting would lose it
+  useEffect(() => {
+    if (!pending.length) return;
+    const stay = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", stay);
+    return () => window.removeEventListener("beforeunload", stay);
+  }, [pending.length]);
 
   const upload = useCallback(async (files: FileList | File[]) => {
     const failed: string[] = [];
@@ -767,7 +850,7 @@ export function Workspace() {
     + profile.numbers.length + profile.preparers.length : 0;
   const total = docs?.length ?? 0;
   const nChecked = ready.length;
-  const allDone = total > 0 && nChecked === total;
+  const allDone = total > 0 && nChecked === total && !pending.length;  // nothing waiting to be removed
   // the finish, in one place: save the checked copies (after a look at the summary), then find them
   const unsaved = ready.filter((d) => !d.exported).length;
   const copies = (n: number) => `${n} safe cop${n === 1 ? "y" : "ies"}`;
@@ -879,13 +962,13 @@ export function Workspace() {
                      allDone={allDone} onFinish={finish} finishLabel={finishLabel}
                      highlight={highlight} onClearHighlight={() => setHighlight(null)} showName={!leftOpen}
                      onChanged={refresh}
-                     onAdded={(queued) => {
-                       loadProfile();
-                       refresh();
-                       const others = queued.length - 1;
-                       setToast(`Added to My profile. Cleaning this document again${others > 0
-                         ? `, then ${others} other${others === 1 ? "" : "s"}` : ""}.`);
-                     }} />
+                     pending={pending} onPend={pend}
+                     tray={pending.length > 0 && (
+                       <Tray pending={pending} here={current.id} applying={applying} error={applyError}
+                             name={(id) => docs?.find((d) => d.id === id)?.name ?? id}
+                             onRemove={(i) => { setPending(pending.filter((_, j) => j !== i)); setApplyError(null); }}
+                             onApply={apply} />
+                     )} />
           ) : (
             <section className="ws-doc" style={{ justifyContent: "center" }}>
               <div className="ws-empty">
@@ -929,6 +1012,9 @@ export function Workspace() {
               <button type="button" className="wbtn quiet" onClick={() => setSafeOpen(false)}>Close</button>
             </div>
             <div className="ws-finish">
+              {pending.length > 0 && <p className="ws-tray-error" role="alert">{pending.length} thing{pending.length === 1
+                ? " is" : "s are"} waiting to be removed. Clean again first, or the safe copies will still show {pending.length
+                === 1 ? "it" : "them"}.</p>}
               {removedAll && <p>Removed across them: {removedAll}.</p>}
               <p className="small">Only what's in My profile, and anything shaped like an SSN, is removed. Have a quick look
                 at each copy before you share it.</p>
@@ -1017,6 +1103,7 @@ export function Workspace() {
                 setRemoving(null);
                 try {
                   await api.remove(doc.id);
+                  setPending((ps) => ps.filter((p) => p.type !== "box" || p.doc !== doc.id));  // its boxes go with it
                   setToast(`Removed ${doc.name} from Taxonymous. Your original file is unchanged.`);
                   if (sel === doc.id) setSel(null);
                 } catch (e) {

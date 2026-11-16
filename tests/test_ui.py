@@ -523,8 +523,18 @@ def test_workspace_click_a_value_to_add_it_to_my_profile(corpus, browser, tmp_pa
         assert pg.locator(".ws-word.on").count() == 3  # the click grew to the whole name
         pg.screenshot(path=str(tmp_path / "click-to-add.png"))
         name.fill("Avery F Abernathy")
-        form.get_by_role("button", name="Add and clean again").click()
-        pg.get_by_text("Added to My profile").wait_for()
+        form.get_by_role("button", name="Add", exact=True).click()
+        # it waits with anything else clicked, outlined and listed; nothing is saved or cleaned yet
+        tray = pg.get_by_test_id("pending")
+        tray.get_by_text("You: Avery F Abernathy").wait_for()
+        assert pg.locator(".ws-pend").count() == 1 and not ws.profile_path.exists()
+        # another copy of it says it's already on the list
+        pg.get_by_role("button", name="Add Avery to My profile").first.click()
+        form.get_by_text("Already on the list").wait_for()
+        form.get_by_role("button", name="OK").click()
+        tray.get_by_role("button", name="Clean again").click()
+        pg.get_by_text("Added 1 detail to My profile. Cleaning 1 document again.").wait_for()
+        assert pg.get_by_test_id("pending").count() == 0
         assert json.loads(ws.profile_path.read_text())["people"][0]["name"] == "Avery F Abernathy"
         app.state.worker.wait()
         pg.get_by_text("Checked again: none left").wait_for(timeout=20_000)
@@ -532,6 +542,19 @@ def test_workspace_click_a_value_to_add_it_to_my_profile(corpus, browser, tmp_pa
         listed = pg.get_by_test_id("checked").inner_text()
         assert "read again" in listed and "as images" in listed and "barcodes" in listed
         assert "Tesseract" not in listed and "Vision" not in listed  # no engine names
+        # a drawn box waits on the list too (saving waits for it), and can be taken off again
+        pg.get_by_role("button", name="Draw a box").click()
+        view = pg.locator(".ws-viewer").bounding_box()  # in the middle of what's showing of page 1
+        x, y = view["x"] + view["width"] / 2, view["y"] + view["height"] / 3
+        pg.mouse.move(x, y)
+        pg.mouse.down()
+        pg.mouse.move(x + 80, y + 30)
+        pg.mouse.up()
+        tray.get_by_text("Box on this document, page 1").wait_for()
+        assert pg.get_by_role("button", name="Save 1 safe copy…").count() == 0
+        tray.get_by_role("button", name="Take “Box on this document, page 1” off the list").click()
+        assert pg.get_by_test_id("pending").count() == 0
+        pg.get_by_role("button", name="Done").click()
         # all checked: the next step is saving the safe copies, then Finder
         # My profile: click yourself to see where you were removed, outlined in the document
         pg.get_by_test_id("profile-summary").get_by_role("button", name="You").click()

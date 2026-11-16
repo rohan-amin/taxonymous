@@ -258,6 +258,10 @@ export const api = {
   saveProfile: (p: Profile) => call<ProfileState>("PUT", "/api/profile", p),
   addDetail: (kind: DetailKind, item: Record<string, string>, rerun: string | null = null) =>
     call<{ added: string; queued: string[] }>("POST", "/api/profile/items", { kind, item, rerun }),
+  // what was collected while reviewing, applied at once (or, with check, only checked)
+  changes: (body: { details: { kind: DetailKind; item: Record<string, string> }[]; boxes: Record<string, Box[]>;
+                    first?: string | null; check?: boolean }) =>
+    call<{ added: number; queued: string[] }>("POST", "/api/changes", body),
   words: (id: string, page: number) => call<{ words: PageWord[] }>("GET", `${doc(id)}/pages/${page}/words`),
   suggest: (id: string, page: number, words: number[]) =>
     call<Suggestion>("POST", `${doc(id)}/pages/${page}/suggest`, { words }),

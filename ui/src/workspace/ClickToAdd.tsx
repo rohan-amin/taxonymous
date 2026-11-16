@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import { api, ApiError } from "../api";
-import type { DetailKind, PageWord, Rect, Region, Suggestion } from "../api";
+import type { DetailKind, PageWord, Rect, Suggestion } from "../api";
 import { DETAIL_FORMS, Field, blankRow, quiet } from "../fields";
 
 // the field a value goes in, for each kind (when the reviewer picks another kind)
@@ -11,6 +11,15 @@ const MAIN: Record<DetailKind, string> = {
   person: "name", address: "street", account: "number", card: "number", number: "number", ein: "ein",
   phone: "value", email: "value", preparer: "name",
 };
+
+// what the reviewer has collected and not applied yet: values clicked (for every document) and
+// boxes drawn (for one); all applied at once, so documents are cleaned again once
+export type Pending =
+  | { type: "detail"; doc: string; page: number; rect: Rect; kind: DetailKind; item: Record<string, string>; text: string }
+  | { type: "box"; doc: string; page: number; rect: Rect };
+
+export const around = (rs: Rect[]): Rect =>
+  [Math.min(...rs.map((r) => r[0])), Math.min(...rs.map((r) => r[1])), Math.max(...rs.map((r) => r[2])), Math.max(...rs.map((r) => r[3]))];
 
 export interface Picked {
   page: number;
@@ -53,9 +62,9 @@ const overlapsMost = (a: Rect, b: Rect) => {
   return w > 0 && h > 0 && w * h > 0.5 * (a[2] - a[0]) * (a[3] - a[1]);
 };
 
-// a page's clickable words: the ones not already removed
-export function WordLayer({ words, regions, picked, size, onPick }: {
-  words: PageWord[]; regions: Region[]; picked: number[]; size: [number, number];
+// a page's clickable words: the ones not already removed, or about to be
+export function WordLayer({ words, covered, picked, size, onPick }: {
+  words: PageWord[]; covered: Rect[]; picked: number[]; size: [number, number];
   onPick: (i: number, extend: boolean) => void;
 }) {
   const [w, h] = size;
@@ -66,7 +75,7 @@ export function WordLayer({ words, regions, picked, size, onPick }: {
   return (
     <>
       {words.map((word, i) => {
-        if (regions.some((g) => overlapsMost(word.rect, g.rect))) return null;
+        if (covered.some((r) => overlapsMost(word.rect, r))) return null;
         const on = picked.includes(i);
         return (
           <button type="button" key={i} className={`ws-word${on ? " on" : ""}`} style={box(word.rect)}
@@ -91,9 +100,11 @@ export function popoverPlace(words: PageWord[], picked: number[], [w, h]: [numbe
   return style;
 }
 
-export function AddForm({ picked, docId, style, onCancel, onAdded }: {
-  picked: Picked; docId: string; style: CSSProperties; onCancel: () => void;
-  onAdded: (queued: string[]) => void;
+// `onAdd` checks the detail and puts it on the list to remove (an ApiError names what to fix)
+// `already`: the same value is waiting to be removed (clicked elsewhere): nothing to add
+export function AddForm({ picked, style, onCancel, onAdd, already }: {
+  picked: Picked; style: CSSProperties; onCancel: () => void;
+  onAdd: (kind: DetailKind, item: Record<string, string>) => Promise<void>; already: boolean;
 }) {
   const s = picked.suggestion;
   const [kind, setKind] = useState<DetailKind | "">(s?.kind ?? "");  // "": not said yet
@@ -131,8 +142,7 @@ export function AddForm({ picked, docId, style, onCancel, onAdded }: {
     setSaving(true);
     try {
       if (!kind) return;
-      const r = await api.addDetail(kind, item, docId);
-      onAdded(r.queued);
+      await onAdd(kind, item);
     } catch (err) {
       const ae = err as ApiError;
       setErrors(ae.fields ?? {});
@@ -151,9 +161,13 @@ export function AddForm({ picked, docId, style, onCancel, onAdded }: {
           onPointerDown={(e) => e.stopPropagation()} data-testid="add-to-profile" aria-label="Add to My profile">
       <div className="ws-add-head">
         <strong>Add to My profile</strong>
-        <span>Removed from all documents, in any format it's printed.</span>
+        <span>Removed from all documents, in any format it's printed, when you clean them again.</span>
       </div>
-      {!s ? <p className="ws-add-wait">Looking at it…</p> : <>
+      {!s ? <p className="ws-add-wait">Looking at it…</p> : already ? <>
+        <p className="ws-add-note" role="note">Already on the list. It will be removed here and everywhere else when
+          you clean again.</p>
+        <div className="ws-add-foot"><button type="button" className="wbtn primary" onClick={onCancel}>OK</button></div>
+      </> : <>
         {s.note && <p className="ws-add-note" role="note">{s.note}</p>}
         <div className="ws-add-fields">
           <Field label="What is it">
@@ -180,7 +194,7 @@ export function AddForm({ picked, docId, style, onCancel, onAdded }: {
             More fields ({all.length - fields.length})</button>}
         {error && <p className="ws-add-error" role="alert">{error}</p>}
         <div className="ws-add-foot">
-          <button type="submit" className="wbtn primary" disabled={saving || !kind}>{saving ? "Adding…" : "Add and clean again"}</button>
+          <button type="submit" className="wbtn primary" disabled={saving || !kind}>{saving ? "Adding…" : "Add"}</button>
           <button type="button" className="wbtn quiet" onClick={onCancel}>Cancel</button>
           <span className="ws-add-tip">Shift-click to add the next word</span>
         </div>

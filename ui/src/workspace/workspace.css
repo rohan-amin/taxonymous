@@ -272,6 +272,19 @@
   white-space: nowrap;
 }
 .ws-local.pending { opacity: 0.8; outline: 2px dashed #ffffff; outline-offset: -4px; }
+/* a value clicked and waiting to be removed (every document), and the bar listing what's waiting */
+.ws-pend { position: absolute; border-radius: 2px; background: rgba(31, 78, 67, 0.16); outline: 2px dashed var(--w-accent); outline-offset: 1px; pointer-events: none; }
+.ws-swatch.pend { background: rgba(31, 78, 67, 0.16); outline: 2px dashed var(--w-accent); outline-offset: -2px; }
+.ws-tray { flex: none; display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: var(--w-accent-soft); border-bottom: 1px solid var(--w-line); font-size: 13px; }
+.ws-tray-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ws-tray-text > strong { font-size: 14px; }
+.ws-tray-text > span { color: var(--w-muted); }
+.ws-tray ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 0; padding: 0; list-style: none; }
+.ws-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 0 2px 0 10px; height: 28px; border-radius: 14px; background: var(--w-surface); border: 1px solid var(--w-line-strong); }
+.ws-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-chip button { width: 24px; height: 24px; border: 0; border-radius: 12px; background: transparent; color: var(--w-muted); font-size: 16px; line-height: 1; cursor: pointer; }
+.ws-chip button:hover { background: var(--w-line); color: var(--w-ink); }
+.ws-tray-error { color: var(--w-look); }
 .ws-drag { position: absolute; border: 2px dashed var(--w-local-2); background: rgba(58, 123, 192, 0.15); }
 .ws-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; max-width: 640px; color: var(--w-muted); font-size: 12px; }
 .ws-legend span { display: inline-flex; align-items: center; gap: 6px; }
