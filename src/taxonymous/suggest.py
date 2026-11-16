@@ -24,8 +24,9 @@ PHONE = re.compile(r"^(?:\+?1[\s.-]?)?(?:\(\d{3}\)\s?|\d{3}[\s.-])\d{3}[\s.-]\d{
 STATES = set("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH "
              "NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR GU VI AS MP".split())
 MONEY = re.compile(r"^\(?-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)?$")
-EIN = re.compile(r"^\d{2}-\d{7}$")
-SSN = re.compile(r"^\d{3}-\d{2}-\d{4}$")
+EIN = re.compile(r"^\d{2}[- ]\d{7}$")
+SSN = re.compile(r"^\d{3}[- ]\d{2}[- ]\d{4}$")  # "987-65-4321", "987 65 4321"
+GROUP = re.compile(r"[\dX*•#]{2,7}", re.I)  # one group of a number printed in groups (or masked)
 MASKED_SSN = re.compile(r"^[X*•#]{3}[-_ ]?[X*•#]{2}[-_ ]?\d{4}$", re.I)
 PTIN = re.compile(r"^P\d{8}$", re.I)
 # capitalised words, two to five: "Avery F Abernathy", not "Total wages"
@@ -105,7 +106,8 @@ def label_for(words: Sequence[PageWord], chosen: Sequence[int]) -> str:
 
 
 def grow(words: Sequence[PageWord], chosen: Sequence[int]) -> list[int]:
-    """One word clicked, the whole value, from the words beside it on its row: a phone
+    """One word clicked, the whole value, from the words beside it on its row: a number
+    printed in groups ("987 65 4321", "4111 1111 1111 1111", "XXX XX 4321"), a phone
     number's area code ("555-0128" -> "(555) 555-0128"), a street or "City, ST ZIP" line,
     or the rest of a name ("Avery" -> "Avery F Abernathy", across a form's boxes too)."""
     chosen = sorted(set(chosen))
@@ -131,6 +133,14 @@ def grow(words: Sequence[PageWord], chosen: Sequence[int]) -> list[int]:
         lo -= 1
     while hi < len(row) - 1 and gap(hi, hi + 1) < 1.2 * h:
         hi += 1
+    if GROUP.fullmatch(w.text):  # the groups of one number, set close together
+        a, b = at, at
+        while a > lo and GROUP.fullmatch(words[row[a - 1]].text):
+            a -= 1
+        while b < hi and GROUP.fullmatch(words[row[b + 1]].text):
+            b += 1
+        if b - a < 6 and _grouped(span(a, b)):
+            return [row[k] for k in range(a, b + 1)]
     for a in range(lo, at + 1):  # from the first start that makes a whole value, its longest
         ends = [b for b in range(at, min(hi, a + 8) + 1)
                 if (a < b and (PHONE.fullmatch(t := _tidy(span(a, b))) or CITY_LINE.fullmatch(t)))
@@ -151,6 +161,15 @@ def grow(words: Sequence[PageWord], chosen: Sequence[int]) -> list[int]:
     while hi < len(row) - 1 and hi - lo < 3 and joins(hi + 1, hi) and not words[row[hi]].text.endswith(":"):
         hi += 1
     return [row[k] for k in range(lo, hi + 1)]
+
+
+def _grouped(text: str) -> bool:
+    """Two or more groups that make one identifier: an SSN or EIN with spaces, or a card or
+    account number printed in groups (8 to 19 characters in all), with digits in it."""
+    groups = text.split()
+    return (len(groups) >= 2 and bool(digits(text))
+            and (bool(SSN.fullmatch(text) or EIN.fullmatch(text) or MASKED_SSN.fullmatch(text))
+                 or 8 <= sum(map(len, groups)) <= 19))
 
 
 def _says(text: str) -> bool:

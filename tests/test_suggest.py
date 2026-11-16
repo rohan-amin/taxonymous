@@ -20,6 +20,8 @@ def row(*texts: str, y: float = 100, x: float = 40, line: int = 1, gap: float = 
     ("(555) 555-0100", "", "phone", {"value": "(555) 555-0100"}),
     ("5555550100", "Telephone", "phone", {"value": "5555550100"}),
     ("987-65-4323", "", "person", {"name": "", "ssn": "987-65-4323", "role": "other"}),
+    ("987 65 4323", "", "person", {"name": "", "ssn": "987 65 4323", "role": "other"}),
+    ("XXX XX 4323", "", "person", {"name": "", "ssn": "", "role": "other"}),
     ("00-8907406", "PAYER’S TIN", "ein", {"ein": "00-8907406", "description": "PAYER’S TIN"}),
     ("002823586", "Payer's RTN (optional)", "account",
      {"institution": "", "number": "", "routing": "002823586", "name": ""}),
@@ -78,6 +80,15 @@ def test_a_click_grows_to_the_whole_value():
     words = row("Avery", "F", line=1) + row("Abernathy", x=180, line=2)
     assert grow(words, [2]) == [0, 1, 2]
     assert grow(words, [0, 1]) == [0, 1]  # chosen by hand: left as chosen
+    # a number printed in groups: any group grows to all of it, and no further
+    words = row("SSN", "987", "65", "4321", "Box")
+    assert grow(words, [2]) == [1, 2, 3] and grow(words, [3]) == [1, 2, 3]
+    assert grow(row("XXX", "XX", "4321"), [2]) == [0, 1, 2]
+    assert grow(row("Card", "4111", "1111", "1111", "1111"), [1]) == [1, 2, 3, 4]
+    assert grow(row("12", "3456789"), [0]) == [0, 1]
+    assert grow(row("Box", "12", "34"), [1]) == [1]  # too short to be one number: left alone
+    words = row("987", "65", "4321") + row("2024", x=400)  # far off: another value
+    assert grow(words, [0]) == [0, 1, 2]
 
 
 def test_the_nearest_label_speaks_for_a_value():
