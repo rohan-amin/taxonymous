@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { FormEvent, InputHTMLAttributes, ReactNode } from "react";
+import type { FormEvent, InputHTMLAttributes, KeyboardEvent, ReactNode } from "react";
 import { ACCOUNT_TYPES } from "../fields";
 import { HOST } from "./host";
 import type { HostState } from "./host";
@@ -18,7 +18,50 @@ const newId = () => "e" + [...crypto.getRandomValues(new Uint8Array(4))].map((b)
 const person = (): Who => ({ id: newId(), name: "", ssn: "", dob: "" });
 const account = (): Acct => ({ id: newId(), institution: "", number: "", type: "", owner: "" });
 const digits = (s: string) => s.replace(/\D/g, "");
-const date = (s: string) => s.trim().replace(/\s*[-.\s]\s*/g, "/");  // 03-14-1952, 3.14.1952: as the app takes it
+// 03-14-1952, 3.14.1952 as the app takes it; a two-digit year is the last 100 years (a birth date is past)
+function date(s: string): string {
+  const t = s.trim().replace(/\s*[-.\s]\s*/g, "/");
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/.exec(t);
+  if (!m) return t;
+  const y = Number(m[3]);
+  return `${m[1]}/${m[2]}/${(y > new Date().getFullYear() % 100 ? 1900 : 2000) + y}`;
+}
+
+// As you type: an SSN gets its dashes (###-##-####), a date its slashes (03/14/1952). A separator
+// appears when the next digit comes, so backspace never stops at one; slashes you type are kept
+// (3/14/52), and a month from 2 to 9 or a day from 4 to 9 can't take a second digit (3141952).
+const SEP = /[-/]/;
+function ssnFormat(s: string): string {
+  const d = s.replace(/\D/g, "").slice(0, 9);
+  return d.length <= 3 ? d : d.length <= 5 ? `${d.slice(0, 3)}-${d.slice(3)}` : `${d.slice(0, 3)}-${d.slice(3, 5)}-${d.slice(5)}`;
+}
+function dateFormat(s: string): string {
+  const parts = [""];
+  for (const ch of s.replace(/[-.\s]/g, "/")) {
+    const i = parts.length - 1;
+    if (ch === "/") { if (parts[i] && i < 2) parts.push(""); continue; }
+    if (!/\d/.test(ch)) continue;
+    if (i < 2 && parts[i].length === 2) parts.push(ch);
+    else if (i === 2 && parts[i].length === 4) continue;
+    else parts[i] += ch;
+    const j = parts.length - 1;
+    if (j < 2 && parts[j].length === 1 && Number(ch) > (j === 0 ? 1 : 3)) parts.push("");
+  }
+  return parts.join("/");
+}
+const count = (s: string) => s.replace(/\D/g, "").length;
+function caretAfter(s: string, n: number): number {  // just past the nth digit, and any separator after it
+  let i = 0;
+  for (let seen = 0; n > 0 && i < s.length; i++) if (/\d/.test(s[i]) && ++seen === n) { i++; break; }
+  while (n > 0 && i < s.length && SEP.test(s[i])) i++;
+  return i;
+}
+// a whole date said back in words, "March 14, 1952", so a month/day mix-up shows
+function spoken(s: string): string {
+  if (!/\/\d{4}$/.test(s.trim()) || !realDate(s)) return "";
+  const [mo, d, y] = date(s).split("/").map(Number);
+  return new Date(y, mo - 1, d).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
 const filled = (o: object, but: string[] = ["id", "type", "owner"]) =>
   Object.entries(o).some(([k, v]) => !but.includes(k) && String(v).trim());
 
@@ -56,17 +99,39 @@ function checkPerson(p: Who, at = ""): Errors {
   return e;
 }
 
-function Field({ label, hint, error, value, onChange, ...rest }: {
+function Field({ label, hint, error, value, onChange, format, below, ...rest }: {
   label: string; hint?: ReactNode; error?: string; value: string; onChange: (v: string) => void;
+  format?: (s: string) => string; below?: ReactNode;
 } & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
   const id = useId();
+  // formatted as typed, with the caret kept after the same digit
+  const put = (el: HTMLInputElement, raw: string, n: number) => {
+    const v = format!(raw), c = caretAfter(v, n);
+    el.value = v;  // set here first, so React finds it already right and leaves the caret alone
+    el.setSelectionRange(c, c);
+    onChange(v);
+  };
+  const keys = (e: KeyboardEvent<HTMLInputElement>) => {  // a separator goes with the digit next to it
+    const el = e.currentTarget, v = el.value, p = el.selectionStart ?? 0;
+    if (p !== el.selectionEnd) return;
+    let q = -1;
+    if (e.key === "Backspace" && p > 0 && SEP.test(v[p - 1])) for (q = p - 2; q >= 0 && !/\d/.test(v[q]); q--);
+    else if (e.key === "Delete" && p < v.length && SEP.test(v[p])) for (q = p + 1; q < v.length && !/\d/.test(v[q]); q++);
+    else return;
+    e.preventDefault();
+    if (q >= 0 && q < v.length) put(el, v.slice(0, q) + v.slice(q + 1), count(v.slice(0, Math.min(p, q))));
+  };
   return (
     <div className="ws-field">
       <label htmlFor={id}>{label}</label>
       {hint && <span className="hint" id={`${id}-hint`}>{hint}</span>}
-      <input id={id} value={value} onChange={(e) => onChange(e.target.value)} autoComplete="off" spellCheck={false}
-             aria-invalid={!!error} aria-describedby={[hint && `${id}-hint`, error && `${id}-err`].filter(Boolean).join(" ") || undefined}
+      <input id={id} value={value} autoComplete="off" spellCheck={false}
+             onChange={(e) => format ? put(e.target, e.target.value, count(e.target.value.slice(0, e.target.selectionStart ?? undefined)))
+                                     : onChange(e.target.value)}
+             onKeyDown={format ? keys : undefined}
+             aria-invalid={!!error} aria-describedby={[hint && `${id}-hint`, below !== undefined && `${id}-below`, error && `${id}-err`].filter(Boolean).join(" ") || undefined}
              {...rest} />
+      {below !== undefined && <span className="readback" id={`${id}-below`} aria-live="polite">{below}</span>}
       {error && <span className="error" id={`${id}-err`} role="alert">{error}</span>}
     </div>
   );
@@ -98,9 +163,12 @@ function PersonFields({ p, set, errors, at = "", you }: {
              error={errors[`${at}name`]} autoFocus={!at || at.endsWith("0.")}
              hint="First and last name, the way your tax documents print it. Add a middle name or initial if they show one." />
       <Field label="Social Security number" value={p.ssn} onChange={(ssn) => set({ ...p, ssn })} error={errors[`${at}ssn`]}
-             inputMode="numeric" className="short" hint="9 digits. An ITIN works too." />
+             inputMode="numeric" className="short" format={ssnFormat}
+             hint="9 digits; the dashes fill in. An ITIN works too. Used only to find and remove it from your documents." />
       <Field label="Date of birth (optional)" value={p.dob} onChange={(dob) => set({ ...p, dob })} error={errors[`${at}dob`]}
-             inputMode="numeric" className="short" hint="Month/day/year, like 03/14/1952. A few forms print it." />
+             inputMode="numeric" className="short" format={dateFormat} below={spoken(p.dob)}
+             onBlur={() => { if (realDate(p.dob) && date(p.dob) !== p.dob) set({ ...p, dob: date(p.dob) }); }}
+             hint="Month/day/year, like 03/14/1952. A few forms print it." />
     </>
   );
 }
@@ -444,6 +512,12 @@ export function Setup({ s, onCancel }: { s: HostState; onCancel: () => void }) {
         {lede && <p className="lede">{lede}</p>}
         <div className="ws-setup-body">{body}</div>
         <div className="ws-setup-foot">
+          {step !== "who" && (
+            <p className="ws-setup-local">
+              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H4a1.5 1.5 0 0 0-1.5 1.5v6A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5v-6A1.5 1.5 0 0 0 12 6h-.5V4.5A3.5 3.5 0 0 0 8 1Zm2 5H6V4.5a2 2 0 1 1 4 0V6Z"/></svg>
+              What you type stays on your computer. None of it is sent over the internet.
+            </p>
+          )}
           <button type="button" className="wbtn big" onClick={back} disabled={saving}>Back</button>
           <button type="submit" className="wbtn primary big" disabled={saving}>{go}</button>
         </div>

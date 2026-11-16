@@ -550,3 +550,9 @@
 .ws-empty.first .wbtn { height: 46px; padding: 0 26px; font-size: 17px; border-radius: 8px; }
 .ws-empty .small { font-size: 12px; }
 .ws-empty.first .small { font-size: 15px; }
+/* setup: the same quiet reassurance by the buttons on every screen you type on; a date said back */
+.ws-setup-foot { flex-wrap: wrap; }
+.ws-setup-local { flex-basis: 100%; display: flex; align-items: center; gap: 8px; margin: 0 0 4px; color: var(--w-muted); font-size: 15px; }
+.ws-setup-local svg { flex: none; }
+.ws-field .readback { font-size: 16px; color: var(--w-ink); min-height: 0; }
+.ws-field .readback:empty { display: none; }
