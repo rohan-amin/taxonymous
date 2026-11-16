@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taxonymous: have AI check your tax return, without telling it who you are</title>
+<meta name="description" content="Taxonymous takes your names, Social Security numbers and account numbers out of your tax documents, on your computer, and puts labels in their place so AI can still follow the math.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect x='3' y='2' width='22' height='24' rx='4' fill='none' stroke='%231f4e43' stroke-width='2.4'/%3E%3Crect x='8' y='9' width='12' height='4' rx='1' fill='%231f4e43'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="landing.css">
+</head>
+<body>
+<nav class="top" aria-label="Main">
+  <div class="wrap">
+    <a class="brand" href="#">
+      <svg width="20" height="20" viewBox="0 0 28 28" aria-hidden="true"><rect x="3" y="2" width="22" height="24" rx="4" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="8" y="9" width="12" height="4" rx="1" fill="currentColor"/></svg>
+      Taxonymous<span class="beta">Beta</span>
+    </a>
+    <div class="links">
+      <a href="#how">How it works</a>
+      <a href="#prompts">Prompts</a>
+      <a href="#privacy">Privacy</a>
+      <a href="https://github.com/rohan-amin/taxonymous">Source code</a>
+      <a class="btn primary small" href="app/" data-open>Get started</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <div class="stack">
+        <span class="eyebrow">Beta · runs in your browser · source available</span>
+        <h1>Have AI check your tax return, without telling it who you are.</h1>
+        <p class="lede">Taxonymous takes your names, Social Security numbers and account numbers out of your tax documents, on your computer. In their place go labels that say who each one is, so AI can still follow the math.</p>
+        <div class="ctas">
+          <a class="btn primary" href="app/" data-open>Get started</a>
+          <a class="btn" href="#how">See how it works</a>
+        </div>
+        <p class="fine">For personal returns, trusts and estates. Nothing you add is uploaded. Works in Chrome, Edge, Safari and Firefox.</p>
+      </div>
+      <div class="form-demo" aria-label="Part of a W-2, three ways">
+        <div class="seg" role="group" aria-label="Show the W-2">
+          <button type="button" data-v="orig" aria-pressed="false">Original</button>
+          <button type="button" data-v="black" aria-pressed="false">Blacked out</button>
+          <button type="button" data-v="tax" aria-pressed="true">Taxonymous</button>
+        </div>
+        <div class="w2">
+          <div class="box"><span class="k"><b>a</b>Employee's social security number</span><span class="v" data-f="ssn"></span></div>
+          <div class="box"><span class="k"><b>1</b>Wages, tips, other compensation</span><span class="v amt">150,000.00</span></div>
+          <div class="box"><span class="k"><b>c</b>Employer's name</span><span class="v">Northwind Logistics LLC</span></div>
+          <div class="box"><span class="k"><b>3</b>Social security wages</span><span class="v amt">150,000.00</span></div>
+          <div class="box"><span class="k"><b>e</b>Employee's name</span><span class="v" data-f="name"></span></div>
+          <div class="box"><span class="k"><b>4</b>Social security tax withheld</span><span class="v amt">9,300.00</span></div>
+          <div class="box wide"><span class="k"><b>f</b>Employee's address and ZIP code</span><span class="v" data-f="addr"></span></div>
+        </div>
+        <p class="demo-note" id="demo-note" aria-live="polite"></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="context">
+    <div class="wrap">
+      <div class="stack narrow">
+        <span class="eyebrow">Why labels, not black bars</span>
+        <h2>A tax return depends on whose document is whose.</h2>
+        <p class="lede">Limits, caps and credits apply per person. Black out every name and AI can read the numbers but can't add them up correctly. Taxonymous gives each person and account a label that is the same in every document.</p>
+      </div>
+      <div class="why">
+        <div class="case">
+          <h3>Two W-2s, $190,000 in wages <small>tax year 2025</small></h3>
+          <div class="row"><span>Northwind Logistics, box 3</span><span class="num">150,000.00</span><span class="num">9,300.00</span></div>
+          <div class="row"><span>Lakeside Grocers Co-op, box 3</span><span class="num">40,000.00</span><span class="num">2,480.00</span></div>
+          <p class="muted small">Social Security tax stops at $176,100 of wages per person. If one person earned both, $861.80 was withheld too much and comes back as a credit. If a couple earned one each, nothing comes back.</p>
+          <div class="verdict bad"><strong>Blacked out:</strong> both W-2s say ████████. AI has to guess, or ask you who earned what.</div>
+          <div class="verdict good"><strong>Taxonymous:</strong> both W-2s say <span class="label">&lt;TAXPAYER&gt;</span>. AI can tell the $861.80 is yours to claim, on Schedule 3, line 11.</div>
+        </div>
+        <div class="stack">
+          <h3>What the labels say</h3>
+          <div class="legend">
+            <span class="label">&lt;TAXPAYER&gt;</span><span>You. <span class="label">&lt;TAXPAYER_SSN&gt;</span> is your SSN, wherever it appears, even as ***-**-4321.</span>
+            <span class="label">&lt;SPOUSE&gt;</span><span>Your spouse, if you file jointly.</span>
+            <span class="label">&lt;DEPENDENT_1&gt;</span><span>Your first dependent, in every document.</span>
+            <span class="label">&lt;TAXPAYER_ROTH_IRA_1&gt;</span><span>Whose account it is and what kind, so contribution limits can be checked.</span>
+            <span class="label">&lt;JOINT_BROKERAGE_1&gt;</span><span>An account you own together.</span>
+            <span class="label">&lt;HOME_ADDR&gt;</span><span>Your home, apart from a <span class="label">&lt;RENTAL_1_ADDR&gt;</span>.</span>
+            <span class="label">&lt;TRUST_1&gt;</span><span>A family trust that sent you a K-1. Its name often says who you are, so it goes too.</span>
+          </div>
+          <p class="muted small">Amounts, box numbers, payers and form names stay as they are. AI gets your financial picture. It just doesn't know it's you.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <div class="stack narrow">
+        <span class="eyebrow">How it works</span>
+        <h2>From a folder of tax PDFs to a second opinion.</h2>
+        <p class="lede">Taxonymous is one step in checking your return. It makes the documents safe to share, and gives you a prompt to share them with.</p>
+      </div>
+      <ol class="flow">
+        <li><span class="tag">About 5 minutes, once</span><h3>Tell it whose return this is</h3><p>Your household, or a trust or estate. A guided form asks for the people and numbers to remove, and saves them in a file you keep, protected with a passphrase.</p></li>
+        <li><span class="tag">Drag them in</span><h3>Add your documents</h3><p>W-2s, 1099s, K-1s, statements, scans and photos, and the draft of your return.</p></li>
+        <li><span class="tag">Page by page</span><h3>Review what was removed</h3><p>Every page is read again after cleaning. You see each one side by side and can remove anything else with a click.</p></li>
+        <li class="where"><span class="tag">In your AI assistant</span><h3>Share the safe copies, with a prompt</h3><p>Upload them to the AI assistant you use, with one of the prompts below.</p></li>
+        <li><span class="tag">You know who's who</span><h3>Read what it found</h3><p>When it says <span class="label">&lt;SPOUSE&gt;</span>'s 1099-R is missing, you know exactly which form to look for.</p></li>
+      </ol>
+      <div class="one-return">
+        <div class="returns" aria-hidden="true">
+          <div class="ret"><span class="ret-k">Form 1040</span><strong>Williams household 2025</strong><span>W-2 ×2 · 1099-INT · 1099-DIV · K-1 from <span class="label">&lt;TRUST_1&gt;</span></span><span class="ret-chat">→ its own AI conversation</span></div>
+          <div class="ret"><span class="ret-k">Form 1041</span><strong>Williams Family Trust 2025</strong><span>1099-B · 1099-DIV · K-1s it issued</span><span class="ret-chat">→ its own AI conversation</span></div>
+        </div>
+        <div class="stack">
+          <h3>One return at a time</h3>
+          <p class="muted">Each return gets its own Taxonymous file, its own safe copies and its own conversation with AI. Your household's documents go together. A trust or estate you manage files its own return, so it gets its own file. Two filers' details never end up in the same conversation, and each return's labels mean one thing.</p>
+          <p class="muted small">Personal returns (Form 1040), trusts and estates (Form 1041). Business returns aren't supported yet.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="prompts">
+    <div class="wrap">
+      <div class="stack narrow">
+        <span class="eyebrow">Prompts</span>
+        <h2>What to ask, once your documents are safe.</h2>
+        <p class="lede">Start a new conversation for each return. Copy a prompt, attach that return's safe copies, and send. Each prompt explains the labels, so the AI won't ask for your real details.</p>
+      </div>
+      <div class="prompts">
+        <div class="tabs" role="tablist" aria-label="Prompts">
+          <button type="button" role="tab" id="t-check" aria-selected="true" aria-controls="p-body">Check my 1040</button>
+          <button type="button" role="tab" id="t-trust" aria-selected="false" aria-controls="p-body">Check a trust's 1041</button>
+          <button type="button" role="tab" id="t-missing" aria-selected="false" aria-controls="p-body">What am I missing?</button>
+          <button type="button" role="tab" id="t-explain" aria-selected="false" aria-controls="p-body">Explain my documents</button>
+        </div>
+        <div class="body" id="p-body" role="tabpanel">
+          <pre id="prompt-text"></pre>
+          <div class="foot">
+            <button type="button" class="btn primary small" id="copy">Copy prompt</button>
+            <span class="muted" id="copied" aria-live="polite" class="small"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy">
+    <div class="wrap">
+      <div class="stack narrow">
+        <span class="eyebrow">Privacy</span>
+        <h2>Your documents never leave your computer.</h2>
+        <p class="lede">Taxonymous is a web page that does all its work inside your browser. There's no account and no server that sees your files.</p>
+      </div>
+      <div class="grid3">
+        <div class="stack"><h3>You can check it</h3><p>After a one-time download, Taxonymous works with no internet connection. Turn off Wi-Fi and clean a document: it still works.</p></div>
+        <div class="stack"><h3>Your details stay in your file</h3><p>Your household's details are kept in one file, encrypted with AES-256 and locked with your passphrase, that you save where you like. Close the page and your documents go with it.</p></div>
+        <div class="stack"><h3>You can read the code</h3><p>Every line is public, so anyone can see exactly what it does with your documents.</p></div>
+      </div>
+      <div class="two">
+        <div class="col"><h3>Taken out</h3><ul>
+          <li>Names, SSNs and ITINs, in full or masked</li>
+          <li>Birth dates, addresses, phone numbers, emails</li>
+          <li>Account, routing and card numbers, and their last four digits</li>
+          <li>Your preparer's name, firm and PTIN</li>
+          <li>A family trust's name and EIN, on your own return</li>
+          <li>Barcodes, which can hold a whole return</li>
+        </ul></div>
+        <div class="col"><h3>Left in</h3><ul>
+          <li>Every dollar amount and box number</li>
+          <li>Payers and employers, and their EINs</li>
+          <li>Form names and tax years</li>
+          <li>Your state, unless you choose to remove it</li>
+          <li>Anything else you don't mark to remove</li>
+        </ul></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap stack">
+      <span class="eyebrow">Questions</span>
+      <h2>Before you start</h2>
+      <div>
+        <details open><summary>Does it catch everything?</summary><p>It removes the details you list, in every form they appear, and anything shaped like an SSN. Then it reads every page again, including text in pictures, and fails any page where one survives. You still look at every page before sharing, and can remove anything else with a click.</p></details>
+        <details><summary>Why not black things out myself?</summary><p>You'd have to find every copy on every page, and a black box in a PDF often leaves the text underneath. You'd also lose who's who, which is what the AI needs to check your return correctly.</p></details>
+        <details><summary>I'm also a trustee or executor. What do I do?</summary><p>Make a second Taxonymous file for the trust or estate, and add its documents there. Its K-1 to you goes in your own file too, where the trust's name is replaced by <span class="label">&lt;TRUST_1&gt;</span>. Check each return in its own AI conversation.</p></details>
+        <details><summary>Does it work for business returns?</summary><p>Not yet. Partnership and S corporation returns (Forms 1065 and 1120-S) aren't supported. A K-1 you received from a business works fine on your own return.</p></details>
+        <details><summary>Do I need a particular AI assistant?</summary><p>No. Any assistant that reads PDFs works. The prompts are plain text.</p></details>
+        <details><summary>Will it run on an older computer?</summary><p>Yes. During setup, Taxonymous times two sample pages on your computer, so before it cleans anything it can tell you about how long your documents will take. Text PDFs from your bank or employer are much faster than scans and photos, and a laptop runs faster plugged in.</p></details>
+        <details><summary>Is it finished?</summary><p>Taxonymous is in beta. It checks every page it cleans, and you review every page before sharing, but expect rough edges. If something doesn't work, <a href="https://github.com/rohan-amin/taxonymous/issues">report it on GitHub</a>.</p></details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Taxonymous is in beta. Its source code is available under the AGPL-3.0. It isn't tax advice, and it doesn't file anything.</span>
+    <span><a href="https://github.com/rohan-amin/taxonymous">Source code</a></span>
+  </div>
+</footer>
+
+<script src="landing.js"></script>
+</body>
+</html>

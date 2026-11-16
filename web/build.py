@@ -1,6 +1,6 @@
 """Build Taxonymous for the browser into web/dist: a static site, the engine running in the
 page (Pyodide + PyMuPDF + the app's own Python), the workspace UI (ui/), every file served
-from the site itself.
+from the site itself. The app is at app/; the site's root is the landing page (landing/).
 
     uv run python web/build.py      # builds the UI, fetches pinned files once, then copies
     uv run python web/serve.py      # http://127.0.0.1:8800
@@ -21,6 +21,7 @@ from pathlib import Path
 HERE = Path(__file__).parent
 ROOT = HERE.parent
 DIST = HERE / "dist"
+APP = DIST / "app"  # the app; the site's root is the landing page (landing/)
 CACHE = HERE / ".downloads"  # pinned files, fetched once (gitignored with dist)
 PYODIDE = "0.28.3"
 CDN = f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE}/full"
@@ -77,6 +78,15 @@ EXTRA = {
     "paddle/dict.txt": f"{HF}/recognition/multi/en/v5/ppocrv5_en_dict.txt",
 }
 
+# the landing page's typefaces (SIL Open Font License), each one variable font, pinned by Google
+# Fonts' versioned addresses and served from the site
+GSTATIC = "https://fonts.gstatic.com/s"
+FONTS = {
+    "schibsted-grotesk.woff2": f"{GSTATIC}/schibstedgrotesk/v7/Jqz55SSPQuCQF3t8uOwiUL-taUTtap9GayojdSFO.woff2",
+    "source-sans-3.woff2": f"{GSTATIC}/sourcesans3/v20/nwpStKy2OAdR1K-IwhWudF-R3w8aZejf5Hc.woff2",
+    "jetbrains-mono.woff2": f"{GSTATIC}/jetbrainsmono/v24/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8-qxTOlOVk6OThhvA.woff2",
+}
+
 
 def fetch(url: str) -> bytes:
     path = CACHE / url.split("://", 1)[1].replace("/", "_")
@@ -90,7 +100,7 @@ def fetch(url: str) -> bytes:
 
 def main() -> None:
     shutil.rmtree(DIST, ignore_errors=True)
-    (DIST / "pyodide").mkdir(parents=True)
+    (APP / "pyodide").mkdir(parents=True)
     # the Python runtime and the packages the engine needs, from the pinned release
     lock = json.loads(fetch(f"{CDN}/pyodide-lock.json"))
     needed, todo = set(), list(PACKAGES)
@@ -102,53 +112,61 @@ def main() -> None:
     files = ["pyodide.js", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip", "pyodide-lock.json"]
     files += [lock["packages"][n]["file_name"] for n in sorted(needed)]
     for name in files:
-        (DIST / "pyodide" / name).write_bytes(fetch(f"{CDN}/{name}"))
+        (APP / "pyodide" / name).write_bytes(fetch(f"{CDN}/{name}"))
     for path, url in EXTRA.items():
-        (DIST / path).parent.mkdir(parents=True, exist_ok=True)
-        (DIST / path).write_bytes(fetch(url))
-    (DIST / "engine" / "wheels").mkdir(parents=True)
+        (APP / path).parent.mkdir(parents=True, exist_ok=True)
+        (APP / path).write_bytes(fetch(url))
+    (APP / "engine" / "wheels").mkdir(parents=True)
     for name, (where, digest) in WHEELS.items():
         data = fetch(f"{PYPI}/{where}/{name}")
         if hashlib.sha256(data).hexdigest() != digest:
             raise SystemExit(f"{name} isn't the file PyPI published: not used")
-        (DIST / "engine" / "wheels" / name).write_bytes(data)
+        (APP / "engine" / "wheels" / name).write_bytes(data)
     # the engine, as it is in the repo, and its two roles in the page (engine/: home, lane)
-    (DIST / "engine" / "taxonymous").mkdir(parents=True)
+    (APP / "engine" / "taxonymous").mkdir(parents=True)
     for py in sorted((ROOT / "src" / "taxonymous").glob("*.py")):
-        shutil.copy(py, DIST / "engine" / "taxonymous" / py.name)
+        shutil.copy(py, APP / "engine" / "taxonymous" / py.name)
     for py in sorted((HERE / "engine").glob("*.py")):
-        shutil.copy(py, DIST / "engine" / py.name)
+        shutil.copy(py, APP / "engine" / py.name)
     # synthetic samples (the generated test corpus: fake people, fake numbers)
-    (DIST / "samples").mkdir()
+    (APP / "samples").mkdir()
     for name in SAMPLES:
-        shutil.copy(ROOT / "tests" / "fixtures" / "generated" / name, DIST / "samples" / name)
+        shutil.copy(ROOT / "tests" / "fixtures" / "generated" / name, APP / "samples" / name)
     for f in (HERE / "static").iterdir():
-        shutil.copy(f, DIST / f.name)
+        shutil.copy(f, (DIST if f.name == "_headers" else APP) / f.name)
     # the workspace UI (ui/, built here): its files, placed in the page (boot.js adds them once
     # your file is open)
-    subprocess.run(["npm", "run", "build"], cwd=ROOT / "ui", check=True, capture_output=True)
+    # relative addresses: the app is served from app/, not the site's root
+    subprocess.run(["npm", "run", "build", "--", "--base=./"], cwd=ROOT / "ui", check=True, capture_output=True)
     built = (ROOT / "ui" / "dist" / "index.html").read_text()
     tags = re.findall(r"<script [^>]*></script>|<link rel=\"stylesheet\"[^>]*>", built)
-    shutil.copytree(ROOT / "ui" / "dist" / "assets", DIST / "assets")
-    page = (DIST / "index.html").read_text()
+    shutil.copytree(ROOT / "ui" / "dist" / "assets", APP / "assets")
+    page = (APP / "index.html").read_text()
     page = page.replace("<!-- the workspace UI's files (build.py) -->", "".join(tags))
     # the page's own files named by their contents: a page always loads the files made with it,
     # even from a site or an offline layer that still has an older version's under the old name
     for name in ("boot.css", "bridge.js", "keyfile.js", "boot.js"):
-        data = (DIST / name).read_bytes()
+        data = (APP / name).read_bytes()
         named = f"{Path(name).stem}.{hashlib.sha256(data).hexdigest()[:10]}{Path(name).suffix}"
-        (DIST / name).rename(DIST / named)
+        (APP / name).rename(APP / named)
         assert page.count(f'"{name}"') == 1, name
         page = page.replace(f'"{name}"', f'"{named}"')
-    (DIST / "index.html").write_text(page)
+    (APP / "index.html").write_text(page)
     # what the setup step downloads: everything, the page too (a version's page and its scripts
     # always go together), but the site's own headers
-    keep = [p for p in sorted(DIST.rglob("*")) if p.is_file() and p.relative_to(DIST).as_posix() != "_headers"]
-    manifest = [{"path": p.relative_to(DIST).as_posix(), "size": p.stat().st_size,
+    keep = [p for p in sorted(APP.rglob("*")) if p.is_file()]
+    manifest = [{"path": p.relative_to(APP).as_posix(), "size": p.stat().st_size,
                  "sha256": hashlib.sha256(p.read_bytes()).hexdigest()} for p in keep]
-    (DIST / "manifest.json").write_text(json.dumps({"version": PYODIDE, "files": manifest}, indent=1))
+    (APP / "manifest.json").write_text(json.dumps({"version": PYODIDE, "files": manifest}, indent=1))
     total = sum(f["size"] for f in manifest)
-    print(f"dist: {len(manifest)} files, {total / 2**20:.1f} MB to download once")
+    # the landing page, at the site's root: what Taxonymous is, then Get started (the app, app/).
+    # Its own small files and fonts; nothing of the app is downloaded until you set it up
+    for f in (HERE / "landing").iterdir():
+        shutil.copy(f, DIST / f.name)
+    (DIST / "fonts").mkdir()
+    for name, url in FONTS.items():
+        (DIST / "fonts" / name).write_bytes(fetch(url))
+    print(f"app: {len(manifest)} files, {total / 2**20:.1f} MB to download once")
 
 
 if __name__ == "__main__":

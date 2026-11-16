@@ -11,6 +11,10 @@ Deploy (Cloudflare Pages, static; `_headers` carries the content-security policy
 
     npx wrangler pages deploy web/dist --project-name taxonymous --branch main   # https://taxonymous.pages.dev
 
+The site's root is the landing page (`landing/`); the app is at `app/`, with its service worker
+scoped there. `landing/sw.js` only exists for browsers set up before the app moved: it clears
+that old install and unregisters itself.
+
 ## How it fits together
 
 - **The page** (`static/boot.js`): setup, your Taxonymous file and the engines, as the UI's

@@ -7,8 +7,9 @@
 //  - the page and everything else come from the version that's set up ("current"), never a
 //    mix of versions; until one is set up whole (the page among its files), from the site
 "use strict";
-const SHELL = "taxonymous-shell";
-const CURRENT = "taxonymous-current";  // one entry: the name of the version cache in use
+const SHELL = "taxonymous-app-shell";
+const CURRENT = "taxonymous-app-current";  // one entry: the name of the version cache in use
+const BASE = new URL("./", location.href).pathname;  // where the app lives on the site (/app/)
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(["./", "index.html"])).then(() => self.skipWaiting()));
@@ -49,9 +50,10 @@ self.addEventListener("fetch", (e) => {
   if (url.origin !== location.origin) return;
   if (url.pathname.startsWith("/api/")) return e.respondWith(api(e, url));
   if (e.request.method !== "GET") return;
+  if (!url.pathname.startsWith(BASE)) return;  // the rest of the site (the landing page)
   if (url.searchParams.has("fresh")) return;  // setup: straight to the site
   e.respondWith((async () => {
-    const path = url.pathname.replace(/^\//, "") || "index.html";
+    const path = url.pathname.slice(BASE.length) || "index.html";
     const page = path === "index.html" || e.request.mode === "navigate";
     const cache = await currentCache();
     const whole = cache && await cache.match("index.html");  // a version set up with its page

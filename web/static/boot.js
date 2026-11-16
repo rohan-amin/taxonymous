@@ -6,7 +6,7 @@
 // the home engine (home.py), which runs the app's own server code in memory.
 "use strict";
 
-const CACHE_PREFIX = "taxonymous-v-";  // one per version; the service worker keeps the page in "taxonymous-shell"
+const CACHE_PREFIX = "taxonymous-app-v-";  // one per version; the service worker keeps the page in "taxonymous-app-shell"
 let manifest, manifestText, cacheName;
 
 const mb = (n) => (n < 2 ** 20 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
@@ -50,7 +50,7 @@ async function start() {
 }
 
 async function currentVersion() {
-  const r = await (await caches.open("taxonymous-current")).match("version");
+  const r = await (await caches.open("taxonymous-app-current")).match("version");
   return r ? r.text() : null;
 }
 
@@ -104,7 +104,7 @@ async function setUp() {
   }
   await cache.put("manifest.json", new Response(manifestText, { headers: { "Content-Type": "application/json" } }));
   // this version is the one in use from now on; the one before goes
-  await (await caches.open("taxonymous-current")).put("version", new Response(cacheName));
+  await (await caches.open("taxonymous-app-current")).put("version", new Response(cacheName));
   for (const k of await caches.keys()) if (k.startsWith(CACHE_PREFIX) && k !== cacheName) await caches.delete(k);
   if (navigator.storage?.persist) await navigator.storage.persist();  // not cleared to make room
   if (current && current !== cacheName) return location.reload();  // an update: start on the new version
@@ -118,7 +118,7 @@ function ready() {
 }
 
 async function removeAll() {
-  for (const k of await caches.keys()) if (k.startsWith("taxonymous-")) await caches.delete(k);
+  for (const k of await caches.keys()) if (k.startsWith("taxonymous-app-")) await caches.delete(k);
   for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
   location.reload();
 }
