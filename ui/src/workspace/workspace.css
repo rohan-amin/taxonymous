@@ -556,3 +556,7 @@
 .ws-setup-local svg { flex: none; }
 .ws-field .readback { font-size: 16px; color: var(--w-ink); min-height: 0; }
 .ws-field .readback:empty { display: none; }
+/* start: opening your file and setting up a new one, side by side and the same */
+.ws-start-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 580px; margin-top: 4px; }
+.ws-start .ws-start-pair .wbtn.big { width: 100%; height: 52px; font-size: 18px; }
+@media (max-width: 560px) { .ws-start-pair { grid-template-columns: 1fr; } }

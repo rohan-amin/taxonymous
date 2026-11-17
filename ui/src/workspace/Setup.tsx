@@ -9,13 +9,13 @@ import type { HostState } from "./host";
 // Setup's download carries on behind it. Nothing is kept anywhere until the last screen saves
 // your Taxonymous file; the browser isn't asked to remember any of it (autocomplete off).
 
-interface Who { id: string; name: string; ssn: string; dob: string }
+interface Who { id: string; name: string; ssn: string; dob: string; deceased: boolean; dod: string }
 interface Acct { id: string; institution: string; number: string; type: string; owner: string }
 type Errors = Record<string, string>;
 type Step = "who" | "you" | "spouse" | "dependents" | "home" | "accounts" | "save";
 
 const newId = () => "e" + [...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, "0")).join("");
-const person = (): Who => ({ id: newId(), name: "", ssn: "", dob: "" });
+const person = (): Who => ({ id: newId(), name: "", ssn: "", dob: "", deceased: false, dod: "" });
 const account = (): Acct => ({ id: newId(), institution: "", number: "", type: "", owner: "" });
 const digits = (s: string) => s.replace(/\D/g, "");
 // 03-14-1952, 3.14.1952 as the app takes it; a two-digit year is the last 100 years (a birth date is past)
@@ -30,10 +30,18 @@ function date(s: string): string {
 // As you type: an SSN gets its dashes (###-##-####), a date its slashes (03/14/1952). A separator
 // appears when the next digit comes, so backspace never stops at one; slashes you type are kept
 // (3/14/52), and a month from 2 to 9 or a day from 4 to 9 can't take a second digit (3141952).
-const SEP = /[-/]/;
+const SEP = /[-/() ]/;
 function ssnFormat(s: string): string {
   const d = s.replace(/\D/g, "").slice(0, 9);
   return d.length <= 3 ? d : d.length <= 5 ? `${d.slice(0, 3)}-${d.slice(3)}` : `${d.slice(0, 3)}-${d.slice(3, 5)}-${d.slice(5)}`;
+}
+// (555) 555-0188, or 1 (555) 555-0188: an area code never starts with 1, so a leading 1 is the country's
+function phoneFormat(s: string): string {
+  let d = s.replace(/\D/g, "");
+  const one = d.startsWith("1") ? "1 " : "";
+  d = d.slice(one ? 1 : 0, (one ? 1 : 0) + 10);
+  const body = d.length <= 3 ? d : d.length <= 6 ? `(${d.slice(0, 3)}) ${d.slice(3)}` : `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  return (one + body).trimEnd();
 }
 function dateFormat(s: string): string {
   const parts = [""];
@@ -63,7 +71,7 @@ function spoken(s: string): string {
   return new Date(y, mo - 1, d).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 }
 const filled = (o: object, but: string[] = ["id", "type", "owner"]) =>
-  Object.entries(o).some(([k, v]) => !but.includes(k) && String(v).trim());
+  Object.entries(o).some(([k, v]) => !but.includes(k) && typeof v === "string" && v.trim());
 
 export const STATES: [string, string][] = [
   ["AL", "Alabama"], ["AK", "Alaska"], ["AZ", "Arizona"], ["AR", "Arkansas"], ["CA", "California"], ["CO", "Colorado"],
@@ -96,6 +104,14 @@ function checkPerson(p: Who, at = ""): Errors {
     e[`${at}ssn`] = "A Social Security number has 9 digits.";
   }
   if (p.dob.trim() && !realDate(p.dob)) e[`${at}dob`] = "Write it as month/day/year, like 03/14/1952.";
+  if (p.deceased) {
+    if (!p.dod.trim()) e[`${at}dod`] = "Enter the date of death.";
+    else if (!realDate(p.dod)) e[`${at}dod`] = "Write it as month/day/year, like 06/02/2025.";
+    else if (realDate(p.dob)) {
+      const t = (x: string) => { const [m, d, y] = date(x).split("/").map(Number); return new Date(y, m - 1, d).getTime(); };
+      if (t(p.dod) < t(p.dob)) e[`${at}dod`] = "The date of death is before the date of birth.";
+    }
+  }
   return e;
 }
 
@@ -154,9 +170,11 @@ function Choice({ label, options, value, onChange, error }: {
   );
 }
 
-function PersonFields({ p, set, errors, at = "", you }: {
+function PersonFields({ p, set, errors, at = "", you, died }: {
   p: Who; set: (p: Who) => void; errors: Errors; at?: string; you?: boolean;
+  died?: string;  // "My spouse has died": asks for the date of death
 }) {
+  const whole = (k: "dob" | "dod") => () => { if (realDate(p[k]) && date(p[k]) !== p[k]) set({ ...p, [k]: date(p[k]) }); };
   return (
     <>
       <Field label={you ? "Your full name" : "Full name"} value={p.name} onChange={(name) => set({ ...p, name })}
@@ -166,9 +184,19 @@ function PersonFields({ p, set, errors, at = "", you }: {
              inputMode="numeric" className="short" format={ssnFormat}
              hint="9 digits; the dashes fill in. An ITIN works too. Used only to find and remove it from your documents." />
       <Field label="Date of birth (optional)" value={p.dob} onChange={(dob) => set({ ...p, dob })} error={errors[`${at}dob`]}
-             inputMode="numeric" className="short" format={dateFormat} below={spoken(p.dob)}
-             onBlur={() => { if (realDate(p.dob) && date(p.dob) !== p.dob) set({ ...p, dob: date(p.dob) }); }}
+             inputMode="numeric" className="short" format={dateFormat} below={spoken(p.dob)} onBlur={whole("dob")}
              hint="Month/day/year, like 03/14/1952. A few forms print it." />
+      {died && (
+        <label className="ws-setup-check">
+          <input type="checkbox" checked={p.deceased} onChange={(e) => set({ ...p, deceased: e.target.checked })} />
+          {died}
+        </label>
+      )}
+      {died && p.deceased && (
+        <Field label="Date of death" value={p.dod} onChange={(dod) => set({ ...p, dod })} error={errors[`${at}dod`]}
+               inputMode="numeric" className="short" format={dateFormat} below={spoken(p.dod)} onBlur={whole("dod")}
+               hint="Month/day/year. It stays readable in your documents: it matters for your taxes." />
+      )}
     </>
   );
 }
@@ -261,7 +289,8 @@ export function Setup({ s, onCancel }: { s: HostState; onCancel: () => void }) {
       { ...you, role: "taxpayer" },
       ...(couple ? [{ ...spouse, role: "spouse" }] : []),
       ...(hasDeps === "yes" ? deps.filter((d) => filled(d)).map((d) => ({ ...d, role: "dependent" })) : []),
-    ].map((p) => ({ id: p.id, name: p.name, ssn: p.ssn, dob: date(p.dob), role: p.role, deceased: false, dod: "",
+    ].map((p) => ({ id: p.id, name: p.name, ssn: p.ssn, dob: date(p.dob), role: p.role, deceased: p.deceased,
+                    dod: p.deceased ? date(p.dod) : "",
                     occupation: "", employer: "" }));
     return {
       keep_state: true,
@@ -342,28 +371,29 @@ export function Setup({ s, onCancel }: { s: HostState; onCancel: () => void }) {
       break;
     case "spouse":
       title = "About your spouse";
-      body = <PersonFields p={spouse} set={setSpouse} errors={errors} />;
+      body = <PersonFields p={spouse} set={setSpouse} errors={errors} died="My spouse has died" />;
       break;
     case "dependents":
-      title = "Does anyone else appear on your return?";
-      lede = "Children or others you claim as dependents. Their names and Social Security numbers are removed too.";
+      title = "Do you have any dependents?";
+      lede = "Children, or anyone else you claim on your return, like a parent you support. Their names and Social Security numbers are removed too.";
       body = (
         <>
           <Choice label="Dependents" value={hasDeps} onChange={setHasDeps} error={errors.has}
-                  options={[["no", "No, no one else"], ["yes", "Yes"]]} />
+                  options={[["no", "No"], ["yes", "Yes"]]} />
           {hasDeps === "yes" && deps.map((d, i) => (
             <fieldset className="ws-setup-group" key={d.id}>
-              <legend>Person {i + 1}</legend>
-              <PersonFields p={d} set={(p) => setDeps(deps.map((x, j) => (j === i ? p : x)))} errors={errors} at={`deps.${i}.`} />
+              <legend>Dependent {i + 1}</legend>
+              <PersonFields p={d} set={(p) => setDeps(deps.map((x, j) => (j === i ? p : x)))} errors={errors} at={`deps.${i}.`}
+                            died="This dependent has died" />
               {deps.length > 1 && (
                 <button type="button" className="ws-link" onClick={() => setDeps(deps.filter((_, j) => j !== i))}>
-                  Remove person {i + 1}
+                  Remove dependent {i + 1}
                 </button>
               )}
             </fieldset>
           ))}
           {hasDeps === "yes" && (
-            <button type="button" className="wbtn big" onClick={() => setDeps([...deps, person()])}>Add another person</button>
+            <button type="button" className="wbtn big" onClick={() => setDeps([...deps, person()])}>Add another dependent</button>
           )}
         </>
       );
@@ -390,7 +420,7 @@ export function Setup({ s, onCancel }: { s: HostState; onCancel: () => void }) {
             <Field label="ZIP code" value={home.zip} onChange={(zip) => setHome({ ...home, zip })} error={errors.zip}
                    inputMode="numeric" className="short" />
           </div>
-          <Field label="Phone number (optional)" value={phone} onChange={setPhone} error={errors.phone} inputMode="tel"
+          <Field label="Phone number (optional)" value={phone} onChange={setPhone} error={errors.phone} inputMode="tel" format={phoneFormat}
                  className="short" hint="Some statements print it." />
           <Field label="Email address (optional)" value={email} onChange={setEmail} error={errors.email} inputMode="email" />
         </>
