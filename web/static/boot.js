@@ -14,7 +14,12 @@ const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart
 const sha256 = async (buf) => hex(await crypto.subtle.digest("SHA-256", buf));
 
 // what the UI shows: a new object on every change (it compares them)
-let state = { stage: "checking", size: "", update: false, progress: null, error: "", file: null };
+// how fast this computer cleans a page, timed once on two sample pages (kept on this computer)
+const SPEED_KEY = "taxonymous-speed";
+let speed = null;
+try { speed = JSON.parse(localStorage.getItem(SPEED_KEY)); } catch { /* none kept */ }
+
+let state = { stage: "checking", size: "", update: false, progress: null, error: "", file: null, speed };
 const listeners = new Set();
 function set(patch) {
   state = { ...state, ...patch };
@@ -33,7 +38,18 @@ async function start() {
   await navigator.serviceWorker.register("sw.js");
   await navigator.serviceWorker.ready;
   if (!navigator.serviceWorker.controller) return location.reload();  // the first visit: run under it
-  const text = await (await fetch("manifest.json", { cache: "no-store" })).text();
+  let text;
+  try {
+    const res = await fetch("manifest.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`manifest.json: ${res.status}`);
+    text = await res.text();
+    JSON.parse(text);
+  } catch (e) {  // the site didn't answer properly (mid-deploy, say): the version set up, as offline
+    const current = await currentVersion();
+    const kept = current && await (await caches.open(current)).match("manifest.json");
+    if (!kept) throw e;
+    text = await kept.text();
+  }
   manifest = JSON.parse(text);
   manifestText = text;
   cacheName = CACHE_PREFIX + (await sha256(new TextEncoder().encode(text))).slice(0, 16);
@@ -41,9 +57,12 @@ async function start() {
   if (current === cacheName && await isSetUp()) return ready();
   const todo = await toDownload(current);
   const size = mb(todo.reduce((a, f) => a + f.size, 0));
-  if (current && await caches.has(current)) {  // set up before: this is an update, when you like
+  if (current && await caches.has(current)) {  // set up before: an update, done now (nothing of yours is open yet)
     set({ size, update: true });
-    ready();
+    setUp().catch(() => {  // offline, or a file that didn't check out: carry on with the version you have
+      set({ update: false, progress: null, notice: "Couldn't update just now. Using the version on your computer." });
+      ready();
+    });
   } else {
     set({ stage: "setup", size });
   }
@@ -54,10 +73,10 @@ async function currentVersion() {
   return r ? r.text() : null;
 }
 
-async function isSetUp() {
+async function isSetUp() {  // every file kept, by its whole address (they're kept relative to this page)
   const cache = await caches.open(cacheName);
-  const keys = new Set((await cache.keys()).map((r) => new URL(r.url).pathname.replace(/^\//, "")));
-  return manifest.files.every((f) => keys.has(f.path));
+  const keys = new Set((await cache.keys()).map((r) => new URL(r.url).pathname));
+  return manifest.files.every((f) => keys.has(new URL(f.path, location.href).pathname));
 }
 
 // what this version needs that the version set up (if any) doesn't already have, by fingerprint
@@ -114,7 +133,44 @@ async function setUp() {
 
 function ready() {
   set({ stage: "ready", progress: null });
-  engines();  // starting now, while you open your file
+  engines().then(calibrate, () => {});  // starting now, while you open your file (or answer setup's questions)
+}
+
+// Once: a page with text and a scanned page, cleaned and checked in a lane of its own (made-up
+// details, nothing of yours), so the time left can be told before any document of yours has
+// been measured. Skipped while the lane is cleaning something; tried again next time.
+let timing = false;
+async function calibrate() {
+  if (speed || timing) return;
+  const lane = lanes[0];
+  if (!lane || lane.busy) return;
+  timing = true;
+  lane.busy = true;
+  set({ timing: true });
+  try {
+    const data = await new Promise((resolve) => {
+      const on = (e) => {
+        if (e.data.type !== "calibrated") return;
+        lane.worker.removeEventListener("message", on);
+        resolve(e.data.data);
+      };
+      lane.worker.addEventListener("message", on);
+      lane.worker.postMessage({ type: "calibrate" });
+    });
+    if (data) {
+      speed = { ...JSON.parse(data), at: new Date().toISOString().slice(0, 10) };
+      try { localStorage.setItem(SPEED_KEY, JSON.stringify(speed)); } catch { /* kept for this visit only */ }
+      tellSpeed();
+    }
+  } finally {
+    timing = false;
+    lane.busy = false;
+    set({ timing: false, speed });
+    nextLane();
+  }
+}
+function tellSpeed() {  // the home engine, once it's started
+  if (speed && state.stage === "open") home.worker.postMessage({ type: "speed", speed: JSON.stringify(speed) });
 }
 
 async function removeAll() {
@@ -575,6 +631,7 @@ async function open(profile) {
   if (!session.dirty) saved = canonical(await contents());  // opened: what the file has, as the workspace reads it
   showFile();
   set({ stage: "open" });
+  tellSpeed();
 }
 
 // what the start screen asks for: one at a time; a cancelled picker is no error

@@ -41,9 +41,23 @@ function Start({ s }: { s: HostState }) {
   }
 
   let card;
-  const first = s.stage === "setup" || s.stage === "downloading";
+  const first = (s.stage === "setup" || s.stage === "downloading") && !s.update;
   if (s.stage === "checking") {
     card = <p className="ws-start-muted">Getting ready…</p>;
+  } else if (s.update && s.stage === "downloading" && s.progress) {
+    card = (
+      <>
+        <h2>Updating Taxonymous</h2>
+        <p className="ws-start-muted">A new version ({s.size}). Your Taxonymous file and documents aren't touched.</p>
+        <div className="ws-start-progress">
+          <div className="ws-bar work" role="progressbar" aria-label="Updating" aria-valuemin={0} aria-valuemax={100}
+               aria-valuenow={Math.round(s.progress.fraction * 100)}>
+            <div style={{ width: `${s.progress.fraction * 100}%` }} />
+          </div>
+          <span className="ws-start-muted">{s.progress.text}</span>
+        </div>
+      </>
+    );
   } else if (first && s.stage === "downloading" && s.progress && !s.update) {
     card = (
       <>
@@ -146,15 +160,10 @@ function Start({ s }: { s: HostState }) {
           )}
           {(s.stage === "ready" || s.stage === "starting") && (
             <p className="ws-start-muted small ws-start-foot">
-              {s.update ? (
-                <>A new version is ready ({s.size}).{" "}
-                  <button type="button" className="ws-link" onClick={() => HOST!.setUp()}>Update</button> · </>
-              ) : <>Set up on your computer, works offline · </>}
+              {s.notice && <>{s.notice} · </>}
+              Set up on your computer, works offline ·{" "}
               <button type="button" className="ws-link" onClick={() => HOST!.remove()}>Remove from your computer</button>
             </p>
-          )}
-          {s.stage === "downloading" && s.update && s.progress && (
-            <p className="ws-start-muted small ws-start-foot">Updating: {s.progress.text}</p>
           )}
           <p className="ws-start-muted small ws-start-foot">
             Beta ·{" "}

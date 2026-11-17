@@ -99,7 +99,11 @@ def fetch(url: str) -> bytes:
 
 
 def main() -> None:
-    shutil.rmtree(DIST, ignore_errors=True)
+    # emptied, not removed: the folder keeps its flag that keeps it out of Dropbox (the project
+    # lives in Dropbox, which otherwise swaps older copies of rebuilt files back in)
+    DIST.mkdir(exist_ok=True)
+    for child in DIST.iterdir():
+        shutil.rmtree(child) if child.is_dir() else child.unlink()
     (APP / "pyodide").mkdir(parents=True)
     # the Python runtime and the packages the engine needs, from the pinned release
     lock = json.loads(fetch(f"{CDN}/pyodide-lock.json"))

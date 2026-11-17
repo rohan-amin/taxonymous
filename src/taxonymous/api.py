@@ -146,6 +146,10 @@ class Worker:
         self.batch: set[str] = set()
         self.pages: dict[str, int] = {}  # each waiting or running job's pages, for the time left
         self.per_page: float | None = None  # seconds a page takes a lane on this computer, as measured
+        # seconds a page with text and a picture page (a scan, a photo) take a lane here, as timed
+        # on two sample pages ({"text", "picture"}): the time left before anything is measured
+        self.speed: dict[str, float] | None = None
+        self.mix: dict[str, tuple[int, int]] = {}  # each waiting or running job's text and picture pages
         self.unfinished = 0
         helpers = [None] if self.lanes == 1 else [lanes_mod.Lane(lanes_mod.ocr_share(self.lanes))
                                                   for _ in range(self.lanes)]
@@ -154,13 +158,19 @@ class Worker:
                              name=f"taxonymous-lane-{n}").start()
 
     def submit(self, job: Job) -> None:
-        pages = _pages(self.ws, job.stem) if job.action != "merge" else 0
+        mix = _mix(self.ws, job.stem) if job.action == "process" else (0, 0)
+        if job.action == "process":
+            pages = sum(mix)
+        else:
+            pages = _pages(self.ws, job.stem) if job.action != "merge" else 0
         with self.cv:
             if self.idle():
                 self.batch = set()
             self.batch.add(job.stem)
             self.unfinished += 1
             self.pages[job.stem] = max(self.pages.get(job.stem, 0), pages)
+            if job.action == "process":
+                self.mix[job.stem] = mix
             self.pending.append(job)
             self.cv.notify_all()
 
@@ -199,18 +209,46 @@ class Worker:
             left = self._batch_left()
         snap = progress.snapshot() or {"stage": None, "label": "Starting", "done": 0, "total": 0,
                                        "fraction": 0, "eta": None}
+        if snap["eta"] is None and not progress.rounds and snap.get("fraction", 0) < 0.1:
+            snap = {**snap, "eta": self._guess_left(stem, progress)}  # not started long enough to have a pace
         return {**snap, "job": place, "jobs": total, "batch_eta": left}
+
+    def _expected(self, stem: str) -> float | None:
+        """Seconds a job should take a lane here, from the sample pages' timing."""
+        mix = self.mix.get(stem)
+        if self.speed is None or mix is None:
+            return None
+        return mix[0] * self.speed["text"] + mix[1] * self.speed["picture"]
+
+    def _guess_left(self, stem: str, progress: Progress) -> int | None:
+        """A running job's time left before it has a pace of its own."""
+        expected = self._expected(stem)
+        if expected is None:
+            return None
+        return max(1, round(expected - (time.monotonic() - progress.started)))
 
     def _batch_left(self) -> int | None:
         """Seconds until everything submitted is done: the running jobs' own estimates, then
         the waiting pages at this computer's measured pace, shared between the lanes."""
-        if self.per_page is None:
+        if self.per_page is None and self.speed is None:
             return None
-        running = [p.snapshot() for p in self.running.values()]
-        if any(s is None or s["eta"] is None for s in running):
-            return None
-        now = max((s["eta"] for s in running), default=0)
-        waiting = sum(self.pages.get(j.stem, 1) for j in self.pending) * self.per_page / self.lanes
+        etas = []
+        for stem, p in self.running.items():
+            s = p.snapshot()
+            eta = s["eta"] if s is not None else None
+            if eta is None and not p.rounds and (s is None or s.get("fraction", 0) < 0.1):
+                eta = self._guess_left(stem, p)  # not started long enough to have a pace
+            if eta is None:
+                return None
+            etas.append(eta)
+        now = max(etas, default=0)
+        if self.per_page is not None:
+            waiting = sum(self.pages.get(j.stem, 1) for j in self.pending) * self.per_page / self.lanes
+        else:
+            expected = [self._expected(j.stem) for j in self.pending if j.action == "process"]
+            if any(e is None for e in expected):
+                return None
+            waiting = sum(expected) / self.lanes
         return round(now + waiting)
 
     def idle(self) -> bool:
@@ -248,6 +286,8 @@ class Worker:
                 with self.cv:
                     del self.running[job.stem]
                     pages = self.pages.pop(job.stem, 0) if not self.busy_unlocked(job.stem) else 0
+                    if not self.busy_unlocked(job.stem):
+                        self.mix.pop(job.stem, None)
                     if job.action == "process" and pages:
                         took = (time.monotonic() - started) / pages
                         self.per_page = took if self.per_page is None else 0.7 * self.per_page + 0.3 * took
@@ -270,6 +310,22 @@ class Worker:
             lanes_mod.run_job(self.ws, job.action, job.stem, job.forget, self.ocr, progress)
         else:
             helper.run(self.ws, job.action, job.stem, job.forget, self.ocr, progress.show)
+
+
+def _mix(ws: Workspace, stem: str) -> tuple[int, int]:
+    """(pages with text, picture pages): a picture (a photo) is one picture page; a PDF page
+    with no text to speak of is a scan."""
+    src = ws.source(stem)
+    if src is None:
+        return (0, 1)
+    if src.suffix.lower() != ".pdf":
+        return (0, 1)
+    try:
+        with pymupdf.open(src) as doc:
+            text = sum(1 for page in doc if len(page.get_text("text").strip()) >= 20)
+            return (text, doc.page_count - text)
+    except Exception:  # an unreadable file: its own job says so
+        return (0, 1)
 
 
 def _pages(ws: Workspace, stem: str) -> int:

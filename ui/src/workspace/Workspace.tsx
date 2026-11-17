@@ -8,7 +8,7 @@ import { Details } from "../Details";
 import { ACCOUNT_TYPES, ADDRESS_TYPES, DETAIL_FORMS, ROLE_NAME } from "../fields";
 import { AddForm, WordLayer, around, popoverPlace, usePageWords } from "./ClickToAdd";
 import { FileControls } from "./FileControls";
-import { HOST } from "./host";
+import { HOST, useHost } from "./host";
 import type { Pending, Picked } from "./ClickToAdd";
 import { DOT, checked, plain, removedList, timeLeft } from "./messages";
 import type { Tone } from "./messages";
@@ -975,7 +975,8 @@ export function Workspace() {
                 <strong>{docs ? "Add your first document" : "Loading…"}</strong>
                 {docs && <><span>Any document works. Your W-2 or 1040 is a good start: most of your details are at the top.</span>
                   <button type="button" className="wbtn primary" onClick={() => fileInput.current?.click()}>Add documents…</button>
-                  <span className="small">Or drop PDFs and photos anywhere in this window.</span></>}
+                  <span className="small">Or drop PDFs and photos anywhere in this window.</span>
+                  <Speed /></>}
               </div>
             </section>
           )}
@@ -1120,5 +1121,34 @@ export function Workspace() {
       {toast && <div className="ws-toast" role="status"><span>{toast}</span>
         <button type="button" className="wbtn quiet" style={{ color: "inherit" }} onClick={() => setToast(null)}>OK</button></div>}
     </div>
+  );
+}
+
+// how long cleaning takes on this computer, from setup's timing of two sample pages (browser app)
+const perPage = (s: number) => {
+  if (s < 1.5) return "a second";
+  if (s < 60) return `${s < 10 ? Math.round(s) : Math.round(s / 5) * 5} seconds`;
+  const m = Math.round(s / 60);
+  return m === 1 ? "a minute" : `${m} minutes`;
+};
+
+function Speed() {
+  const h = useHost();
+  const [onBattery, setOnBattery] = useState(false);
+  useEffect(() => {
+    type Battery = EventTarget & { charging: boolean };
+    const nav = navigator as Navigator & { getBattery?: () => Promise<Battery> };
+    let battery: Battery | null = null;
+    const check = () => setOnBattery(!!battery && !battery.charging);
+    nav.getBattery?.().then((b) => { battery = b; check(); b.addEventListener("chargingchange", check); }).catch(() => {});
+    return () => battery?.removeEventListener("chargingchange", check);
+  }, []);
+  if (!h?.speed) return h?.timing ? <span className="ws-speed">Timing how fast your computer cleans a page…</span> : null;
+  return (
+    <span className="ws-speed">
+      On your computer, cleaning takes about {perPage(h.speed.text)} a page for PDFs you downloaded, and
+      about {perPage(h.speed.picture)} a page for scans and photos.
+      {onBattery && " It's faster with your laptop plugged in."}
+    </span>
   );
 }

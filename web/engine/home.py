@@ -43,6 +43,7 @@ class BrowserWorker(api.Worker):
         self.cv = threading.Condition()  # one thread here: never waited on, only kept in step
         self.pending, self.running, self.errors = [], {}, {}
         self.batch, self.pages, self.per_page, self.unfinished = set(), {}, None, 0
+        self.speed, self.mix = None, {}
         self.free = lanes
         self.next_id = 0
 
@@ -74,6 +75,8 @@ class BrowserWorker(api.Worker):
             with self.cv:
                 del self.running[job.stem]
                 pages = self.pages.pop(job.stem, 0) if not self.busy_unlocked(job.stem) else 0
+                if not self.busy_unlocked(job.stem):
+                    self.mix.pop(job.stem, None)
                 if job.action == "process" and pages:
                     took = (time.monotonic() - started) / pages
                     self.per_page = took if self.per_page is None else 0.7 * self.per_page + 0.3 * took
@@ -132,11 +135,22 @@ def clean_profile(text: str) -> str:
     return json.dumps({"profile": profile, "errors": errors})
 
 
+WORKER: BrowserWorker | None = None
+
+
 def start(token: str, lanes: int) -> None:
-    global APP
+    global APP, WORKER
     ws = Workspace(ROOT)
     ws.init()
-    APP = api.create_app(ws, token, ocr=True, ui_dir=None, worker=BrowserWorker(ws, lanes))
+    WORKER = BrowserWorker(ws, lanes)
+    APP = api.create_app(ws, token, ocr=True, ui_dir=None, worker=WORKER)
+
+
+def set_speed(text: str) -> None:
+    """How fast this computer cleans a page, as timed (the page keeps it): the time left
+    before any document of yours has been measured."""
+    if WORKER is not None:
+        WORKER.speed = json.loads(text)
 
 
 async def request(method: str, path: str, query: str, headers_json: str, body):

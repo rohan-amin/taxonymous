@@ -98,6 +98,10 @@ onmessage = async (e) => {
       const path = "/ws/" + m.path;
       const exists = py.FS.analyzePath(path).exists;
       postMessage({ type: "file", id: m.id, data: exists ? py.FS.readFile(path) : null });
+    } else if (m.type === "calibrate") {  // lane: how fast this computer cleans (lane.py calibrate)
+      postMessage({ type: "calibrated", data: mod.calibrate() });
+    } else if (m.type === "speed") {  // home: that, for the time left
+      mod.set_speed(m.speed);
     } else if (m.type === "job") {  // lane: clean or check one document
       const r = mod.run(m.payload, m.files);
       const result = r.toJs(toObj);
@@ -111,6 +115,8 @@ onmessage = async (e) => {
       postMessage({ type: "response", id: m.id, status: 500, headers: [["content-type", "application/json"]], body: body.buffer }, [body.buffer]);
     } else if (m.type === "job") {
       postMessage({ type: "done", id: m.id, result: { outputs: {}, error: `The engine stopped: ${String(err).split("\n").slice(-2).join(" ")}` } });
+    } else if (m.type === "calibrate" || m.type === "speed") {
+      postMessage({ type: "calibrated", data: null });  // no estimate: the time left comes from measuring
     } else {
       postMessage({ type: "fatal", error: String(err) });
     }

@@ -560,3 +560,4 @@
 .ws-start-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 580px; margin-top: 4px; }
 .ws-start .ws-start-pair .wbtn.big { width: 100%; height: 52px; font-size: 18px; }
 @media (max-width: 560px) { .ws-start-pair { grid-template-columns: 1fr; } }
+.ws-empty .ws-speed { margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--w-line); color: var(--w-muted); font-size: 15px; line-height: 1.45; }
