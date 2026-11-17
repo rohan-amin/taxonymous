@@ -58,28 +58,32 @@ function Start({ s }: { s: HostState }) {
           </div>
           <span className="ws-start-muted">{s.progress.text}</span>
         </div>
-        <div className="ws-start-row">
-          <button type="button" className="wbtn primary big" onClick={() => setGuide(true)}>Set up a new file</button>
-        </div>
+        {s.waiting ? (
+          <p>{s.waiting} will open as soon as this finishes.</p>
+        ) : (
+          <div className="ws-start-pair">
+            <button type="button" className="wbtn primary big" onClick={() => setGuide(true)}>Set up a new file</button>
+            <button type="button" className="wbtn primary big" onClick={() => HOST!.openFile()}>Open my Taxonymous file</button>
+          </div>
+        )}
       </>
     );
   } else if (first) {
     card = (
       <>
-        <h2>Set up Taxonymous</h2>
+        <h2>Get started</h2>
         <p>
-          It takes about five minutes. Have your Social Security number handy, and your spouse's if you file
-          together. Account numbers are optional.
+          New to Taxonymous? Setting up takes about five minutes. Have your Social Security number handy, and your
+          spouse's if you file together. Already set up? Open the Taxonymous file you saved.
         </p>
-        <div className="ws-start-row">
+        <div className="ws-start-pair">
           <button type="button" className="wbtn primary big" onClick={() => { setUp(); setGuide(true); }}>
-            Get started
+            Set up a new file
+          </button>
+          <button type="button" className="wbtn primary big" onClick={() => { setUp(); HOST!.openFile(); }}>
+            Open my Taxonymous file
           </button>
         </div>
-        <p className="ws-start-muted">
-          Already have a Taxonymous file?{" "}
-          <button type="button" className="ws-link" onClick={setUp}>Open it</button>
-        </p>
       </>
     );
   } else {
@@ -87,19 +91,18 @@ function Start({ s }: { s: HostState }) {
       <>
         <h2>Welcome back</h2>
         <p>
-          Open your Taxonymous file to carry on. It's the file you saved when you set up: in your Documents folder,
-          unless you put it somewhere else.
+          Open the Taxonymous file you saved when you set up (in your Documents folder, unless you put it somewhere
+          else), or set up a new one.
         </p>
-        <div className="ws-start-row">
+        <div className="ws-start-pair">
           <button type="button" className="wbtn primary big" disabled={busy} onClick={() => HOST!.openFile()}>
             Open my Taxonymous file
           </button>
-          {busy && <span className="ws-start-muted">Opening…</span>}
+          <button type="button" className="wbtn primary big" disabled={busy} onClick={() => setGuide(true)}>
+            Set up a new file
+          </button>
         </div>
-        <p className="ws-start-muted">
-          New here, or starting over?{" "}
-          <button type="button" className="ws-link" disabled={busy} onClick={() => setGuide(true)}>Set up a new file</button>
-        </p>
+        {busy && <p className="ws-start-muted">Opening…</p>}
         <p className="ws-start-muted small">
           Just looking?{" "}
           <button type="button" className="ws-link" disabled={busy} onClick={() => HOST!.newFile("sample")}>

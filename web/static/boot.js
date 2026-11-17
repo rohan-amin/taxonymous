@@ -282,6 +282,10 @@ async function openFile() {
   session = { vault: contents.vault, decisions: contents.decisions || {}, name, handle, writable: false, passphrase,
               dirty: false, savedAt: modified };
   await allowWriting(true).catch(() => false);  // still your click: Chrome asks whether it may save
+  if (!["ready", "starting", "open"].includes(state.stage)) {  // a first visit: opens once the download is done
+    set({ waiting: name });
+    try { await whenReady(); } finally { set({ waiting: "" }); }
+  }
   await open(contents.profile);
 }
 

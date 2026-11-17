@@ -30,6 +30,7 @@ export interface HostState {
   progress: { fraction: number; text: string } | null;
   error: string;
   file: HostFile | null;
+  waiting?: string;                                   // a file chosen on a first visit, opened once the download is done
 }
 
 export type PassMode = "create" | "open";
