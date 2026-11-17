@@ -24,9 +24,15 @@ FIRST_SHARE = 0.9  # of the bar, for the first look: full only when the job is d
 AGAIN_SHARE = 0.85  # of what is left of the bar, for a second look (more may follow)
 
 
+class Cancelled(BaseException):
+    """A job stopped because its document was removed. Not an Exception: nothing on the way
+    (verification records what goes wrong as a failure) may catch it and carry on."""
+
+
 class Progress:
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self.cancelled = False  # set by cancel(): the job stops at its next step
         self.stage: str | None = None
         self.done = self.total = 0
         self.started = time.monotonic()
@@ -36,12 +42,17 @@ class Progress:
         self._shown = 0.0
         self.remote: dict | None = None  # what a lane's own process last reported
 
+    def cancel(self) -> None:
+        self.cancelled = True
+
     def show(self, snapshot: dict) -> None:
         """Report what another process's Progress says (a lane's)."""
         with self._lock:
             self.remote = snapshot
 
     def start(self, stage: str, total: int) -> None:
+        if self.cancelled:
+            raise Cancelled
         with self._lock:
             order = list(STAGES)
             if self.stage is not None and order.index(stage) <= order.index(self.stage):
@@ -55,6 +66,8 @@ class Progress:
             self.stage, self.done, self.total = stage, 0, total
 
     def step(self, n: int = 1) -> None:
+        if self.cancelled:
+            raise Cancelled
         with self._lock:
             self.done = min(self.total, self.done + n)
 

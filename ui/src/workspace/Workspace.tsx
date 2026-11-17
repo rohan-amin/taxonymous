@@ -1095,7 +1095,8 @@ export function Workspace() {
               }}>
             <strong>Remove “{removing.name}” from Taxonymous?</strong>
             <p><b>Your original file isn't touched.</b> Only Taxonymous's copy is removed, with its safe copy and any boxes
-              you drew on it.</p>
+              you drew on it.{["running", "queued"].includes(docs?.find((d) => d.id === removing.id)?.status ?? "") &&
+                " Cleaning it stops now."}</p>
             <div className="ws-confirm-foot">
               <button type="button" className="wbtn primary" ref={cancelRef}
                       onClick={() => setRemoving(null)}>Cancel</button>

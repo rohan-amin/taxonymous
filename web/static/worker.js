@@ -22,10 +22,10 @@ self.syncCall = (kind, payload, blobs) => {
 };
 
 // home: a job for a lane goes to the page, which gives it to a free lane and brings back its outputs
-let nextJob = 0;
+// (by home.py's id for it); a job stopped (its document removed) comes back with nothing
 const jobs = new Map();
-self.laneJob = (payload, files) => new Promise((resolve, reject) => {
-  const id = nextJob++;
+self.cancelLaneJob = (id) => postMessage({ type: "lane_cancel", id });
+self.laneJob = (id, payload, files) => new Promise((resolve, reject) => {
   jobs.set(id, { resolve, reject });
   const out = {};
   for (const [k, v] of files) out[k] = v;
@@ -85,6 +85,7 @@ onmessage = async (e) => {
       mod.progress(m.id, m.progress);
     } else if (m.type === "lane_done") {
       const j = jobs.get(m.id);
+      if (!j) return;  // answered already (stopped as it finished)
       jobs.delete(m.id);
       // as home.py takes it (a dict): what's missing left out, not null (Python would see JsNull)
       const outputs = Object.fromEntries(Object.entries(m.result.outputs).filter(([, v]) => v));

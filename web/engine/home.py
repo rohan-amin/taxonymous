@@ -31,6 +31,7 @@ from taxonymous.progress import Progress  # noqa: E402
 ROOT = Path("/ws")
 APP = None
 _jobs: dict[int, Progress] = {}  # a lane's job, by its id: where its progress goes
+_lane_ids: dict[str, int] = {}  # the job each document is being cleaned in, in a lane
 
 
 class BrowserWorker(api.Worker):
@@ -44,12 +45,28 @@ class BrowserWorker(api.Worker):
         self.pending, self.running, self.errors = [], {}, {}
         self.batch, self.pages, self.per_page, self.unfinished = set(), {}, None, 0
         self.speed, self.mix = None, {}
+        self.lane_of = {}
         self.free = lanes
         self.next_id = 0
 
     def submit(self, job: api.Job) -> None:
         super().submit(job)
         self._start()
+
+    def cancel(self, stem: str) -> None:
+        """As the app's: waiting jobs dropped, a running one stopped (the page ends its lane's
+        engine and starts a new one). Nothing waits here (one thread): the job's outputs
+        are never taken in once it's stopped (_lane), so the document's files can go now."""
+        with self.cv:
+            self._drop(stem)
+            progress = self.running.get(stem)
+            if progress is None:
+                return
+            progress.cancel()
+            job_id = _lane_ids.get(stem)
+            if job_id is not None:
+                from js import cancelLaneJob
+                cancelLaneJob(job_id)
 
     def _start(self) -> None:
         while self.free > 0:
@@ -68,19 +85,15 @@ class BrowserWorker(api.Worker):
                 self._run(job, None, progress)  # here: it joins the outputs that are here
             else:
                 await self._lane(job, progress)
-            self.errors.pop(job.stem, None)
+            if not progress.cancelled:
+                self.errors.pop(job.stem, None)
         except Exception as e:  # reported on the document, never stops the queue
-            self.errors[job.stem] = f"{type(e).__name__}: {str(e)[:300]}"
+            if not progress.cancelled:  # stopped because it was removed: nothing to report
+                self.errors[job.stem] = f"{type(e).__name__}: {str(e)[:300]}"
         finally:
             with self.cv:
                 del self.running[job.stem]
-                pages = self.pages.pop(job.stem, 0) if not self.busy_unlocked(job.stem) else 0
-                if not self.busy_unlocked(job.stem):
-                    self.mix.pop(job.stem, None)
-                if job.action == "process" and pages:
-                    took = (time.monotonic() - started) / pages
-                    self.per_page = took if self.per_page is None else 0.7 * self.per_page + 0.3 * took
-                self.unfinished -= 1
+                self._finished(job, progress, started)
             self.free += 1
             self._start()
 
@@ -88,6 +101,8 @@ class BrowserWorker(api.Worker):
         from js import laneJob
         from pyodide.ffi import to_js
         ws, stem = self.ws, job.stem
+        if progress.cancelled:  # removed before it reached a lane
+            return
         src = ws.source(stem)
         if src is None:
             raise FileNotFoundError(f"no document {stem!r}")
@@ -97,11 +112,15 @@ class BrowserWorker(api.Worker):
         self.next_id += 1
         job_id = self.next_id
         _jobs[job_id] = progress
+        _lane_ids[stem] = job_id
         try:
             payload = {"id": job_id, "action": job.action, "stem": stem, "forget": job.forget}
-            result = (await laneJob(json.dumps(payload), to_js(files))).to_py()
+            result = (await laneJob(job_id, json.dumps(payload), to_js(files))).to_py()
         finally:
             del _jobs[job_id]
+            _lane_ids.pop(stem, None)
+        if progress.cancelled:  # removed while it was being cleaned: nothing of it is kept
+            return
         for name, path in ws.outputs(stem).items():
             data = result["outputs"].get(name)
             if data is None:

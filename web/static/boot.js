@@ -458,18 +458,38 @@ function spawn(role) {
       else if (e.data.type === "fatal") reject(new Error(e.data.error));
     });
   });
-  return { worker, up, busy: false };
+  return { worker, up, busy: false, channel };
+}
+function spawnLane() {
+  const lane = spawn("lane");
+  lane.worker.addEventListener("message", (e) => onLane(lane, e.data));
+  return lane;
+}
+// a lane's job stopped where it is (its document was removed): the lane's engine ended and a
+// new one started in its place; the OCR reads it was waiting for dropped, the vault taken back
+// if it held it (what it named but didn't hand back is let go with it)
+function stopLane(lane) {
+  lane.dead = true;
+  lane.worker.terminate();
+  BRIDGE.forget(lane.channel);
+  for (let i = waitingForVault.length - 1; i >= 0; i--) {
+    if (waitingForVault[i].channel === lane.channel) waitingForVault.splice(i, 1);
+  }
+  if (vaultHolder === lane.channel) {
+    vaultHolder = null;
+    vaultLent = false;
+    waitingForVault.shift()?.();
+  }
+  const fresh = spawnLane();
+  lanes[lanes.indexOf(lane)] = fresh;
+  fresh.up.catch((e) => say(`The engine didn't start: ${e.message}`));
 }
 
 function engines() {
   if (!loaded) {
     home = spawn("home");
     home.worker.addEventListener("message", onHome);
-    for (let i = 0; i < LANES; i++) {
-      const lane = spawn("lane");
-      lane.worker.addEventListener("message", (e) => onLane(lane, e.data));
-      lanes.push(lane);
-    }
+    for (let i = 0; i < LANES; i++) lanes.push(spawnLane());
     loaded = Promise.all([home.up, ...lanes.map((l) => l.up)]);
     loaded.catch((e) => say(`The engine didn't start: ${e.message}`));
   }
@@ -494,6 +514,16 @@ function onHome(e) {
   if (m.type === "response") { pending.get(m.id)?.(m); pending.delete(m.id); }
   else if (m.type === "file") { pending.get(m.id)?.(m.data); pending.delete(m.id); }
   else if (m.type === "lane_job") { laneQueue.push(m); nextLane(); }
+  else if (m.type === "lane_cancel") cancelLane(m.id);
+}
+function cancelLane(id) {
+  const waiting = laneQueue.findIndex((j) => j.id === id);
+  const lane = lanes.find((l) => l.busy && l.job === id);
+  if (waiting < 0 && !lane) return;  // done already
+  if (waiting >= 0) laneQueue.splice(waiting, 1);
+  else stopLane(lane);
+  home.worker.postMessage({ type: "lane_done", id, result: { outputs: {}, error: null } });
+  nextLane();
 }
 function nextLane() {
   for (const lane of lanes) {
@@ -506,9 +536,11 @@ function nextLane() {
   }
 }
 function onLane(lane, m) {
+  if (lane.dead) return;  // stopped: anything it sent on the way is no one's
   if (m.type === "progress") home.worker.postMessage({ type: "progress", id: m.id, progress: m.progress });
   else if (m.type === "done") {
     lane.busy = false;
+    lane.job = null;
     const buffers = Object.values(m.result.outputs).filter(Boolean).map((b) => b.buffer);
     home.worker.postMessage({ type: "lane_done", id: m.id, result: m.result }, buffers);
     nextLane();
@@ -518,14 +550,23 @@ function onLane(lane, m) {
 // the vault: held here (it's the open file's), lent to one engine at a time (bridge.py's lock);
 // whatever it named comes back here, kept in memory until you save
 let vaultLent = false;
-const waitingForVault = [];
+let vaultHolder = null;  // the engine it's lent to (its channel)
+const waitingForVault = [];  // each a function that wakes one engine waiting for it, with its channel
 BRIDGE.handlers.vault_read = () => session?.vault || "";
-BRIDGE.handlers.vault_lock = async () => {
-  while (vaultLent) await new Promise((resolve) => waitingForVault.push(resolve));
+BRIDGE.handlers.vault_lock = async (_, __, channel) => {
+  while (vaultLent) {
+    await new Promise((resolve) => { const wake = () => resolve(); wake.channel = channel; waitingForVault.push(wake); });
+  }
+  if (channel.dead) {  // stopped while it waited: the next one's turn
+    waitingForVault.shift()?.();
+    return "";
+  }
   vaultLent = true;
+  vaultHolder = channel;
   return session?.vault || "";
 };
 BRIDGE.handlers.vault_unlock = ({ vault }) => {
+  vaultHolder = null;
   if (session && vault && vault !== session.vault) {
     session.vault = vault;
     recheck();

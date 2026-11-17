@@ -82,9 +82,11 @@ EXTRA = {
 # Fonts' versioned addresses and served from the site
 GSTATIC = "https://fonts.gstatic.com/s"
 FONTS = {
-    "schibsted-grotesk.woff2": f"{GSTATIC}/schibstedgrotesk/v7/Jqz55SSPQuCQF3t8uOwiUL-taUTtap9GayojdSFO.woff2",
+    "schibsted-grotesk.woff2":
+        f"{GSTATIC}/schibstedgrotesk/v7/Jqz55SSPQuCQF3t8uOwiUL-taUTtap9GayojdSFO.woff2",
     "source-sans-3.woff2": f"{GSTATIC}/sourcesans3/v20/nwpStKy2OAdR1K-IwhWudF-R3w8aZejf5Hc.woff2",
-    "jetbrains-mono.woff2": f"{GSTATIC}/jetbrainsmono/v24/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8-qxTOlOVk6OThhvA.woff2",
+    "jetbrains-mono.woff2":
+        f"{GSTATIC}/jetbrainsmono/v24/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8-qxTOlOVk6OThhvA.woff2",
 }
 
 
@@ -141,7 +143,8 @@ def main() -> None:
     # the workspace UI (ui/, built here): its files, placed in the page (boot.js adds them once
     # your file is open)
     # relative addresses: the app is served from app/, not the site's root
-    subprocess.run(["npm", "run", "build", "--", "--base=./"], cwd=ROOT / "ui", check=True, capture_output=True)
+    subprocess.run(["npm", "run", "build", "--", "--base=./"], cwd=ROOT / "ui", check=True,
+                   capture_output=True)
     built = (ROOT / "ui" / "dist" / "index.html").read_text()
     tags = re.findall(r"<script [^>]*></script>|<link rel=\"stylesheet\"[^>]*>", built)
     shutil.copytree(ROOT / "ui" / "dist" / "assets", APP / "assets")

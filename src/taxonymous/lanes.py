@@ -102,6 +102,14 @@ class Lane:
         self.proc = None
         raise RuntimeError("the cleaning process stopped unexpectedly")
 
+    def kill(self) -> None:
+        """Stop the job it's on, at once (its document was removed): the process ends where
+        it is, and the next job starts a new one. What it writes is written whole or not at
+        all (files.py), so it leaves nothing half-written."""
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.kill()
+            self.proc.wait(timeout=10)
+
     def stop(self) -> None:
         if self.proc is not None and self.proc.poll() is None:
             self.proc.stdin.close()

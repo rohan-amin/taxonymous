@@ -17,20 +17,32 @@ const BRIDGE = (() => {
   let paddleNext = 0;
   const paddleWaiting = new Map();
 
-  function paddleRead(png) {
+  // reads wait here and go to it one at a time, so a stopped engine's can be dropped (forget)
+  const paddleQueue = [];
+  let paddleBusy = false;
+  function paddlePump() {
+    if (paddleBusy || !paddleQueue.length) return;
+    const job = paddleQueue.shift();
+    paddleBusy = true;
+    const id = paddleNext++;
+    paddleWaiting.set(id, job);
+    paddle.postMessage({ id, png: job.png }, [job.png.buffer]);
+  }
+  function paddleRead(png, owner) {
     if (!paddle) {
       paddle = new Worker("paddle-worker.js");
       paddle.onmessage = (e) => {
         const { id, tsv, error } = e.data;
         const w = paddleWaiting.get(id);
         paddleWaiting.delete(id);
+        paddleBusy = false;
+        paddlePump();
         if (error) w.reject(new Error(error)); else w.resolve(tsv);
       };
     }
     return new Promise((resolve, reject) => {
-      const id = paddleNext++;
-      paddleWaiting.set(id, { resolve, reject });
-      paddle.postMessage({ id, png }, [png.buffer]);
+      paddleQueue.push({ png, owner, resolve, reject });
+      paddlePump();
     });
   }
 
@@ -67,16 +79,16 @@ const BRIDGE = (() => {
       })();
     }
   }
-  function tessRead(psm, png, tsv) {
-    return new Promise((resolve, reject) => { tessQueue.push({ psm, png, tsv, resolve, reject }); pump(); });
+  function tessRead(psm, png, tsv, owner) {
+    return new Promise((resolve, reject) => { tessQueue.push({ psm, png, tsv, owner, resolve, reject }); pump(); });
   }
 
   // jobs: [{psm, png}] -> each one's TSV (or text), in order; psm "vision" is the second
   // engine's read (Paddle, standing in for the Mac's Vision), at the same time as Tesseract's
-  async function ocr({ psms, tsv }, blobs) {
+  async function ocr({ psms, tsv }, blobs, owner) {
     const asText = (t) => (tsv ? t : t.split("\n").slice(1).map((r) => r.split("\t")[11] || "").join(" "));
     return Promise.all(psms.map(async (psm, i) => (
-      psm === "vision" ? asText(await paddleRead(blobs[i])) : tessRead(psm, blobs[i], tsv))));
+      psm === "vision" ? asText(await paddleRead(blobs[i], owner)) : tessRead(psm, blobs[i], tsv, owner))));
   }
 
   async function barcodes({ formats }, blobs) {
@@ -89,13 +101,15 @@ const BRIDGE = (() => {
     return found.filter((r) => r.isValid).map((r) => r.position);
   }
 
-  async function answer({ ctrl, data }, { kind, payload, blobs }) {
+  async function answer(channel, { kind, payload, blobs }) {
+    const { ctrl, data } = channel;
     let result;
     try {
-      result = { ok: await ({ ocr, barcodes, ...handlers })[kind](JSON.parse(payload), blobs) };
+      result = { ok: await ({ ocr, barcodes, ...handlers })[kind](JSON.parse(payload), blobs, channel) };
     } catch (e) {
       result = { error: String(e) };
     }
+    if (channel.dead) return;  // its engine was stopped: no one is waiting for this
     const bytes = new TextEncoder().encode(JSON.stringify(result));
     if (bytes.length > SIZE) throw new Error("answer too long for the bridge");
     data.set(bytes);
@@ -104,5 +118,14 @@ const BRIDGE = (() => {
     Atomics.notify(ctrl, 0);
   }
 
-  return { channel, answer, handlers };
+  // an engine stopped (its document was removed): the reads it's waiting for that haven't
+  // started are dropped, and nothing more is answered on its channel
+  function forget(channel) {
+    channel.dead = true;
+    for (const q of [tessQueue, paddleQueue]) {
+      for (let i = q.length - 1; i >= 0; i--) if (q[i].owner === channel) q.splice(i, 1);
+    }
+  }
+
+  return { channel, answer, handlers, forget };
 })();

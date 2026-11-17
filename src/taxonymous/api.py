@@ -67,6 +67,7 @@ except the original page images and words, a suggestion for words you chose,
 /api/profile, and the file and folder names you gave your documents.
 """
 
+import glob
 import hmac
 import io
 import json
@@ -94,7 +95,7 @@ from .merge import merge
 from .pipeline import Workspace, export
 from .profile import Profile, add_item, clean
 from .profile import save as save_profile
-from .progress import Progress
+from .progress import Cancelled, Progress
 from .redact import IMAGE_SUFFIXES, SUFFIXES, Overrides, load_image, manual_key
 from .suggest import grow, label_for, suggest
 from .vault import Vault
@@ -151,6 +152,7 @@ class Worker:
         self.speed: dict[str, float] | None = None
         self.mix: dict[str, tuple[int, int]] = {}  # each waiting or running job's text and picture pages
         self.unfinished = 0
+        self.lane_of: dict[str, lanes_mod.Lane | None] = {}  # the lane each running job is in
         helpers = [None] if self.lanes == 1 else [lanes_mod.Lane(lanes_mod.ocr_share(self.lanes))
                                                   for _ in range(self.lanes)]
         for n, helper in enumerate(helpers):
@@ -173,6 +175,34 @@ class Worker:
                 self.mix[job.stem] = mix
             self.pending.append(job)
             self.cv.notify_all()
+
+    def cancel(self, stem: str) -> None:
+        """Stop cleaning a document (it's being removed): its waiting jobs are dropped and a
+        running one stops where it is (its lane's process ended; in this process, at its next
+        step). Returns once it has stopped, so nothing of it is written after."""
+        with self.cv:
+            self._drop(stem)
+            progress = self.running.get(stem)
+            if progress is None:
+                return
+            progress.cancel()
+            helper = self.lane_of.get(stem)
+            if helper is not None:
+                helper.kill()
+            self.cv.wait_for(lambda: stem not in self.running, timeout=120)
+
+    def _drop(self, stem: str) -> None:
+        """A document's waiting jobs, gone (the lock held)."""
+        dropped = [j for j in self.pending if j.stem == stem]
+        if not dropped:
+            return
+        self.pending = [j for j in self.pending if j.stem != stem]
+        self.unfinished -= len(dropped)
+        if stem not in self.running:
+            self.pages.pop(stem, None)
+            self.mix.pop(stem, None)
+            self.batch.discard(stem)
+        self.cv.notify_all()
 
     def busy(self, stem: str) -> bool:
         with self.cv:
@@ -276,23 +306,36 @@ class Worker:
                 job = self.cv.wait_for(self._next)
                 progress = Progress()
                 self.running[job.stem] = progress
+                self.lane_of[job.stem] = helper
             started = time.monotonic()
             try:
                 self._run(job, helper, progress)
                 self.errors.pop(job.stem, None)
+            except Cancelled:
+                pass
             except Exception as e:  # reported on the document, never stops the lane
-                self.errors[job.stem] = f"{type(e).__name__}: {str(e)[:300]}"
+                if not progress.cancelled:  # stopped because it was removed: nothing to report
+                    self.errors[job.stem] = f"{type(e).__name__}: {str(e)[:300]}"
             finally:
                 with self.cv:
                     del self.running[job.stem]
-                    pages = self.pages.pop(job.stem, 0) if not self.busy_unlocked(job.stem) else 0
-                    if not self.busy_unlocked(job.stem):
-                        self.mix.pop(job.stem, None)
-                    if job.action == "process" and pages:
-                        took = (time.monotonic() - started) / pages
-                        self.per_page = took if self.per_page is None else 0.7 * self.per_page + 0.3 * took
-                    self.unfinished -= 1
+                    self.lane_of.pop(job.stem, None)
+                    self._finished(job, progress, started)
                     self.cv.notify_all()
+
+    def _finished(self, job: Job, progress: Progress, started: float) -> None:
+        """A job's bookkeeping once it's over (the lock held): its pages and mix, the pace it
+        measured (not when it was stopped), and the batch it leaves (one removed is no part of it)."""
+        busy = self.busy_unlocked(job.stem)
+        pages = self.pages.pop(job.stem, 0) if not busy else 0
+        if not busy:
+            self.mix.pop(job.stem, None)
+            if progress.cancelled:
+                self.batch.discard(job.stem)
+        if job.action == "process" and pages and not progress.cancelled:
+            took = (time.monotonic() - started) / pages
+            self.per_page = took if self.per_page is None else 0.7 * self.per_page + 0.3 * took
+        self.unfinished -= 1
 
     def busy_unlocked(self, stem: str) -> bool:
         return stem in self.running or any(j.stem == stem for j in self.pending)
@@ -898,9 +941,12 @@ def create_app(ws: Workspace, token: str, ocr: bool = True, ui_dir: Path | None 
         """A document taken out of Taxonymous entirely. Its placeholders stay in the vault:
         other documents may share them, and a value keeps its label if it comes back."""
         src = _source(ws, stem)
-        if worker.busy(stem):
-            raise HTTPException(409, "It's being cleaned. Remove it when that's done.")
-        for path in [src, *ws.outputs(stem).values(), ws.overrides_path(stem), *ws.stale(stem)]:
+        worker.cancel(stem)  # one being cleaned stops now; nothing of it is written after
+        outputs = list(ws.outputs(stem).values())
+        # with what a stopped clean was in the middle of writing (files.py's hidden copies)
+        writing = [tmp for p in outputs if p.parent.is_dir()
+                   for tmp in p.parent.glob(f".{glob.escape(p.name)}.*.tmp")]
+        for path in [src, *outputs, *writing, ws.overrides_path(stem), *ws.stale(stem)]:
             path.unlink(missing_ok=True)
         worker.errors.pop(stem, None)
         # folders it leaves empty go too (inbox/2024/ with nothing left in it)
