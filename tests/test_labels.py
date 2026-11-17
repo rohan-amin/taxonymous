@@ -226,3 +226,21 @@ def test_two_addresses_in_one_town_keep_their_own_labels(tmp_path):
     lines = [" ".join(ln.split()) for ln in result.text.read_text().splitlines() if ln.strip()][2:]
     assert lines == ["<ADDR_1>", "<ADDR_1> , WA <ADDR_1>", "<ADDR_2>", "<ADDR_2> , OR <ADDR_2>",
                      "Mailing address <ADDR_3>", "<ADDR_3> , WA <ADDR_3>"]
+
+
+def test_one_label_for_a_value_covered_by_two_touching_boxes():
+    """A second look that blacks out the edge of the digits under the first box adds a box,
+    not a second label; the same value elsewhere, or another value touching it, keeps its own."""
+    import pymupdf
+
+    from taxonymous.redact import _add_label
+
+    labels = []
+    _add_label(labels, pymupdf.Rect(100, 100, 200, 112), "<TAXPAYER_SSN>")
+    _add_label(labels, pymupdf.Rect(98, 111, 200, 117), "<TAXPAYER_SSN>")   # the bottom of the digits
+    _add_label(labels, pymupdf.Rect(100, 113, 200, 118), "<TAXPAYER_SSN>")  # 1 pt below: still that value
+    assert [ph for _, ph in labels] == ["<TAXPAYER_SSN>"]
+    _add_label(labels, pymupdf.Rect(100, 160, 200, 172), "<TAXPAYER_SSN>")  # printed again, lower down
+    _add_label(labels, pymupdf.Rect(100, 126, 200, 138), "<SPOUSE_SSN>")    # someone else's, right under it
+    _add_label(labels, pymupdf.Rect(203, 100, 300, 112), "<TAXPAYER_SSN>")  # beside it, not over it
+    assert [ph for _, ph in labels] == ["<TAXPAYER_SSN>", "<TAXPAYER_SSN>", "<SPOUSE_SSN>", "<TAXPAYER_SSN>"]

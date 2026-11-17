@@ -210,9 +210,19 @@ def _label(page: pymupdf.Page, rect: pymupdf.Rect, ph: str) -> None:
     page.insert_text((x, y), ph, fontname="helv", fontsize=fs, color=LABEL_GREY)
 
 
+def _same_value(a: pymupdf.Rect, b: pymupdf.Rect) -> bool:
+    """Two boxes of one value: they touch (2 pt apart at most) and one sits over the other,
+    as when a second look blacks out the edge of the digits the first box didn't quite cover,
+    or two readers place the same value a little differently."""
+    across = min(a.x1, b.x1) - max(a.x0, b.x0)
+    gap = max(a.y0, b.y0) - min(a.y1, b.y1)
+    return across > 0.5 * min(a.width, b.width) and gap <= 2
+
+
 def _add_label(labels: list[tuple[pymupdf.Rect, str]], rect: pymupdf.Rect, ph: str) -> None:
-    """One placeholder per box, even when two OCR passes found the same thing."""
-    if not any(overlaps(rect, other) for other, _ in labels):
+    """One placeholder per box, even when two OCR passes found the same thing, and one per
+    value when it took two touching boxes to cover it (the first one keeps it)."""
+    if not any(overlaps(rect, other) or (p == ph and _same_value(rect, other)) for other, p in labels):
         labels.append((rect, ph))
 
 
